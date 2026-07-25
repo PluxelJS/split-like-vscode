@@ -14,8 +14,6 @@ package.
 
 The VS Code-like behavior contract is tracked in
 [docs/vscode-workbench-behavior.md](./docs/vscode-workbench-behavior.md).
-Pluxel integration boundaries are documented in
-[docs/pluxel-integration-design.md](./docs/pluxel-integration-design.md).
 
 ## Run
 
