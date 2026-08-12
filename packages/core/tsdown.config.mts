@@ -14,7 +14,7 @@ const config: ReturnType<typeof defineConfig> = defineConfig({
   sourcemap: true,
   shims: false,
   exports: {
-    devExports: true,
+    devExports: "development",
   },
 });
 

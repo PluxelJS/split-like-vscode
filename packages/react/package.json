@@ -10,7 +10,10 @@
     "src/style.css"
   ],
   "exports": {
-    ".": "./src/index.ts",
+    ".": {
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
     "./package.json": "./package.json",
     "./style.css": "./src/style.css"
   },

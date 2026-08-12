@@ -26,7 +26,7 @@ const config: ReturnType<typeof defineConfig> = defineConfig({
       exports["./style.css"] = isPublish ? "./dist/style.css" : "./src/style.css";
       return exports;
     },
-    devExports: true,
+    devExports: "development",
   },
 });
 
