@@ -47,6 +47,11 @@ Implemented API:
 - `WorkbenchPartSize`
 - `WorkbenchHandle.activateView`
 - `WorkbenchHandle.activateEditorTab`
+- `WorkbenchHandle.moveEditorGroup`
+- `WorkbenchHandle.equalizeEditorGroups`
+- `WorkbenchHandle.maximizeEditorGroup`
+- `WorkbenchHandle.restoreEditorGroups`
+- `WorkbenchHandle.toggleEditorGroupMaximized`
 - `WorkbenchHandle.toggleView`
 - `WorkbenchHandle.showPart`
 - `WorkbenchHandle.hidePart`
@@ -132,10 +137,30 @@ The editor area supports two levels:
 The two inputs are mutually exclusive. `editor` is a convenience path for a single editor surface;
 `editorGroups` is the long-term model for editor tabs and split editor groups.
 
-Each editor group owns its active tab. Multiple groups are rendered as a horizontal split inside the
-center area, and their split sizes are persisted separately from the workbench side/panel splits.
-This keeps editor tabs and workbench views separate: views live in workbench parts, while editor
-tabs live in editor groups.
+Each editor group owns its active tab. Without an authored `editorLayout`, multiple groups are
+rendered as a horizontal split inside the center area for backward compatibility. An editor layout
+can instead form an arbitrary recursive grid of horizontal and vertical split nodes.
+
+Editor layout nodes are a discriminated union:
+
+- group leaves reference one `WorkbenchEditorGroup.id`
+- split nodes have a stable id, an orientation, and at least two children
+- each split child may retain its last committed size in CSS pixels
+
+Every declared editor group occurs exactly once. Authored invalid layouts fail fast. Persisted
+layouts are treated as untrusted snapshots: malformed nodes are removed, duplicate references are
+deduplicated, single-child splits are collapsed, and newly declared groups are appended. Moving a
+group beside a direct target in a split with the same orientation inserts it into that split instead
+of creating redundant nesting.
+
+The workbench owns only spatial topology. Group descriptors, tabs, documents, sessions, and their
+lifecycle remain consumer-owned. The editor-grid actions therefore rearrange existing groups and do
+not synthesize or clone application content.
+
+Maximizing a group temporarily expands the branch leading to it and hides sibling branches without
+changing the topology or unmounting sibling DOM. Equalization acts independently at every split
+node. `getAreaLayout("editorGroups")` continues to expose the root editor split for compatibility;
+nested split sizes are represented by `WorkbenchLayout.editorLayout`.
 
 ## Persistence
 
@@ -148,6 +173,8 @@ Workbench layout is serializable:
 - workbench area pane sizes
 - center split pane sizes
 - editor group split pane sizes
+- recursive editor layout topology and nested split sizes
+- maximized editor group
 - schema `version`
 
 Runtime `WorkbenchValue` is normalized and complete. `WorkbenchValueSnapshot` is the partial shape

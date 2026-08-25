@@ -1,6 +1,19 @@
 export type SplitOrientation = "horizontal" | "vertical";
 
 export {
+  createEditorGridLayout,
+  moveEditorGridGroup,
+  normalizeEditorGridLayout,
+  validateEditorGridLayout,
+  type EditorGridDirection,
+  type EditorGridGroupNode,
+  type EditorGridLayout,
+  type EditorGridSplitChild,
+  type EditorGridSplitNode,
+  type MoveEditorGridGroupOptions,
+} from "./editor-grid";
+
+export {
   WORKBENCH_PARTS,
   activateWorkbenchView,
   createWorkbenchValue,

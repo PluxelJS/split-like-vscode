@@ -1,6 +1,8 @@
 import {
   WORKBENCH_PARTS,
   createSplitSizeSnapshot,
+  normalizeEditorGridLayout,
+  type EditorGridLayout,
   type SplitLayout,
   type WorkbenchPart,
   type WorkbenchValue as CoreWorkbenchValue,
@@ -39,13 +41,18 @@ export interface WorkbenchLayout {
   value: WorkbenchValueSnapshot;
   panelPosition: WorkbenchPanelPosition;
   areaSizes?: WorkbenchAreaSizeSnapshot;
+  /** Recursive editor-group topology. Omitted snapshots restore the legacy horizontal layout. */
+  editorLayout?: EditorGridLayout | undefined;
+  /** Group temporarily expanded over the editor grid without changing its topology. */
+  maximizedEditorGroupId?: string | undefined;
 }
 
 export function readStartupLayout(
   storageKey: string | undefined,
   defaultLayout: WorkbenchLayout | undefined,
+  editorGroupIds: readonly string[] = [],
 ): WorkbenchLayout {
-  const fallback = normalizeLayout(defaultLayout, undefined, "bottom");
+  const fallback = normalizeLayout(defaultLayout, undefined, "bottom", editorGroupIds);
   if (!storageKey || typeof window === "undefined") {
     return fallback;
   }
@@ -57,7 +64,7 @@ export function readStartupLayout(
     }
     const parsed = JSON.parse(stored) as Partial<WorkbenchLayout>;
     if (parsed.version === 1 && parsed.value) {
-      return normalizeLayout(parsed, undefined, "bottom");
+      return normalizeLayout(parsed, undefined, "bottom", editorGroupIds);
     }
   } catch {
     return fallback;
@@ -70,12 +77,23 @@ export function normalizeLayout(
   layout: Partial<WorkbenchLayout> | undefined,
   defaultValue: WorkbenchValueSnapshot | undefined,
   fallbackPanelPosition: WorkbenchPanelPosition,
+  editorGroupIds: readonly string[] = [],
 ): WorkbenchLayout {
+  const editorLayout = layout?.editorLayout
+    ? normalizeEditorGridLayout(layout.editorLayout, editorGroupIds)
+    : undefined;
+  const maximizedEditorGroupId =
+    typeof layout?.maximizedEditorGroupId === "string" &&
+    editorGroupIds.includes(layout.maximizedEditorGroupId)
+      ? layout.maximizedEditorGroupId
+      : undefined;
   return {
     panelPosition: isPanelPosition(layout?.panelPosition)
       ? layout.panelPosition
       : fallbackPanelPosition,
     areaSizes: normalizeAreaSizeSnapshot(layout?.areaSizes),
+    editorLayout,
+    maximizedEditorGroupId,
     version: 1,
     value: normalizeValueSnapshot(layout?.value ?? defaultValue),
   };

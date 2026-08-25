@@ -202,6 +202,26 @@ button {
   line-height: 1.5;
 }
 
+.previewActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.previewActions button {
+  padding: 6px 9px;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  color: #cccccc;
+  background: #2d2d2d;
+  cursor: pointer;
+}
+
+.previewActions button:hover {
+  border-color: #007acc;
+  background: #333333;
+}
+
 .terminalHeader {
   text-transform: none;
 }

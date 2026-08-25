@@ -70,6 +70,8 @@ describe("workbench model", () => {
         editorGroups: undefined,
         workbench: undefined,
       },
+      editorLayout: undefined,
+      maximizedEditorGroupId: undefined,
       panelPosition: "right",
       value: {
         activeByPart: {
@@ -134,6 +136,42 @@ describe("workbench model", () => {
       version: 1,
       visibleParts: undefined,
     });
+  });
+
+  it("normalizes recursive editor topology and maximized state", () => {
+    const layout = normalizeLayout(
+      {
+        editorLayout: {
+          children: [
+            { node: { groupId: "left", type: "group" }, size: 420 },
+            {
+              node: {
+                children: [
+                  { node: { groupId: "right", type: "group" } },
+                  { node: { groupId: "bottom", type: "group" } },
+                ],
+                id: "stack",
+                orientation: "vertical",
+                type: "split",
+              },
+            },
+          ],
+          id: "root",
+          orientation: "horizontal",
+          type: "split",
+        },
+        maximizedEditorGroupId: "right",
+      },
+      undefined,
+      "bottom",
+      ["left", "right", "bottom"],
+    );
+
+    expect(layout.editorLayout?.type).toBe("split");
+    expect(layout.maximizedEditorGroupId).toBe("right");
+    expect(
+      layout.editorLayout?.type === "split" ? layout.editorLayout.children[0]?.size : undefined,
+    ).toBe(420);
   });
 
   it("drops malformed persisted state instead of leaking it into runtime layout", () => {

@@ -73,6 +73,20 @@ const editorGroups: WorkbenchEditorGroup[] = [
   },
 ];
 
+const recursiveEditorGroups: WorkbenchEditorGroup[] = [
+  ...editorGroups,
+  {
+    id: "bottom",
+    tabs: [
+      {
+        id: "terminal",
+        renderContent: () => <div>Embedded terminal</div>,
+        title: "Terminal",
+      },
+    ],
+  },
+];
+
 function RerenderingWorkbench(props: { readonly version: number }) {
   return (
     <Workbench
@@ -411,6 +425,185 @@ describe("Workbench", () => {
 
     expect(screen.getByRole("tab", { name: "Workbench.tsx" }).tabIndex).toBe(0);
     expect(screen.getByRole("tabpanel", { name: "Workbench.tsx" })).toBeTruthy();
+  });
+
+  it("renders and restores recursive editor grid topology", () => {
+    const handle = createRef<WorkbenchHandle>();
+    const editorLayout = {
+      children: [
+        { node: { groupId: "left", type: "group" as const }, size: 480 },
+        {
+          node: {
+            children: [
+              { node: { groupId: "right", type: "group" as const } },
+              { node: { groupId: "bottom", type: "group" as const } },
+            ],
+            id: "right-stack",
+            orientation: "vertical" as const,
+            type: "split" as const,
+          },
+        },
+      ],
+      id: "root",
+      orientation: "horizontal" as const,
+      type: "split" as const,
+    };
+
+    const { container } = render(
+      <Workbench
+        ref={handle}
+        defaultLayout={{
+          editorLayout,
+          panelPosition: "bottom",
+          value: { version: 1 },
+          version: 1,
+        }}
+        editorGroups={recursiveEditorGroups}
+      />,
+    );
+
+    expect(screen.getByText("App editor")).toBeTruthy();
+    expect(screen.getByText("Preview editor")).toBeTruthy();
+    expect(screen.getByText("Embedded terminal")).toBeTruthy();
+    expect(
+      [...container.querySelectorAll(".worksplit-workbench-editor-split")].map((element) =>
+        element.getAttribute("data-orientation"),
+      ),
+    ).toEqual(["horizontal", "vertical"]);
+    expect(handle.current?.getLayout().editorLayout).toMatchObject(editorLayout);
+  });
+
+  it("moves existing groups without taking ownership of their content", () => {
+    const handle = createRef<WorkbenchHandle>();
+
+    render(<Workbench ref={handle} editorGroups={recursiveEditorGroups} />);
+
+    act(() => {
+      handle.current?.moveEditorGroup({
+        groupId: "bottom",
+        position: "bottom",
+        targetGroupId: "right",
+      });
+    });
+
+    const layout = handle.current?.getLayout().editorLayout;
+    expect(layout?.type).toBe("split");
+    expect(layout?.type === "split" ? layout.children[1]?.node : undefined).toMatchObject({
+      children: [
+        { node: { groupId: "right", type: "group" } },
+        { node: { groupId: "bottom", type: "group" } },
+      ],
+      id: "split",
+      orientation: "vertical",
+      type: "split",
+    });
+    expect(screen.getByText("Embedded terminal")).toBeTruthy();
+  });
+
+  it("maximizes a group without removing sibling content from the DOM", () => {
+    const handle = createRef<WorkbenchHandle>();
+    const { container } = render(<Workbench ref={handle} editorGroups={recursiveEditorGroups} />);
+
+    act(() => handle.current?.maximizeEditorGroup("right"));
+
+    expect(handle.current?.getLayout().maximizedEditorGroupId).toBe("right");
+    expect(screen.getByText("App editor")).toBeTruthy();
+    expect(container.querySelectorAll(".worksplit-workbench-editor-maximized-hidden")).toHaveLength(
+      2,
+    );
+
+    act(() => handle.current?.restoreEditorGroups());
+
+    expect(handle.current?.getLayout().maximizedEditorGroupId).toBeUndefined();
+    expect(container.querySelector(".worksplit-workbench-editor-maximized-hidden")).toBeNull();
+  });
+
+  it("persists and restores recursive editor grid operations", () => {
+    const firstHandle = createRef<WorkbenchHandle>();
+    const first = render(
+      <Workbench
+        ref={firstHandle}
+        editorGroups={recursiveEditorGroups}
+        storageKey="recursive-grid"
+      />,
+    );
+
+    act(() => {
+      firstHandle.current?.moveEditorGroup({
+        groupId: "bottom",
+        position: "bottom",
+        targetGroupId: "right",
+      });
+      firstHandle.current?.maximizeEditorGroup("right");
+    });
+
+    const persisted = JSON.parse(window.localStorage.getItem("recursive-grid") ?? "null") as {
+      editorLayout?: { type?: string };
+      maximizedEditorGroupId?: string;
+    };
+    expect(persisted.editorLayout?.type).toBe("split");
+    expect(persisted.maximizedEditorGroupId).toBe("right");
+
+    const expectedEditorLayout = firstHandle.current?.getLayout().editorLayout;
+    first.unmount();
+    const restoredHandle = createRef<WorkbenchHandle>();
+    render(
+      <Workbench
+        ref={restoredHandle}
+        editorGroups={recursiveEditorGroups}
+        storageKey="recursive-grid"
+      />,
+    );
+
+    expect(restoredHandle.current?.getLayout().editorLayout).toEqual(expectedEditorLayout);
+    expect(restoredHandle.current?.getLayout().maximizedEditorGroupId).toBe("right");
+  });
+
+  it("fails fast for invalid authored editor topology", () => {
+    expect(() =>
+      render(
+        <Workbench
+          defaultLayout={{
+            editorLayout: { groupId: "left", type: "group" },
+            panelPosition: "bottom",
+            value: { version: 1 },
+            version: 1,
+          }}
+          editorGroups={editorGroups}
+        />,
+      ),
+    ).toThrow('Editor layout is missing editor group "right"');
+  });
+
+  it("reconciles topology when consumers remove an owned group", () => {
+    const handle = createRef<WorkbenchHandle>();
+    const defaultLayout = {
+      editorLayout: {
+        children: [
+          { node: { groupId: "left", type: "group" as const } },
+          { node: { groupId: "right", type: "group" as const } },
+        ],
+        id: "root",
+        orientation: "horizontal" as const,
+        type: "split" as const,
+      },
+      panelPosition: "bottom" as const,
+      value: { version: 1 as const },
+      version: 1 as const,
+    };
+    const { rerender } = render(
+      <Workbench ref={handle} defaultLayout={defaultLayout} editorGroups={editorGroups} />,
+    );
+
+    rerender(
+      <Workbench ref={handle} defaultLayout={defaultLayout} editorGroups={[editorGroups[0]!]} />,
+    );
+
+    expect(screen.queryByText("Preview editor")).toBeNull();
+    expect(handle.current?.getLayout().editorLayout).toEqual({
+      groupId: "left",
+      type: "group",
+    });
   });
 
   it("restores layout snapshots with split sizes", () => {

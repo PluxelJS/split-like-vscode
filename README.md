@@ -5,7 +5,8 @@ A small split-view workspace library inspired by VS Code and the `johnwalley/all
 This repo is intentionally split into DOM-free core logic and a React binding:
 
 - `packages/demo`: Vite 8 + React 19 demo with nested editor/workspace panes.
-- `@worksplit/core`: pane constraints, preferred sizes, proportional resize, sash drag math, value snapshots.
+- `@worksplit/core`: pane constraints, preferred sizes, proportional resize, sash drag math, recursive
+  editor-grid topology, and value snapshots.
 - `@worksplit/react`: React components, ResizeObserver integration, pointer handling, CSS.
 
 pnpm workspaces manage package linking. Turbo coordinates package task graphs and local caching. The
@@ -71,7 +72,12 @@ should only consume `commit` events so pointer movement never performs synchrono
 ### Workbench
 
 ```tsx
-import { Workbench, type WorkbenchEditorGroup, type WorkbenchView } from "@worksplit/react";
+import {
+  Workbench,
+  type WorkbenchEditorGroup,
+  type WorkbenchLayout,
+  type WorkbenchView,
+} from "@worksplit/react";
 import "@worksplit/react/style.css";
 
 const views: WorkbenchView[] = [
@@ -102,11 +108,41 @@ const editorGroups: WorkbenchEditorGroup[] = [
     size: { default: 360, min: 260 },
     tabs: [{ id: "preview", title: "Preview", renderContent: () => <Preview /> }],
   },
+  {
+    id: "terminal",
+    tabs: [{ id: "terminal", title: "Terminal", renderContent: () => <Terminal /> }],
+  },
 ];
+
+const defaultLayout: WorkbenchLayout = {
+  version: 1,
+  panelPosition: "bottom",
+  value: { version: 1 },
+  editorLayout: {
+    type: "split",
+    id: "root",
+    orientation: "horizontal",
+    children: [
+      { node: { type: "group", groupId: "main" } },
+      {
+        node: {
+          type: "split",
+          id: "preview-stack",
+          orientation: "vertical",
+          children: [
+            { node: { type: "group", groupId: "preview" } },
+            { node: { type: "group", groupId: "terminal" } },
+          ],
+        },
+      },
+    ],
+  },
+};
 
 export function Workspace() {
   return (
     <Workbench
+      defaultLayout={defaultLayout}
       editorGroups={editorGroups}
       partSizes={{
         panel: { default: 220, min: 140, max: 360 },
@@ -134,3 +170,27 @@ Workbench actions compose against the latest pending state, so multiple actions 
 event are applied atomically. Action objects remain stable when consumers recreate equivalent
 `views` or `editorGroups` descriptors during render. Duplicate ids, conflicting defaults, and
 invalid size constraints fail fast with contextual errors.
+
+`defaultLayout.editorLayout` describes an optional recursive editor grid. Omitting it preserves the
+legacy behavior: one group renders directly and multiple groups form one horizontal split. Split
+nodes have stable ids and may contain horizontal or vertical child splits. Every declared editor
+group must occur exactly once in an authored layout.
+
+The grid owns spatial state, not application content. `moveEditorGroup` can reposition an existing
+group, while creation and deletion of group descriptors remain the consumer's responsibility:
+
+```tsx
+renderEditorTabLabel={({ actions, group, tab }) => (
+  <button
+    onDoubleClick={() => actions.toggleEditorGroupMaximized(group.id)}
+    onClick={() => actions.activateEditorTab(group.id, tab.id)}
+  >
+    {tab.title}
+  </button>
+)}
+```
+
+`moveEditorGroup`, `equalizeEditorGroups`, `maximizeEditorGroup`, `restoreEditorGroups`, and
+`toggleEditorGroupMaximized` are available on both render-slot actions and `WorkbenchHandle`.
+Maximizing is non-destructive: the topology and committed sash sizes stay intact, and sibling group
+DOM remains mounted.

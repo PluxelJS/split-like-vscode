@@ -1,6 +1,7 @@
 import {
   Workbench,
   type WorkbenchEditorGroup,
+  type WorkbenchLayout,
   type WorkbenchPart,
   type WorkbenchView,
 } from "@worksplit/react";
@@ -132,22 +133,78 @@ const editorGroups: WorkbenchEditorGroup[] = [
     tabs: [
       {
         id: "preview",
-        renderContent: () => (
+        renderContent: ({ actions }) => (
           <div className="previewPane">
             <h2>Editor groups</h2>
-            <p>The center area is described as groups and tabs, not hard-coded markup.</p>
+            <p>The center area is a persisted recursive grid of independently owned groups.</p>
+            <div className="previewActions">
+              <button
+                onClick={() =>
+                  actions.moveEditorGroup({
+                    groupId: "bottom",
+                    position: "bottom",
+                    targetGroupId: "right",
+                  })
+                }
+                type="button"
+              >
+                Stack terminal below
+              </button>
+              <button onClick={() => actions.toggleEditorGroupMaximized("right")} type="button">
+                Toggle maximize
+              </button>
+            </div>
           </div>
         ),
         title: "Preview",
       },
     ],
   },
+  {
+    id: "bottom",
+    size: { min: 180 },
+    tabs: [
+      {
+        id: "output",
+        renderContent: () => (
+          <pre className="terminalText">{"Editor Grid ready.\nLayout persisted."}</pre>
+        ),
+        title: "Output",
+      },
+    ],
+  },
 ];
+
+const defaultLayout: WorkbenchLayout = {
+  editorLayout: {
+    children: [
+      { node: { groupId: "left", type: "group" } },
+      {
+        node: {
+          children: [
+            { node: { groupId: "right", type: "group" } },
+            { node: { groupId: "bottom", type: "group" } },
+          ],
+          id: "right-stack",
+          orientation: "vertical",
+          type: "split",
+        },
+      },
+    ],
+    id: "root",
+    orientation: "horizontal",
+    type: "split",
+  },
+  panelPosition: "bottom",
+  value: { version: 1 },
+  version: 1,
+};
 
 function App() {
   return (
     <Workbench
       className="shell"
+      defaultLayout={defaultLayout}
       editorGroups={editorGroups}
       partSizes={{
         panel: { default: 220, max: 360, min: 140 },
