@@ -4,11 +4,13 @@
   "type": "module",
   "scripts": {
     "build": "turbo run build",
+    "postbuild": "pnpm source-declarations:check",
     "dev": "turbo run dev --filter=@worksplit/demo --ui stream",
     "format": "oxfmt . --write",
     "format:check": "oxfmt . --check",
     "lint": "turbo run lint && oxlint -c oxlint.config.ts oxlint.config.ts --deny-warnings",
     "lint:fix": "oxlint -c oxlint.config.ts . --fix",
+    "source-declarations:check": "node scripts/check-source-declarations.mjs",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck && tsc -p tsconfig.typecheck.json --noEmit"
   },
