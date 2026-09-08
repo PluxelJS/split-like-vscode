@@ -69,6 +69,24 @@ export function Workspace() {
 its `reason` identifies pointer, keyboard, visibility, reset, or imperative work. Persistence
 should only consume `commit` events so pointer movement never performs synchronous storage writes.
 
+### Preserving pane content
+
+A collapsed pane unmounts its content by default. Opt into `keepMounted` for forms,
+tabs, or other stateful content:
+
+```tsx
+<Pane id="inspector" keepMounted visible={inspectorVisible}>
+  <Inspector />
+</Pane>
+```
+
+This mounts content even when initially collapsed. Hidden content uses `display: none`,
+`hidden`, `inert`, and `aria-hidden`; it does not participate in the split layout.
+React state, DOM values, and scroll positions survive collapse and expansion. Effects
+and subscriptions continue running; applications still own background-work policies
+and focus restoration. Removing the pane or remounting the SplitView ends its lifetime.
+This option does not move content between containers or manage responsive overlays.
+
 ### Workbench
 
 ```tsx

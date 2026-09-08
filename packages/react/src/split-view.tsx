@@ -45,6 +45,8 @@ export interface PaneProps extends HTMLAttributes<HTMLDivElement> {
   priority?: PaneConstraints["priority"] | undefined;
   collapsedSize?: number | undefined;
   visible?: boolean | undefined;
+  /** Mount content even while collapsed. Effects continue running while hidden. */
+  keepMounted?: boolean | undefined;
   snap?: boolean | undefined;
   snapThreshold?: number | undefined;
   snapCollapseDelay?: number | undefined;
@@ -129,6 +131,7 @@ export const Pane = forwardRef<HTMLDivElement, PaneProps>(function Pane(props, r
     priority: _priority,
     collapsedSize: _collapsedSize,
     visible: _visible,
+    keepMounted: _keepMounted,
     snap: _snap,
     snapThreshold: _snapThreshold,
     snapCollapseDelay: _snapCollapseDelay,
@@ -184,10 +187,6 @@ export const SplitView = forwardRef<SplitViewHandle, SplitViewProps>(
       [paneElements],
     );
     const paneModelElements = useStablePaneModelElements(paneElements, paneModelSignature);
-    const panesById = useMemo(
-      () => new Map(paneElements.map((pane) => [pane.props.id, pane])),
-      [paneElements],
-    );
     const paneModels = useMemo<PaneConstraints[]>(() => {
       return paneModelElements.map((pane, index) => ({
         id: pane.props.id || `pane-${index}`,
@@ -623,18 +622,23 @@ export const SplitView = forwardRef<SplitViewHandle, SplitViewProps>(
         data-orientation={orientation}
         style={{ "--worksplit-sash-size": `${sashSize}px`, ...style } as CSSProperties}
       >
-        {layout?.items.map((item) => {
-          const source = panesById.get(item.id);
-          if (!source) {
+        {paneElements.map((source) => {
+          const item = layout?.items.find((candidate) => candidate.id === source.props.id);
+          const shown = Boolean(item && resolvePaneVisible(source, visibility));
+          if (!shown && !source.props.keepMounted) {
             return null;
           }
 
           return cloneElement(source, {
-            key: item.id,
+            key: source.props.id,
+            hidden: shown ? source.props.hidden : true,
+            inert: shown ? source.props.inert : true,
+            "aria-hidden": shown ? source.props["aria-hidden"] : true,
             className: ["worksplit-pane", source.props.className].filter(Boolean).join(" "),
             style: {
-              ...paneStyle(orientation, item.offset, item.size),
+              ...(item ? paneStyle(orientation, item.offset, item.size) : {}),
               ...source.props.style,
+              ...(!shown ? { display: "none" } : {}),
             },
           });
         })}

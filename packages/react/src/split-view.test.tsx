@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createRef, type ComponentProps } from "react";
+import { createRef, useEffect, useState, type ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Pane, SplitView, type SplitViewHandle } from "./split-view";
@@ -27,7 +27,88 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function Content({ onUnmount }: { onUnmount: () => void }) {
+  const [count, setCount] = useState(0);
+  useEffect(() => onUnmount, [onUnmount]);
+  return (
+    <>
+      <button onClick={() => setCount(count + 1)}>Count {count}</button>
+      <input aria-label="Draft" defaultValue="initial" />
+    </>
+  );
+}
+
 describe("@worksplit/react", () => {
+  it("preserves state and DOM through controlled collapse and cleans up on removal", () => {
+    const unmount = vi.fn<() => void>();
+    function Fixture({ visible, present = true }: { visible: boolean; present?: boolean }) {
+      return (
+        <SplitView>
+          {present && (
+            <Pane id="retained" keepMounted visible={visible} style={{ display: "flex" }}>
+              <Content onUnmount={unmount} />
+            </Pane>
+          )}
+          <Pane id="main">Main</Pane>
+        </SplitView>
+      );
+    }
+    const { rerender } = render(<Fixture visible />);
+    const input = screen.getByRole("textbox") as HTMLInputElement;
+    const pane = input.closest<HTMLElement>("#retained")!;
+    fireEvent.change(input, { target: { value: "unsaved" } });
+    fireEvent.click(screen.getByRole("button"));
+    pane.scrollTop = 75;
+    rerender(<Fixture visible={false} />);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(pane.hidden).toBe(true);
+    expect(pane.hasAttribute("inert")).toBe(true);
+    expect(pane.getAttribute("aria-hidden")).toBe("true");
+    expect(pane.style.display).toBe("none");
+    expect(unmount).not.toHaveBeenCalled();
+    rerender(<Fixture visible />);
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(input.value).toBe("unsaved");
+    expect(screen.getByRole("button").textContent).toBe("Count 1");
+    expect(pane.scrollTop).toBe(75);
+    expect(pane.hidden).toBe(false);
+    expect(pane.hasAttribute("inert")).toBe(false);
+    expect(pane.style.display).toBe("flex");
+    rerender(<Fixture visible present={false} />);
+    expect(unmount).toHaveBeenCalledTimes(1);
+  });
+
+  it("mounts initially hidden retained panes and preserves them across imperative visibility changes", () => {
+    const handle = createRef<SplitViewHandle>();
+    render(
+      <SplitView ref={handle}>
+        <Pane id="retained" keepMounted defaultVisible={false}>
+          <input aria-label="Retained" />
+        </Pane>
+        <Pane id="ordinary" defaultVisible={false}>
+          <input aria-label="Ordinary" />
+        </Pane>
+        <Pane id="main">Main</Pane>
+      </SplitView>,
+    );
+    const input = screen.getByLabelText("Retained");
+    expect(screen.queryByLabelText("Ordinary")).toBeNull();
+    expect(handle.current?.getLayout()?.visibleIds).toEqual(["main"]);
+    act(() => {
+      handle.current?.expandPane("retained");
+      handle.current?.expandPane("ordinary");
+    });
+    expect(screen.getByRole("textbox", { name: "Retained" })).toBe(input);
+    expect(screen.getByRole("textbox", { name: "Ordinary" })).toBeTruthy();
+    act(() => {
+      handle.current?.collapsePane("retained");
+      handle.current?.collapsePane("ordinary");
+    });
+    expect(screen.getByLabelText("Retained")).toBe(input);
+    expect(screen.queryByLabelText("Ordinary")).toBeNull();
+    expect(handle.current?.getLayout()?.visibleIds).toEqual(["main"]);
+  });
+
   it("renders declared panes", () => {
     render(
       <div style={{ height: 400, width: 800 }}>
