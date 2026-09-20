@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { installTestResizeObserver } from "./test-resize-observer";
 import {
   Workbench,
+  type WorkbenchEditorArrangement,
   type WorkbenchEditorGroup,
   type WorkbenchHandle,
+  type WorkbenchEditorTab,
   type WorkbenchView,
 } from "./workbench";
 
@@ -86,6 +88,35 @@ const recursiveEditorGroups: WorkbenchEditorGroup[] = [
     ],
   },
 ];
+
+const flatEditorTabs: WorkbenchEditorTab[] = [
+  {
+    id: "app",
+    renderContent: () => <div>App editor</div>,
+    title: "App.tsx",
+  },
+  {
+    id: "preview",
+    renderContent: () => <div>Preview editor</div>,
+    title: "Preview",
+  },
+];
+
+const splitArrangement: WorkbenchEditorArrangement = {
+  groups: [
+    { activeTabId: "app", id: "left", tabIds: ["app"] },
+    { activeTabId: "preview", id: "right", tabIds: ["preview"] },
+  ],
+  layout: {
+    children: [
+      { node: { groupId: "left", type: "group" } },
+      { node: { groupId: "right", type: "group" } },
+    ],
+    id: "root",
+    orientation: "horizontal",
+    type: "split",
+  },
+};
 
 function RerenderingWorkbench(props: { readonly version: number }) {
   return (
@@ -425,6 +456,147 @@ describe("Workbench", () => {
 
     expect(screen.getByRole("tab", { name: "Workbench.tsx" }).tabIndex).toBe(0);
     expect(screen.getByRole("tabpanel", { name: "Workbench.tsx" })).toBeTruthy();
+  });
+
+  it("owns flat editor tab placement and moves tabs atomically", () => {
+    const handle = createRef<WorkbenchHandle>();
+    render(<Workbench ref={handle} editorTabs={flatEditorTabs} />);
+
+    act(() => {
+      handle.current?.moveEditorTab({
+        sourceGroupId: "main",
+        tabId: "preview",
+        target: {
+          kind: "split",
+          newGroupId: "right",
+          position: "right",
+          targetGroupId: "main",
+        },
+      });
+    });
+
+    expect(handle.current?.getLayout().editorArrangement?.groups).toEqual([
+      { activeTabId: "app", id: "main", tabIds: ["app"] },
+      { activeTabId: "preview", id: "right", tabIds: ["preview"] },
+    ]);
+    expect(screen.getByText("App editor")).toBeTruthy();
+    expect(screen.getByText("Preview editor")).toBeTruthy();
+  });
+
+  it("proposes controlled editor arrangements without mutating accepted placement", () => {
+    const handle = createRef<WorkbenchHandle>();
+    const onChange =
+      vi.fn<NonNullable<ComponentProps<typeof Workbench>["onEditorArrangementChange"]>>();
+    render(
+      <Workbench
+        ref={handle}
+        editorArrangement={splitArrangement}
+        editorTabs={flatEditorTabs}
+        onEditorArrangementChange={onChange}
+      />,
+    );
+
+    act(() => {
+      handle.current?.moveEditorTab({
+        sourceGroupId: "left",
+        tabId: "app",
+        target: { groupId: "right", index: 1, kind: "tab-strip" },
+      });
+    });
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groups: [{ activeTabId: "app", id: "right", tabIds: ["preview", "app"] }],
+      }),
+    );
+    expect(handle.current?.getLayout().editorArrangement?.groups).toEqual(splitArrangement.groups);
+  });
+
+  it("persists and restores editor arrangements", () => {
+    const firstHandle = createRef<WorkbenchHandle>();
+    const first = render(
+      <Workbench ref={firstHandle} editorTabs={flatEditorTabs} storageKey="flat-editor-tabs" />,
+    );
+    act(() => {
+      firstHandle.current?.moveEditorTab({
+        sourceGroupId: "main",
+        tabId: "preview",
+        target: {
+          kind: "split",
+          newGroupId: "right",
+          position: "right",
+          targetGroupId: "main",
+        },
+      });
+    });
+    const expected = firstHandle.current?.getLayout().editorArrangement;
+    first.unmount();
+
+    const restored = createRef<WorkbenchHandle>();
+    render(<Workbench ref={restored} editorTabs={flatEditorTabs} storageKey="flat-editor-tabs" />);
+
+    expect(restored.current?.getLayout().editorArrangement).toEqual(expected);
+  });
+
+  it("lets a full tab renderer own the only button while retaining tab behavior", () => {
+    render(
+      <Workbench
+        editorTabs={flatEditorTabs}
+        renderEditorTab={({ tab, tabProps }) => (
+          <button {...tabProps} data-custom-tab={tab.id}>
+            Custom {tab.title}
+          </button>
+        )}
+      />,
+    );
+
+    const preview = screen.getByRole("tab", { name: "Custom Preview" });
+    expect(preview.getAttribute("data-custom-tab")).toBe("preview");
+    fireEvent.click(preview);
+    expect(screen.getByText("Preview editor")).toBeTruthy();
+    expect(preview.tabIndex).toBe(0);
+  });
+
+  it("moves a tab through pointer drop on another tab strip", () => {
+    const handle = createRef<WorkbenchHandle>();
+    render(
+      <Workbench
+        ref={handle}
+        defaultLayout={{
+          editorArrangement: splitArrangement,
+          panelPosition: "bottom",
+          value: { version: 1 },
+          version: 1,
+        }}
+        editorTabs={flatEditorTabs}
+      />,
+    );
+    const appTab = screen.getByRole("tab", { name: "App.tsx" });
+    const previewTab = screen.getByRole("tab", { name: "Preview" });
+    const targetStrip = previewTab.closest<HTMLElement>("[data-worksplit-editor-tabs]")!;
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn<(x: number, y: number) => Element>(() => targetStrip),
+    });
+    vi.spyOn(previewTab, "getBoundingClientRect").mockReturnValue({
+      bottom: 35,
+      height: 35,
+      left: 500,
+      right: 600,
+      top: 0,
+      width: 100,
+      x: 500,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(appTab, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(document, { clientX: 590, clientY: 10 });
+    fireEvent.pointerUp(document, { clientX: 590, clientY: 10 });
+
+    expect(handle.current?.getLayout().editorArrangement?.groups).toEqual([
+      { activeTabId: "app", id: "right", tabIds: ["preview", "app"] },
+    ]);
   });
 
   it("renders and restores recursive editor grid topology", () => {

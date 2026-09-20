@@ -129,13 +129,15 @@ Activity items are view commands:
 
 ## Editor Area
 
-The editor area supports two levels:
+The editor area supports three inputs:
 
 - `editor` for simple single-node usage
-- `editorGroups` for one or more editor groups with tabs
+- `editorGroups` for static application-authored groups with tabs
+- `editorTabs` for a flat content catalog whose placement is owned by an editor arrangement
 
-The two inputs are mutually exclusive. `editor` is a convenience path for a single editor surface;
-`editorGroups` is the long-term model for editor tabs and split editor groups.
+The inputs are mutually exclusive. `editor` is a convenience path for a single editor surface.
+`editorGroups` remains compatible with authored layouts. `editorTabs` is the user-driven model: the
+application owns tab descriptors and lifecycle, while Worksplit owns placement and topology.
 
 Each editor group owns its active tab. Without an authored `editorLayout`, multiple groups are
 rendered as a horizontal split inside the center area for backward compatibility. An editor layout
@@ -157,6 +159,18 @@ The workbench owns only spatial topology. Group descriptors, tabs, documents, se
 lifecycle remain consumer-owned. The editor-grid actions therefore rearrange existing groups and do
 not synthesize or clone application content.
 
+With `editorTabs`, one editor arrangement is the runtime owner of group ids, tab order, active tabs,
+recursive topology, and maximized group. A tab id occurs exactly once. Pointer dragging supports
+reordering within a tab strip, moving between strips, and splitting at the four edges of an editor
+group. Moving the last tab out removes the empty group and collapses redundant split nodes. Invalid
+or already-satisfied moves are no-ops. `moveEditorTab` is available on actions and the imperative
+handle; `editorArrangement` / `onEditorArrangementChange` expose the controlled form.
+
+The default renderer supplies linked tab/tabpanel semantics and keyboard navigation. A complete
+replacement can use `renderEditorTab`, which receives the required `tabProps`. Applications may use
+that slot or `onEditorTabContextMenu` to compose a product menu, but close, pin, dirty-document, and
+other lifecycle rules remain application-owned.
+
 Maximizing a group temporarily expands the branch leading to it and hides sibling branches without
 changing the topology or unmounting sibling DOM. Equalization acts independently at every split
 node. `getAreaLayout("editorGroups")` continues to expose the root editor split for compatibility;
@@ -174,6 +188,7 @@ Workbench layout is serializable:
 - center split pane sizes
 - editor group split pane sizes
 - recursive editor layout topology and nested split sizes
+- editor arrangement group membership, tab order, active tabs, and topology
 - maximized editor group
 - schema `version`
 
@@ -214,8 +229,10 @@ The library should expose behavior hooks without hard-coding product UI:
 - `renderSash`
 - `renderCollapsedPane`
 - `renderActivityItem`
+- `renderEditorTab`
 - `renderPartHeader`
 - `renderCollapsedPart`
+- `onEditorTabContextMenu`
 
 Injected content must not change the sash role. The sash remains the interaction target.
 
@@ -237,8 +254,6 @@ Future work:
 
 ## Backlog For Further VS Code Alignment
 
-- editor group split and merge model
-- drag-and-drop editor groups
 - zen/focus modes
 - primary side bar position left/right
 - secondary side bar independent activity targets

@@ -178,8 +178,8 @@ export function Workspace() {
 
 Workbench state is controlled with `value` / `onValueChange`; uncontrolled initialization uses one
 versioned `defaultLayout`. Layout changes emit through `onLayout`, with area sizes stored by pane
-id. The center area is either an `editor` node or descriptor-based `editorGroups` with tabs.
-Runtime
+id. The center area is an `editor` node, static descriptor-based `editorGroups`, or a flat
+`editorTabs` catalog backed by a mutable editor arrangement. Runtime
 `WorkbenchValue` is complete, while `WorkbenchValueSnapshot` stays partial for persistence and
 initialization. Render slots receive a stable `actions` object, so common UI does not need an
 imperative ref.
@@ -212,3 +212,38 @@ renderEditorTabLabel={({ actions, group, tab }) => (
 `toggleEditorGroupMaximized` are available on both render-slot actions and `WorkbenchHandle`.
 Maximizing is non-destructive: the topology and committed sash sizes stay intact, and sibling group
 DOM remains mounted.
+
+For user-driven editor placement, pass a flat tab catalog and initialize
+`defaultLayout.editorArrangement`. Worksplit then owns tab order, active tabs, group topology,
+pointer drop targets, empty-group removal, and persistence. The application continues to own tab
+content and lifecycle:
+
+```tsx
+const editorTabs: WorkbenchEditorTab[] = [
+  { id: "ledger", title: "Ledger", renderContent: () => <Ledger /> },
+  { id: "review", title: "Review", renderContent: () => <Review /> },
+];
+
+<Workbench
+  defaultLayout={{
+    version: 1,
+    panelPosition: "bottom",
+    value: { version: 1 },
+    editorArrangement: {
+      groups: [{ id: "main", tabIds: ["ledger", "review"], activeTabId: "ledger" }],
+      layout: { type: "group", groupId: "main" },
+    },
+  }}
+  editorTabs={editorTabs}
+  renderEditorTab={({ tab, tabProps }) => <button {...tabProps}>{tab.title}</button>}
+  storageKey="workspace-layout"
+/>;
+```
+
+Dragging a tab within a strip reorders it; dragging across strips moves it; dropping at an editor
+edge creates a left, right, top, or bottom split. Moving the final tab out removes its empty group
+and collapses redundant split nodes. `moveEditorTab` exposes the same operation through render-slot
+actions and `WorkbenchHandle`. `editorArrangement` / `onEditorArrangementChange` provide controlled
+ownership when an application needs it. `renderEditorTab` receives the complete accessible
+`tabProps`; `onEditorTabContextMenu` is available when the application only needs a menu hook.
+Worksplit intentionally does not define close, pin, dirty-document, or product menu semantics.

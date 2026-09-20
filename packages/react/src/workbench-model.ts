@@ -2,6 +2,8 @@ import {
   WORKBENCH_PARTS,
   createSplitSizeSnapshot,
   normalizeEditorGridLayout,
+  normalizeEditorArrangement,
+  type EditorArrangement,
   type EditorGridLayout,
   type SplitLayout,
   type WorkbenchPart,
@@ -45,14 +47,23 @@ export interface WorkbenchLayout {
   editorLayout?: EditorGridLayout | undefined;
   /** Group temporarily expanded over the editor grid without changing its topology. */
   maximizedEditorGroupId?: string | undefined;
+  /** Tab placement and editor topology for the descriptor-based editorTabs API. */
+  editorArrangement?: EditorArrangement | undefined;
 }
 
 export function readStartupLayout(
   storageKey: string | undefined,
   defaultLayout: WorkbenchLayout | undefined,
   editorGroupIds: readonly string[] = [],
+  editorTabIds: readonly string[] = [],
 ): WorkbenchLayout {
-  const fallback = normalizeLayout(defaultLayout, undefined, "bottom", editorGroupIds);
+  const fallback = normalizeLayout(
+    defaultLayout,
+    undefined,
+    "bottom",
+    editorGroupIds,
+    editorTabIds,
+  );
   if (!storageKey || typeof window === "undefined") {
     return fallback;
   }
@@ -64,7 +75,7 @@ export function readStartupLayout(
     }
     const parsed = JSON.parse(stored) as Partial<WorkbenchLayout>;
     if (parsed.version === 1 && parsed.value) {
-      return normalizeLayout(parsed, undefined, "bottom", editorGroupIds);
+      return normalizeLayout(parsed, undefined, "bottom", editorGroupIds, editorTabIds);
     }
   } catch {
     return fallback;
@@ -78,6 +89,7 @@ export function normalizeLayout(
   defaultValue: WorkbenchValueSnapshot | undefined,
   fallbackPanelPosition: WorkbenchPanelPosition,
   editorGroupIds: readonly string[] = [],
+  editorTabIds: readonly string[] = [],
 ): WorkbenchLayout {
   const editorLayout = layout?.editorLayout
     ? normalizeEditorGridLayout(layout.editorLayout, editorGroupIds)
@@ -92,6 +104,10 @@ export function normalizeLayout(
       ? layout.panelPosition
       : fallbackPanelPosition,
     areaSizes: normalizeAreaSizeSnapshot(layout?.areaSizes),
+    editorArrangement:
+      layout?.editorArrangement && editorTabIds.length > 0
+        ? normalizeEditorArrangement(layout.editorArrangement, editorTabIds)
+        : undefined,
     editorLayout,
     maximizedEditorGroupId,
     version: 1,

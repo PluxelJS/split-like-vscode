@@ -217,6 +217,7 @@
 
 .worksplit-workbench-editor,
 .worksplit-workbench-editor-group {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
 }
@@ -300,6 +301,52 @@
 
 .worksplit-workbench-editor-content {
   overflow: auto;
+}
+
+.worksplit-workbench-editor-tab-drop {
+  z-index: 3;
+  flex: 0 0 2px;
+  align-self: stretch;
+  background: Highlight;
+  pointer-events: none;
+}
+
+.worksplit-workbench-editor-drop {
+  position: absolute;
+  z-index: 4;
+  border: 1px solid Highlight;
+  background: color-mix(in srgb, Highlight 18%, transparent);
+  pointer-events: none;
+}
+
+.worksplit-workbench-editor-drop-left,
+.worksplit-workbench-editor-drop-right {
+  top: 0;
+  bottom: 0;
+  width: 50%;
+}
+
+.worksplit-workbench-editor-drop-left {
+  left: 0;
+}
+
+.worksplit-workbench-editor-drop-right {
+  right: 0;
+}
+
+.worksplit-workbench-editor-drop-top,
+.worksplit-workbench-editor-drop-bottom {
+  right: 0;
+  left: 0;
+  height: 50%;
+}
+
+.worksplit-workbench-editor-drop-top {
+  top: 0;
+}
+
+.worksplit-workbench-editor-drop-bottom {
+  bottom: 0;
 }
 
 .worksplit-workbench-collapsed-part {

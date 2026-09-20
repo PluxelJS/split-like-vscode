@@ -1,15 +1,22 @@
+/* oxlint-disable react/refs -- Stable refs back the imperative workbench action and layout APIs. */
 import {
   WORKBENCH_PARTS as CORE_WORKBENCH_PARTS,
   activateWorkbenchView,
+  createEditorArrangement,
   createWorkbenchValue,
   getActiveWorkbenchView,
   moveEditorGridGroup,
+  moveEditorTab as moveEditorArrangementTab,
+  normalizeEditorArrangement,
   normalizeEditorGridLayout,
   setWorkbenchPartVisibility,
   validateEditorGridLayout,
   createSplitSizeSnapshot,
   type EditorGridDirection,
   type EditorGridLayout,
+  type EditorArrangement,
+  type EditorTabDropTarget,
+  type MoveEditorTabOptions,
   type MoveEditorGridGroupOptions,
   type PaneSizeValue,
   type SplitLayout,
@@ -18,6 +25,7 @@ import {
 } from "@worksplit/core";
 import {
   createElement,
+  Fragment,
   isValidElement,
   forwardRef,
   useCallback,
@@ -28,11 +36,15 @@ import {
   useRef,
   useState,
   type ElementType,
+  type ButtonHTMLAttributes,
   type HTMLAttributes,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
   type ReactNode,
 } from "react";
 
+import { resolveEditorGroupDropPosition, resolveTabInsertionIndex } from "./editor-drag";
 import {
   Pane,
   SplitView,
@@ -47,7 +59,6 @@ import {
   normalizeLayout,
   readCurrentAreaSizes,
   readStartupLayout,
-  sameStringRecord,
   sameWorkbenchValue,
   toCoreValue,
   toCoreValueSnapshot,
@@ -74,6 +85,8 @@ export type {
 export type WorkbenchEditorLayout = EditorGridLayout;
 export type WorkbenchEditorGroupDirection = EditorGridDirection;
 export type WorkbenchEditorGroupMoveOptions = MoveEditorGridGroupOptions;
+export type WorkbenchEditorArrangement = EditorArrangement;
+export type WorkbenchEditorTabMoveOptions = MoveEditorTabOptions;
 
 export type WorkbenchIcon = ReactNode | ElementType<{ className?: string; size?: number }>;
 
@@ -86,6 +99,7 @@ export interface WorkbenchViewSize {
 export interface WorkbenchActions {
   activateView(id: string): void;
   activateEditorTab(groupId: string, tabId: string): void;
+  moveEditorTab(options: WorkbenchEditorTabMoveOptions): void;
   equalizeEditorGroups(): void;
   hidePart(part: WorkbenchPart): void;
   maximizeEditorGroup(groupId: string): void;
@@ -164,6 +178,20 @@ export interface WorkbenchEditorTabLabelRenderInfo {
   value: WorkbenchValue;
 }
 
+export interface WorkbenchEditorTabRenderInfo extends WorkbenchEditorTabLabelRenderInfo {
+  tabProps: ButtonHTMLAttributes<HTMLButtonElement> & {
+    "aria-controls": string;
+    "aria-selected": boolean;
+    "data-worksplit-editor-tab": string;
+    id: string;
+    role: "tab";
+  };
+}
+
+export interface WorkbenchEditorTabContextMenuInfo extends WorkbenchEditorTabLabelRenderInfo {
+  index: number;
+}
+
 export type WorkbenchPartSize = WorkbenchViewSize;
 
 export interface WorkbenchActivityItemRenderInfo {
@@ -225,8 +253,15 @@ interface WorkbenchBaseProps extends Omit<
   editorGroupMinSize?: number;
   onLayout?: (layout: WorkbenchLayout) => void;
   onValueChange?: (value: WorkbenchValue) => void;
+  editorArrangement?: WorkbenchEditorArrangement;
+  onEditorArrangementChange?: (arrangement: WorkbenchEditorArrangement) => void;
   renderActivityItem?: (info: WorkbenchActivityItemRenderInfo) => ReactNode;
   renderEditorTabLabel?: (info: WorkbenchEditorTabLabelRenderInfo) => ReactNode;
+  renderEditorTab?: (info: WorkbenchEditorTabRenderInfo) => ReactNode;
+  onEditorTabContextMenu?: (
+    info: WorkbenchEditorTabContextMenuInfo,
+    event: ReactMouseEvent<HTMLButtonElement>,
+  ) => void;
   renderPartHeader?: (info: WorkbenchPartRenderInfo) => ReactNode;
   renderCollapsedPart?: (info: WorkbenchCollapsedPartRenderInfo) => ReactNode;
 }
@@ -235,10 +270,17 @@ export type WorkbenchProps =
   | (WorkbenchBaseProps & {
       editor: ReactNode;
       editorGroups?: never;
+      editorTabs?: never;
     })
   | (WorkbenchBaseProps & {
       editor?: never;
       editorGroups: readonly WorkbenchEditorGroup[];
+      editorTabs?: never;
+    })
+  | (WorkbenchBaseProps & {
+      editor?: never;
+      editorGroups?: never;
+      editorTabs: readonly WorkbenchEditorTab[];
     });
 
 interface WorkbenchResolvedView extends Omit<WorkbenchView, "part"> {
@@ -302,14 +344,19 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       commands,
       defaultLayout,
       editor,
+      editorArrangement: controlledEditorArrangement,
       editorGroups,
+      editorTabs,
       centerMinSize = 320,
       editorGroupMinSize = centerMinSize,
       onLayout,
+      onEditorArrangementChange,
+      onEditorTabContextMenu,
       onValueChange,
       partSizes,
       renderActivityItem,
       renderCollapsedPart,
+      renderEditorTab,
       renderEditorTabLabel,
       renderPartHeader,
       value,
@@ -331,15 +378,31 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
     );
     const showActivity =
       showActivityBar === true || (showActivityBar === "auto" && orderedViews.length > 0);
-    const orderedEditorGroups = useMemo(
-      () => validateEditorGroups(orderViews(createEditorGroups(editorGroups, editor))),
-      [editor, editorGroups],
+    const descriptorGroups = useMemo(
+      () =>
+        editorTabs
+          ? []
+          : validateEditorGroups(orderViews(createEditorGroups(editorGroups, editor))),
+      [editor, editorGroups, editorTabs],
+    );
+    const editorTabCatalog = useMemo(
+      () => validateEditorTabCatalog(editorTabs ?? descriptorGroups.flatMap((group) => group.tabs)),
+      [descriptorGroups, editorTabs],
+    );
+    const editorTabIds = useMemo(() => editorTabCatalog.map((tab) => tab.id), [editorTabCatalog]);
+    const initialArrangement = useMemo(
+      () => createArrangementFromDescriptors(descriptorGroups, editorTabs),
+      [descriptorGroups, editorTabs],
     );
     const editorGroupIds = useMemo(
-      () => orderedEditorGroups.map((group) => group.id),
-      [orderedEditorGroups],
+      () => initialArrangement.groups.map((group) => group.id),
+      [initialArrangement],
     );
     const defaultLayoutRef = useRef(defaultLayout);
+    const initialArrangementRef = useRef(initialArrangement);
+    const editorTabIdsRef = useRef(editorTabIds);
+    initialArrangementRef.current = initialArrangement;
+    editorTabIdsRef.current = editorTabIds;
     const defaultLayoutValidatedRef = useRef(false);
     if (!defaultLayoutValidatedRef.current) {
       if (defaultLayoutRef.current?.editorLayout) {
@@ -348,7 +411,12 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       defaultLayoutValidatedRef.current = true;
     }
     const startupLayoutRef = useRef<WorkbenchLayout | null>(null);
-    startupLayoutRef.current ??= readStartupLayout(storageKey, defaultLayout, editorGroupIds);
+    startupLayoutRef.current ??= readStartupLayout(
+      storageKey,
+      defaultLayout,
+      editorGroupIds,
+      editorTabIds,
+    );
     const startupLayout = startupLayoutRef.current;
     const areaSizeSnapshotRef = useRef<WorkbenchAreaSizeSnapshot>(
       startupLayout.areaSizes ? cloneAreaSizeSnapshot(startupLayout.areaSizes) : {},
@@ -356,30 +424,30 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
     const [uncontrolledValue, setUncontrolledValue] = useState(() =>
       createWorkbenchValue(orderedViews, toCoreValueSnapshot(startupLayout.value)),
     );
-    const [uncontrolledActiveEditorTabs, setUncontrolledActiveEditorTabs] = useState(() =>
-      createActiveEditorTabs(orderedEditorGroups, startupLayout.value.activeEditorTabs),
+    const [uncontrolledEditorArrangement, setUncontrolledEditorArrangement] = useState(() =>
+      startupLayout.editorArrangement
+        ? normalizeEditorArrangement(startupLayout.editorArrangement, editorTabIds)
+        : createLegacyStartupArrangement(initialArrangement, startupLayout),
     );
     const [uncontrolledPanelPosition, setUncontrolledPanelPosition] =
       useState<WorkbenchPanelPosition>(startupLayout.panelPosition);
-    const [editorLayout, setEditorLayout] = useState<EditorGridLayout | undefined>(() =>
-      applyLegacyEditorGroupSizes(
-        normalizeEditorGridLayout(startupLayout.editorLayout, editorGroupIds),
-        startupLayout.areaSizes?.editorGroups,
-      ),
-    );
-    const [maximizedEditorGroupId, setMaximizedEditorGroupId] = useState<string | undefined>(
-      startupLayout.maximizedEditorGroupId,
-    );
     const [layoutVersion, setLayoutVersion] = useState(0);
     const controlledValue = useMemo(() => (value ? toCoreValue(value) : undefined), [value]);
     const currentValue = controlledValue ?? uncontrolledValue;
-    const currentActiveEditorTabs = useMemo(
+    const currentEditorArrangement = useMemo(
       () =>
-        createActiveEditorTabs(
-          orderedEditorGroups,
-          value?.activeEditorTabs ?? uncontrolledActiveEditorTabs,
-        ),
-      [orderedEditorGroups, uncontrolledActiveEditorTabs, value?.activeEditorTabs],
+        controlledEditorArrangement
+          ? normalizeEditorArrangement(controlledEditorArrangement, editorTabIds)
+          : normalizeEditorArrangement(uncontrolledEditorArrangement, editorTabIds),
+      [controlledEditorArrangement, editorTabIds, uncontrolledEditorArrangement],
+    );
+    const currentActiveEditorTabs = useMemo(
+      () => activeTabsFromArrangement(currentEditorArrangement),
+      [currentEditorArrangement],
+    );
+    const orderedEditorGroups = useMemo(
+      () => materializeEditorGroups(currentEditorArrangement, editorTabCatalog, descriptorGroups),
+      [currentEditorArrangement, descriptorGroups, editorTabCatalog],
     );
     const publicValue = useMemo(
       () => toPublicValue(currentValue, currentActiveEditorTabs),
@@ -387,34 +455,38 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
     );
     const currentPanelPosition = uncontrolledPanelPosition;
     const currentValueRef = useRef(currentValue);
-    const currentActiveEditorTabsRef = useRef(currentActiveEditorTabs);
+    const currentEditorArrangementRef = useRef(currentEditorArrangement);
     const currentPanelPositionRef = useRef(currentPanelPosition);
+    const editorLayout = currentEditorArrangement.layout;
+    const maximizedEditorGroupId = currentEditorArrangement.maximizedGroupId;
     const editorLayoutRef = useRef(editorLayout);
     const maximizedEditorGroupIdRef = useRef(maximizedEditorGroupId);
     const editorSplitRefs = useRef(new Map<string, SplitViewHandle>());
     const pendingValueRef = useRef<CoreWorkbenchValue | undefined>(undefined);
-    const pendingActiveEditorTabsRef = useRef<Record<string, string> | undefined>(undefined);
+    const pendingEditorArrangementRef = useRef<EditorArrangement | undefined>(undefined);
     const pendingResetScheduledRef = useRef(false);
     const orderedViewsRef = useRef(orderedViews);
     const orderedEditorGroupsRef = useRef(orderedEditorGroups);
     const controlledValueRef = useRef(value !== undefined);
+    const controlledEditorArrangementRef = useRef(controlledEditorArrangement !== undefined);
+    const onEditorArrangementChangeRef = useRef(onEditorArrangementChange);
     const onValueChangeRef = useRef(onValueChange);
     const onLayoutRef = useRef(onLayout);
     const storageKeyRef = useRef(storageKey);
-    const declaredEditorGroupsRef = useRef(editorGroups !== undefined);
 
     currentValueRef.current = currentValue;
-    currentActiveEditorTabsRef.current = currentActiveEditorTabs;
+    currentEditorArrangementRef.current = currentEditorArrangement;
     currentPanelPositionRef.current = currentPanelPosition;
     editorLayoutRef.current = editorLayout;
     maximizedEditorGroupIdRef.current = maximizedEditorGroupId;
     orderedViewsRef.current = orderedViews;
     orderedEditorGroupsRef.current = orderedEditorGroups;
     controlledValueRef.current = value !== undefined;
+    controlledEditorArrangementRef.current = controlledEditorArrangement !== undefined;
+    onEditorArrangementChangeRef.current = onEditorArrangementChange;
     onValueChangeRef.current = onValueChange;
     onLayoutRef.current = onLayout;
     storageKeyRef.current = storageKey;
-    declaredEditorGroupsRef.current = editorGroups !== undefined;
 
     const schedulePendingReset = useCallback(() => {
       if (pendingResetScheduledRef.current) {
@@ -424,7 +496,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       queueMicrotask(() => {
         pendingResetScheduledRef.current = false;
         pendingValueRef.current = undefined;
-        pendingActiveEditorTabsRef.current = undefined;
+        pendingEditorArrangementRef.current = undefined;
       });
     }, []);
 
@@ -432,58 +504,57 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       () => pendingValueRef.current ?? currentValueRef.current,
       [],
     );
-    const readActionEditorTabs = useCallback(
-      () => pendingActiveEditorTabsRef.current ?? currentActiveEditorTabsRef.current,
+    const readActionEditorArrangement = useCallback(
+      () => pendingEditorArrangementRef.current ?? currentEditorArrangementRef.current,
       [],
     );
 
     const commitValue = useCallback(
-      (next: CoreWorkbenchValue, nextActiveEditorTabs = readActionEditorTabs()) => {
+      (next: CoreWorkbenchValue) => {
         const previousValue = readActionValue();
-        const previousActiveEditorTabs = readActionEditorTabs();
-        if (
-          sameWorkbenchValue(next, previousValue) &&
-          sameStringRecord(nextActiveEditorTabs, previousActiveEditorTabs)
-        ) {
+        if (sameWorkbenchValue(next, previousValue)) {
           return;
         }
         if (controlledValueRef.current) {
           pendingValueRef.current = next;
-          pendingActiveEditorTabsRef.current = nextActiveEditorTabs;
           schedulePendingReset();
         } else {
           currentValueRef.current = next;
-          currentActiveEditorTabsRef.current = nextActiveEditorTabs;
           setUncontrolledValue(next);
         }
-        onValueChangeRef.current?.(toPublicValue(next, nextActiveEditorTabs));
+        onValueChangeRef.current?.(
+          toPublicValue(next, activeTabsFromArrangement(readActionEditorArrangement())),
+        );
       },
-      [readActionEditorTabs, readActionValue, schedulePendingReset],
+      [readActionEditorArrangement, readActionValue, schedulePendingReset],
     );
 
-    const commitActiveEditorTabs = useCallback(
-      (next: Record<string, string>) => {
-        if (sameStringRecord(next, readActionEditorTabs())) {
+    const commitEditorArrangement = useCallback(
+      (next: EditorArrangement) => {
+        const previous = readActionEditorArrangement();
+        if (sameEditorArrangement(next, previous)) {
           return;
         }
-        const actionValue = readActionValue();
-        if (controlledValueRef.current) {
-          pendingActiveEditorTabsRef.current = next;
+        if (controlledEditorArrangementRef.current) {
+          pendingEditorArrangementRef.current = next;
           schedulePendingReset();
         } else {
-          currentActiveEditorTabsRef.current = next;
-          setUncontrolledActiveEditorTabs(next);
+          currentEditorArrangementRef.current = next;
+          setUncontrolledEditorArrangement(next);
         }
-        onValueChangeRef.current?.(toPublicValue(actionValue, next));
+        onEditorArrangementChangeRef.current?.(next);
+        onValueChangeRef.current?.(
+          toPublicValue(readActionValue(), activeTabsFromArrangement(next)),
+        );
       },
-      [readActionEditorTabs, readActionValue, schedulePendingReset],
+      [readActionEditorArrangement, readActionValue, schedulePendingReset],
     );
 
     const createLayout = useCallback(
       (
         nextValue = currentValueRef.current,
         nextPanelPosition = currentPanelPositionRef.current,
-        nextActiveEditorTabs = currentActiveEditorTabsRef.current,
+        nextArrangement = currentEditorArrangementRef.current,
       ): WorkbenchLayout => ({
         panelPosition: nextPanelPosition,
         areaSizes: readCurrentAreaSizes(
@@ -492,14 +563,14 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
           editorGroupsSplitRef.current?.getLayout() ?? null,
           areaSizeSnapshotRef.current,
         ),
-        editorLayout: declaredEditorGroupsRef.current
-          ? snapshotEditorGridLayout(editorLayoutRef.current, editorSplitRefs.current)
-          : undefined,
-        maximizedEditorGroupId: declaredEditorGroupsRef.current
-          ? maximizedEditorGroupIdRef.current
-          : undefined,
+        editorArrangement: {
+          ...nextArrangement,
+          layout: snapshotEditorGridLayout(nextArrangement.layout, editorSplitRefs.current),
+        },
+        editorLayout: snapshotEditorGridLayout(nextArrangement.layout, editorSplitRefs.current),
+        maximizedEditorGroupId: nextArrangement.maximizedGroupId,
         version: 1,
-        value: createPublicValueSnapshot(nextValue, nextActiveEditorTabs),
+        value: createPublicValueSnapshot(nextValue, activeTabsFromArrangement(nextArrangement)),
       }),
       [],
     );
@@ -542,37 +613,16 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
     }, [commitValue, currentValue, orderedViews]);
 
     useEffect(() => {
-      const reconciled = createActiveEditorTabs(orderedEditorGroups, currentActiveEditorTabs);
-      if (!sameStringRecord(reconciled, currentActiveEditorTabs)) {
-        commitActiveEditorTabs(reconciled);
+      const reconciled = normalizeEditorArrangement(currentEditorArrangement, editorTabIds);
+      if (!sameEditorArrangement(reconciled, currentEditorArrangement)) {
+        commitEditorArrangement(reconciled);
       }
-    }, [commitActiveEditorTabs, currentActiveEditorTabs, orderedEditorGroups]);
-
-    useEffect(() => {
-      const reconciled = normalizeEditorGridLayout(editorLayoutRef.current, editorGroupIds);
-      if (!sameEditorGridLayout(reconciled, editorLayoutRef.current)) {
-        editorLayoutRef.current = reconciled;
-        setEditorLayout(reconciled);
-      }
-      const maximized = maximizedEditorGroupIdRef.current;
-      if (maximized && !editorGroupIds.includes(maximized)) {
-        maximizedEditorGroupIdRef.current = undefined;
-        setMaximizedEditorGroupId(undefined);
-      }
-    }, [editorGroupIds]);
+    }, [commitEditorArrangement, currentEditorArrangement, editorTabIds]);
 
     useEffect(
-      () => publishLayout(createLayout()),
-      [
-        createLayout,
-        currentActiveEditorTabs,
-        currentPanelPosition,
-        currentValue,
-        editorLayout,
-        layoutVersion,
-        maximizedEditorGroupId,
-        publishLayout,
-      ],
+      () =>
+        publishLayout(createLayout(currentValue, currentPanelPosition, currentEditorArrangement)),
+      [createLayout, currentEditorArrangement, currentPanelPosition, currentValue, publishLayout],
     );
 
     const showPart = useCallback(
@@ -618,48 +668,64 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
 
     const activateEditorTab = useCallback(
       (groupId: string, tabId: string) => {
-        const group = orderedEditorGroupsRef.current.find((item) => item.id === groupId);
-        if (!group?.tabs.some((tab) => tab.id === tabId)) {
+        const current = readActionEditorArrangement();
+        const groupIndex = current.groups.findIndex((group) => group.id === groupId);
+        const group = current.groups[groupIndex];
+        if (!group?.tabIds.includes(tabId) || group.activeTabId === tabId) {
           return;
         }
-        commitActiveEditorTabs({ ...readActionEditorTabs(), [groupId]: tabId });
+        const groups = [...current.groups];
+        groups[groupIndex] = { ...group, activeTabId: tabId };
+        commitEditorArrangement({ ...current, groups });
       },
-      [commitActiveEditorTabs, readActionEditorTabs],
+      [commitEditorArrangement, readActionEditorArrangement],
     );
 
-    const commitEditorLayout = useCallback((next: EditorGridLayout | undefined) => {
-      if (sameEditorGridLayout(next, editorLayoutRef.current)) {
-        return;
-      }
-      editorLayoutRef.current = next;
-      setEditorLayout(next);
-    }, []);
+    const commitEditorLayout = useCallback(
+      (next: EditorGridLayout | undefined) => {
+        const current = readActionEditorArrangement();
+        if (sameEditorGridLayout(next, current.layout)) {
+          return;
+        }
+        commitEditorArrangement({ ...current, layout: next });
+      },
+      [commitEditorArrangement, readActionEditorArrangement],
+    );
 
     const moveEditorGroup = useCallback(
       (options: WorkbenchEditorGroupMoveOptions) => {
-        commitEditorLayout(moveEditorGridGroup(editorLayoutRef.current, options));
+        commitEditorLayout(moveEditorGridGroup(readActionEditorArrangement().layout, options));
       },
-      [commitEditorLayout],
+      [commitEditorLayout, readActionEditorArrangement],
     );
 
-    const maximizeEditorGroup = useCallback((groupId: string) => {
-      if (
-        maximizedEditorGroupIdRef.current === groupId ||
-        !editorLayoutContainsGroup(editorLayoutRef.current, groupId)
-      ) {
-        return;
-      }
-      maximizedEditorGroupIdRef.current = groupId;
-      setMaximizedEditorGroupId(groupId);
-    }, []);
+    const moveEditorTab = useCallback(
+      (options: WorkbenchEditorTabMoveOptions) => {
+        commitEditorArrangement(moveEditorArrangementTab(readActionEditorArrangement(), options));
+      },
+      [commitEditorArrangement, readActionEditorArrangement],
+    );
+
+    const maximizeEditorGroup = useCallback(
+      (groupId: string) => {
+        const current = readActionEditorArrangement();
+        if (
+          current.maximizedGroupId === groupId ||
+          !editorLayoutContainsGroup(current.layout, groupId)
+        ) {
+          return;
+        }
+        commitEditorArrangement({ ...current, maximizedGroupId: groupId });
+      },
+      [commitEditorArrangement, readActionEditorArrangement],
+    );
 
     const restoreEditorGroups = useCallback(() => {
-      if (!maximizedEditorGroupIdRef.current) {
-        return;
+      const current = readActionEditorArrangement();
+      if (current.maximizedGroupId) {
+        commitEditorArrangement({ ...current, maximizedGroupId: undefined });
       }
-      maximizedEditorGroupIdRef.current = undefined;
-      setMaximizedEditorGroupId(undefined);
-    }, []);
+    }, [commitEditorArrangement, readActionEditorArrangement]);
 
     const toggleEditorGroupMaximized = useCallback(
       (groupId: string) => {
@@ -700,75 +766,66 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
     const restoreLayout = useCallback(
       (layout: WorkbenchLayout) => {
         const previousValue = currentValueRef.current;
-        const previousActiveEditorTabs = currentActiveEditorTabsRef.current;
         const previousPanelPosition = currentPanelPositionRef.current;
-        const currentEditorGroupIds = orderedEditorGroupsRef.current.map((group) => group.id);
+        const currentEditorGroupIds = readActionEditorArrangement().groups.map((group) => group.id);
         const normalized = normalizeLayout(
           layout,
           undefined,
           previousPanelPosition,
           currentEditorGroupIds,
+          editorTabIdsRef.current,
         );
         areaSizeSnapshotRef.current = cloneAreaSizeSnapshot(normalized.areaSizes ?? {});
         const nextValue = createWorkbenchValue(
           orderedViewsRef.current,
           toCoreValueSnapshot(normalized.value),
         );
-        const nextActiveEditorTabs = createActiveEditorTabs(
-          orderedEditorGroupsRef.current,
-          normalized.value.activeEditorTabs,
-        );
         const nextPanelPosition = normalized.panelPosition;
-        const nextEditorLayout = applyLegacyEditorGroupSizes(
-          normalizeEditorGridLayout(normalized.editorLayout, currentEditorGroupIds),
-          normalized.areaSizes?.editorGroups,
-        );
-        const nextMaximizedEditorGroupId = normalized.maximizedEditorGroupId;
+        const nextArrangement = normalized.editorArrangement
+          ? normalizeEditorArrangement(normalized.editorArrangement, editorTabIdsRef.current)
+          : createLegacyStartupArrangement(initialArrangementRef.current, normalized);
 
         if (controlledValueRef.current) {
           pendingValueRef.current = nextValue;
-          pendingActiveEditorTabsRef.current = nextActiveEditorTabs;
           schedulePendingReset();
         } else {
           currentValueRef.current = nextValue;
-          currentActiveEditorTabsRef.current = nextActiveEditorTabs;
           if (!sameWorkbenchValue(nextValue, previousValue)) {
             setUncontrolledValue(nextValue);
           }
-          if (!sameStringRecord(nextActiveEditorTabs, previousActiveEditorTabs)) {
-            setUncontrolledActiveEditorTabs(nextActiveEditorTabs);
-          }
         }
-        if (
-          !sameWorkbenchValue(nextValue, previousValue) ||
-          !sameStringRecord(nextActiveEditorTabs, previousActiveEditorTabs)
-        ) {
-          onValueChangeRef.current?.(toPublicValue(nextValue, nextActiveEditorTabs));
+        if (!sameWorkbenchValue(nextValue, previousValue)) {
+          onValueChangeRef.current?.(
+            toPublicValue(nextValue, activeTabsFromArrangement(nextArrangement)),
+          );
         }
+        commitEditorArrangement(nextArrangement);
         currentPanelPositionRef.current = nextPanelPosition;
         if (nextPanelPosition !== previousPanelPosition) {
           setUncontrolledPanelPosition(nextPanelPosition);
         }
-        editorLayoutRef.current = nextEditorLayout;
-        maximizedEditorGroupIdRef.current = nextMaximizedEditorGroupId;
-        setEditorLayout(nextEditorLayout);
-        setMaximizedEditorGroupId(nextMaximizedEditorGroupId);
         setLayoutVersion((version) => version + 1);
       },
-      [schedulePendingReset],
+      [commitEditorArrangement, readActionEditorArrangement, schedulePendingReset],
     );
 
     const resetLayout = useCallback(() => {
       const currentEditorGroupIds = orderedEditorGroupsRef.current.map((group) => group.id);
       restoreLayout(
-        normalizeLayout(defaultLayoutRef.current, undefined, "bottom", currentEditorGroupIds),
+        normalizeLayout(
+          defaultLayoutRef.current,
+          undefined,
+          "bottom",
+          currentEditorGroupIds,
+          editorTabIdsRef.current,
+        ),
       );
     }, [restoreLayout]);
 
     const commandRegistry = useMemo(() => createCommandRegistry(commands), [commands]);
 
     const runCommand = useCallback(
-      (id: string): boolean => {
+      function executeCommand(id: string): boolean {
         const command = commandRegistry.find((item) => item.id === id);
         if (!command) {
           return false;
@@ -780,14 +837,18 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
             activateView,
             createLayout,
             equalizeEditorGroups,
-            publicValue: toPublicValue(currentValueRef.current, currentActiveEditorTabsRef.current),
+            publicValue: toPublicValue(
+              currentValueRef.current,
+              activeTabsFromArrangement(currentEditorArrangementRef.current),
+            ),
             hidePart,
             maximizeEditorGroup,
             moveEditorGroup,
+            moveEditorTab,
             resetLayout,
             restoreEditorGroups,
             restoreLayout,
-            runCommand,
+            runCommand: executeCommand,
             setPanelPosition,
             showPart,
             togglePanelPosition,
@@ -810,6 +871,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
         hidePart,
         maximizeEditorGroup,
         moveEditorGroup,
+        moveEditorTab,
         resetLayout,
         restoreEditorGroups,
         restoreLayout,
@@ -831,10 +893,15 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
         getLayout: createLayout,
         getAreaLayout: (id) =>
           readAreaLayout(id, mainSplitRef, centerSplitRef, editorGroupsSplitRef),
-        getValue: () => toPublicValue(currentValueRef.current, currentActiveEditorTabsRef.current),
+        getValue: () =>
+          toPublicValue(
+            currentValueRef.current,
+            activeTabsFromArrangement(currentEditorArrangementRef.current),
+          ),
         hidePart,
         maximizeEditorGroup,
         moveEditorGroup,
+        moveEditorTab,
         resetLayout,
         restoreEditorGroups,
         restoreLayout,
@@ -854,6 +921,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
         hidePart,
         maximizeEditorGroup,
         moveEditorGroup,
+        moveEditorTab,
         resetLayout,
         restoreEditorGroups,
         restoreLayout,
@@ -875,6 +943,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
         hidePart,
         maximizeEditorGroup,
         moveEditorGroup,
+        moveEditorTab,
         resetLayout,
         restoreEditorGroups,
         runCommand,
@@ -892,6 +961,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
         hidePart,
         maximizeEditorGroup,
         moveEditorGroup,
+        moveEditorTab,
         resetLayout,
         restoreEditorGroups,
         runCommand,
@@ -946,6 +1016,89 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       document.addEventListener("keydown", handleKeyDown);
       return () => document.removeEventListener("keydown", handleKeyDown);
     }, []);
+
+    const [editorDropPreview, setEditorDropPreview] = useState<EditorDropPreview | null>(null);
+    const editorDropPreviewRef = useRef<EditorDropPreview | null>(null);
+    const nextEditorGroupIdRef = useRef(1);
+    const suppressEditorTabClickRef = useRef(false);
+    editorDropPreviewRef.current = editorDropPreview;
+
+    const beginEditorTabDrag = useCallback(
+      (event: ReactPointerEvent<HTMLButtonElement>, groupId: string, tabId: string) => {
+        if (event.button !== 0) {
+          return;
+        }
+        const startX = event.clientX;
+        const startY = event.clientY;
+        let dragging = false;
+
+        const handleMove = (pointerEvent: PointerEvent) => {
+          if (
+            !dragging &&
+            Math.hypot(pointerEvent.clientX - startX, pointerEvent.clientY - startY) < 4
+          ) {
+            return;
+          }
+          dragging = true;
+          suppressEditorTabClickRef.current = true;
+          const preview = resolveEditorDropPreview(
+            rootRef.current,
+            groupId,
+            tabId,
+            pointerEvent.clientX,
+            pointerEvent.clientY,
+          );
+          editorDropPreviewRef.current = preview;
+          setEditorDropPreview(preview);
+          pointerEvent.preventDefault();
+        };
+
+        const finish = () => {
+          document.removeEventListener("pointermove", handleMove);
+          document.removeEventListener("pointerup", handleUp);
+          document.removeEventListener("pointercancel", cancel);
+          const preview = editorDropPreviewRef.current;
+          editorDropPreviewRef.current = null;
+          setEditorDropPreview(null);
+          if (dragging) {
+            globalThis.setTimeout(() => {
+              suppressEditorTabClickRef.current = false;
+            }, 0);
+          }
+          if (!dragging || !preview) {
+            return;
+          }
+          const target: EditorTabDropTarget =
+            preview.kind === "split"
+              ? {
+                  kind: "split",
+                  newGroupId: `group-${accessibilityId}-${nextEditorGroupIdRef.current++}`,
+                  position: preview.position,
+                  targetGroupId: preview.groupId,
+                }
+              : {
+                  groupId: preview.groupId,
+                  index: preview.index,
+                  kind: "tab-strip",
+                };
+          moveEditorTab({ sourceGroupId: groupId, tabId, target });
+        };
+        const handleUp = () => finish();
+        const cancel = () => {
+          dragging = false;
+          editorDropPreviewRef.current = null;
+          setEditorDropPreview(null);
+          document.removeEventListener("pointermove", handleMove);
+          document.removeEventListener("pointerup", handleUp);
+          document.removeEventListener("pointercancel", cancel);
+        };
+
+        document.addEventListener("pointermove", handleMove);
+        document.addEventListener("pointerup", handleUp, { once: true });
+        document.addEventListener("pointercancel", cancel, { once: true });
+      },
+      [accessibilityId, moveEditorTab],
+    );
 
     const renderPartPane = (part: CoreWorkbenchPart) => {
       const view = getActiveWorkbenchView(orderedViews, currentValue, part) as
@@ -1087,7 +1240,8 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       );
       editorLayoutRef.current = next;
       if (event.phase === "commit") {
-        setEditorLayout(next);
+        const current = readActionEditorArrangement();
+        commitEditorArrangement({ ...current, layout: next });
       }
       if (root) {
         areaSizeSnapshotRef.current = {
@@ -1115,12 +1269,17 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
 
       return (
         <section
+          data-worksplit-editor-group={group.id}
           className={["worksplit-workbench-editor-group", group.className]
             .filter(Boolean)
             .join(" ")}
         >
           {showTabs && (
-            <div className="worksplit-workbench-editor-tabs" role="tablist">
+            <div
+              className="worksplit-workbench-editor-tabs"
+              data-worksplit-editor-tabs={group.id}
+              role="tablist"
+            >
               {group.tabs.map((tab, editorTabIndex) => {
                 const active = tab.id === activeTab?.id;
                 const icon = renderWorkbenchIcon(tab.icon, 14);
@@ -1134,50 +1293,79 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
                   value: publicValue,
                 };
                 const renderedTab = renderEditorTabLabel?.(tabInfo);
+                const tabProps: WorkbenchEditorTabRenderInfo["tabProps"] = {
+                  "aria-controls": activePanelDomId,
+                  "aria-selected": active,
+                  className: [
+                    "worksplit-workbench-editor-tab",
+                    active ? "active" : "",
+                    tab.className,
+                  ]
+                    .filter(Boolean)
+                    .join(" "),
+                  "data-worksplit-editor-tab": tab.id,
+                  id: tabDomId,
+                  onClick: () => {
+                    if (suppressEditorTabClickRef.current) {
+                      suppressEditorTabClickRef.current = false;
+                      return;
+                    }
+                    activateEditorTab(group.id, tab.id);
+                  },
+                  onContextMenu: (event) => {
+                    activateEditorTab(group.id, tab.id);
+                    onEditorTabContextMenu?.({ ...tabInfo, index: editorTabIndex }, event);
+                  },
+                  onKeyDown: (event) => {
+                    const nextIndex = nextTabIndex(event.key, editorTabIndex, group.tabs.length);
+                    if (nextIndex === null) {
+                      return;
+                    }
+                    event.preventDefault();
+                    const nextTab = group.tabs[nextIndex];
+                    const nextElement =
+                      event.currentTarget.parentElement?.querySelector<HTMLElement>(
+                        `#${editorTabDomId(accessibilityId, groupIndex, nextIndex)}`,
+                      );
+                    nextElement?.focus();
+                    if (nextTab) {
+                      activateEditorTab(group.id, nextTab.id);
+                    }
+                  },
+                  onPointerDown: (event) => beginEditorTabDrag(event, group.id, tab.id),
+                  role: "tab",
+                  tabIndex: active ? 0 : -1,
+                  type: "button",
+                };
+                const fullRenderedTab = renderEditorTab?.({ ...tabInfo, tabProps });
+                const showInsertion =
+                  editorDropPreview?.kind === "tab-strip" &&
+                  editorDropPreview.groupId === group.id &&
+                  editorDropPreview.index === editorTabIndex;
 
                 return (
-                  <button
-                    aria-controls={activePanelDomId}
-                    aria-selected={active}
-                    className={[
-                      "worksplit-workbench-editor-tab",
-                      active ? "active" : "",
-                      tab.className,
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    id={tabDomId}
-                    key={tab.id}
-                    onClick={() => activateEditorTab(group.id, tab.id)}
-                    onKeyDown={(event) => {
-                      const nextIndex = nextTabIndex(event.key, editorTabIndex, group.tabs.length);
-                      if (nextIndex === null) {
-                        return;
-                      }
-                      event.preventDefault();
-                      const nextTab = group.tabs[nextIndex];
-                      const nextElement =
-                        event.currentTarget.parentElement?.querySelector<HTMLElement>(
-                          `#${editorTabDomId(accessibilityId, groupIndex, nextIndex)}`,
-                        );
-                      nextElement?.focus();
-                      if (nextTab) {
-                        activateEditorTab(group.id, nextTab.id);
-                      }
-                    }}
-                    role="tab"
-                    tabIndex={active ? 0 : -1}
-                    type="button"
-                  >
-                    {renderedTab ?? (
-                      <>
-                        {icon}
-                        <span>{tab.title ?? tab.id}</span>
-                      </>
+                  <Fragment key={tab.id}>
+                    {showInsertion && (
+                      <span aria-hidden className="worksplit-workbench-editor-tab-drop" />
                     )}
-                  </button>
+                    {fullRenderedTab ?? (
+                      <button {...tabProps}>
+                        {renderedTab ?? (
+                          <>
+                            {icon}
+                            <span>{tab.title ?? tab.id}</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </Fragment>
                 );
               })}
+              {editorDropPreview?.kind === "tab-strip" &&
+                editorDropPreview.groupId === group.id &&
+                editorDropPreview.index === group.tabs.length && (
+                  <span aria-hidden className="worksplit-workbench-editor-tab-drop" />
+                )}
             </div>
           )}
           <div
@@ -1196,6 +1384,12 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
               value: publicValue,
             })}
           </div>
+          {editorDropPreview?.kind === "split" && editorDropPreview.groupId === group.id && (
+            <span
+              aria-hidden
+              className={`worksplit-workbench-editor-drop worksplit-workbench-editor-drop-${editorDropPreview.position}`}
+            />
+          )}
         </section>
       );
     };
@@ -1398,6 +1592,160 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
   },
 );
 
+type EditorDropPreview =
+  | { groupId: string; index: number; kind: "tab-strip" }
+  | { groupId: string; kind: "split"; position: EditorGridDirection };
+
+function validateEditorTabCatalog(tabs: readonly WorkbenchEditorTab[]): WorkbenchEditorTab[] {
+  const ids = new Set<string>();
+  for (const tab of tabs) {
+    if (!tab.id.trim()) {
+      throw new Error("[Worksplit] Editor tab ids must be non-empty strings.");
+    }
+    if (ids.has(tab.id)) {
+      throw new Error(`[Worksplit] Duplicate editor tab id "${tab.id}".`);
+    }
+    ids.add(tab.id);
+  }
+  return [...tabs];
+}
+
+function createArrangementFromDescriptors(
+  groups: readonly WorkbenchEditorGroup[],
+  flatTabs: readonly WorkbenchEditorTab[] | undefined,
+): EditorArrangement {
+  if (flatTabs) {
+    return createEditorArrangement({
+      groups: flatTabs.length > 0 ? [{ id: "main", tabIds: flatTabs.map((tab) => tab.id) }] : [],
+    });
+  }
+  return createEditorArrangement({
+    groups: groups.flatMap((group) =>
+      group.tabs.length > 0
+        ? [
+            {
+              activeTabId: group.defaultActiveTabId,
+              id: group.id,
+              tabIds: group.tabs.map((tab) => tab.id),
+            },
+          ]
+        : [],
+    ),
+  });
+}
+
+function createLegacyStartupArrangement(
+  initial: EditorArrangement,
+  layout: WorkbenchLayout,
+): EditorArrangement {
+  const groups = initial.groups.map((group) => {
+    const active = layout.value.activeEditorTabs?.[group.id];
+    return active && group.tabIds.includes(active) ? { ...group, activeTabId: active } : group;
+  });
+  const groupIds = groups.map((group) => group.id);
+  return {
+    groups,
+    layout: applyLegacyEditorGroupSizes(
+      normalizeEditorGridLayout(layout.editorLayout ?? initial.layout, groupIds),
+      layout.areaSizes?.editorGroups,
+    ),
+    maximizedGroupId: groupIds.includes(layout.maximizedEditorGroupId ?? "")
+      ? layout.maximizedEditorGroupId
+      : undefined,
+  };
+}
+
+function activeTabsFromArrangement(arrangement: EditorArrangement): Record<string, string> {
+  return Object.fromEntries(
+    arrangement.groups.map((group) => [group.id, group.activeTabId] as const),
+  );
+}
+
+function materializeEditorGroups(
+  arrangement: EditorArrangement,
+  tabs: readonly WorkbenchEditorTab[],
+  descriptors: readonly WorkbenchEditorGroup[],
+): WorkbenchEditorGroup[] {
+  const tabsById = new Map(tabs.map((tab) => [tab.id, tab]));
+  const groupsById = new Map(descriptors.map((group) => [group.id, group]));
+  return arrangement.groups.map((state, index) => {
+    const descriptor = groupsById.get(state.id);
+    return {
+      ...descriptor,
+      defaultActiveTabId: state.activeTabId,
+      id: state.id,
+      order: index,
+      tabs: state.tabIds.flatMap((tabId) => {
+        const tab = tabsById.get(tabId);
+        return tab ? [tab] : [];
+      }),
+    };
+  });
+}
+
+function sameEditorArrangement(left: EditorArrangement, right: EditorArrangement): boolean {
+  return (
+    left.maximizedGroupId === right.maximizedGroupId &&
+    sameEditorGridLayout(left.layout, right.layout) &&
+    left.groups.length === right.groups.length &&
+    left.groups.every((group, index) => {
+      const other = right.groups[index];
+      return (
+        other !== undefined &&
+        group.id === other.id &&
+        group.activeTabId === other.activeTabId &&
+        group.tabIds.length === other.tabIds.length &&
+        group.tabIds.every((tabId, tabIndex) => tabId === other.tabIds[tabIndex])
+      );
+    })
+  );
+}
+
+function resolveEditorDropPreview(
+  root: HTMLElement | null,
+  sourceGroupId: string,
+  sourceTabId: string,
+  clientX: number,
+  clientY: number,
+): EditorDropPreview | null {
+  const target = root?.ownerDocument.elementFromPoint(clientX, clientY);
+  const groupElement = target?.closest<HTMLElement>("[data-worksplit-editor-group]");
+  const groupId = groupElement?.getAttribute("data-worksplit-editor-group");
+  if (!root || !groupElement || !groupId || !root.contains(groupElement)) {
+    return null;
+  }
+  const tabStrip = target?.closest<HTMLElement>("[data-worksplit-editor-tabs]");
+  const tabElements = [
+    ...groupElement.querySelectorAll<HTMLElement>("[data-worksplit-editor-tab]"),
+  ];
+  if (tabStrip && groupElement.contains(tabStrip)) {
+    let index = resolveTabInsertionIndex(
+      tabElements.map((tab) => tab.getBoundingClientRect()),
+      clientX,
+    );
+    if (groupId === sourceGroupId) {
+      const sourceIndex = tabElements.findIndex(
+        (tab) => tab.getAttribute("data-worksplit-editor-tab") === sourceTabId,
+      );
+      if (sourceIndex >= 0 && index > sourceIndex) {
+        index -= 1;
+      }
+    }
+    return { groupId, index, kind: "tab-strip" };
+  }
+  const position = resolveEditorGroupDropPosition(
+    groupElement.getBoundingClientRect(),
+    clientX,
+    clientY,
+  );
+  if (position === "center") {
+    const index =
+      groupId === sourceGroupId ? Math.max(0, tabElements.length - 1) : tabElements.length;
+    return { groupId, index, kind: "tab-strip" };
+  }
+  return { groupId, kind: "split", position };
+}
+
 function normalizeView(view: WorkbenchView): WorkbenchResolvedView {
   return {
     ...view,
@@ -1491,25 +1839,6 @@ function createEditorGroups(
       ],
     },
   ];
-}
-
-function createActiveEditorTabs(
-  groups: readonly WorkbenchEditorGroup[],
-  snapshot: Record<string, string> | undefined,
-): Record<string, string> {
-  const activeByGroup: Record<string, string> = {};
-  for (const group of groups) {
-    const restored = snapshot?.[group.id];
-    const active =
-      group.tabs.find((tab) => tab.id === restored) ??
-      group.tabs.find((tab) => tab.id === group.defaultActiveTabId) ??
-      group.tabs[0];
-
-    if (active) {
-      activeByGroup[group.id] = active.id;
-    }
-  }
-  return activeByGroup;
 }
 
 function toPublicView(view: WorkbenchResolvedView): WorkbenchView {
@@ -1710,6 +2039,7 @@ function createCommandContext(options: {
   mainSplitRef: RefObject<SplitViewHandle | null>;
   maximizeEditorGroup: WorkbenchHandle["maximizeEditorGroup"];
   moveEditorGroup: WorkbenchHandle["moveEditorGroup"];
+  moveEditorTab: WorkbenchHandle["moveEditorTab"];
   publicValue: WorkbenchValue;
   resetLayout: WorkbenchHandle["resetLayout"];
   restoreEditorGroups: WorkbenchHandle["restoreEditorGroups"];
@@ -1738,6 +2068,7 @@ function createCommandContext(options: {
     hidePart: options.hidePart,
     maximizeEditorGroup: options.maximizeEditorGroup,
     moveEditorGroup: options.moveEditorGroup,
+    moveEditorTab: options.moveEditorTab,
     resetLayout: options.resetLayout,
     restoreEditorGroups: options.restoreEditorGroups,
     restoreLayout: options.restoreLayout,

@@ -174,6 +174,37 @@ describe("workbench model", () => {
     ).toBe(420);
   });
 
+  it("normalizes persisted editor arrangements against the current tab catalog", () => {
+    const layout = normalizeLayout(
+      {
+        editorArrangement: {
+          groups: [
+            { activeTabId: "missing", id: "left", tabIds: ["app", "missing"] },
+            { activeTabId: "preview", id: "right", tabIds: ["preview"] },
+          ],
+          layout: {
+            children: [
+              { node: { groupId: "left", type: "group" } },
+              { node: { groupId: "right", type: "group" } },
+            ],
+            id: "root",
+            orientation: "horizontal",
+            type: "split",
+          },
+        },
+      },
+      undefined,
+      "bottom",
+      [],
+      ["app", "preview", "new"],
+    );
+
+    expect(layout.editorArrangement?.groups).toEqual([
+      { activeTabId: "app", id: "left", tabIds: ["app", "new"] },
+      { activeTabId: "preview", id: "right", tabIds: ["preview"] },
+    ]);
+  });
+
   it("drops malformed persisted state instead of leaking it into runtime layout", () => {
     const layout = normalizeLayout(
       {

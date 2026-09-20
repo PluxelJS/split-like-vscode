@@ -1,3 +1,4 @@
+/* oxlint-disable react/refs -- Stable refs back the imperative split layout and resize APIs. */
 import {
   createSplitLayout,
   resizeAtSash,

@@ -27,6 +27,12 @@ export interface MoveEditorGridGroupOptions {
   position: EditorGridDirection;
 }
 
+export interface InsertEditorGridGroupOptions {
+  groupId: string;
+  targetGroupId: string;
+  position: EditorGridDirection;
+}
+
 /** Creates the default one-group or horizontal multi-group editor layout. */
 export function createEditorGridLayout(groupIds: readonly string[]): EditorGridLayout | undefined {
   const ids = validateGroupIds(groupIds);
@@ -239,6 +245,42 @@ export function moveEditorGridGroup(
     splitIds,
   );
   return moved ?? layout;
+}
+
+/** Inserts a new group beside an existing target group. Invalid insertions are no-ops. */
+export function insertEditorGridGroup(
+  layout: EditorGridLayout | undefined,
+  options: InsertEditorGridGroupOptions,
+): EditorGridLayout | undefined {
+  if (
+    !layout ||
+    !isNonEmptyString(options.groupId) ||
+    options.groupId === options.targetGroupId ||
+    containsGroup(layout, options.groupId) ||
+    !containsGroup(layout, options.targetGroupId)
+  ) {
+    return layout;
+  }
+
+  const splitIds = new Set<string>();
+  collectSplitIds(layout, splitIds);
+  return (
+    insertGroup(
+      layout,
+      createGroupNode(options.groupId),
+      options.targetGroupId,
+      options.position,
+      splitIds,
+    ) ?? layout
+  );
+}
+
+/** Removes a group and collapses any split left with a single child. */
+export function removeEditorGridGroup(
+  layout: EditorGridLayout | undefined,
+  groupId: string,
+): EditorGridLayout | undefined {
+  return layout && isNonEmptyString(groupId) ? removeGroup(layout, groupId) : layout;
 }
 
 function appendMissingGroups(

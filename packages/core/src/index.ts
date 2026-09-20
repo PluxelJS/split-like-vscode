@@ -1,6 +1,19 @@
 export type SplitOrientation = "horizontal" | "vertical";
 
 export {
+  createEditorArrangement,
+  moveEditorTab,
+  normalizeEditorArrangement,
+  validateEditorArrangement,
+  type CreateEditorArrangementOptions,
+  type EditorArrangement,
+  type EditorArrangementGroup,
+  type EditorArrangementGroupInput,
+  type EditorTabDropTarget,
+  type MoveEditorTabOptions,
+} from "./editor-arrangement";
+
+export {
   createEditorGridLayout,
   moveEditorGridGroup,
   normalizeEditorGridLayout,
