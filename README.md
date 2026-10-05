@@ -247,3 +247,20 @@ actions and `WorkbenchHandle`. `editorArrangement` / `onEditorArrangementChange`
 ownership when an application needs it. `renderEditorTab` receives the complete accessible
 `tabProps`; `onEditorTabContextMenu` is available when the application only needs a menu hook.
 Worksplit intentionally does not define close, pin, dirty-document, or product menu semantics.
+
+`canMoveEditorTab(options, nextArrangement)` lets the application reject a complete tab-move
+candidate before either pointer feedback or imperative submission. The candidate includes removal
+of an empty source group. Returning `false` displays a blocked drag ghost and suppresses the drop
+indicator, arrangement/value callbacks, and persistence for that move. Core no-ops, including a
+sole tab dropped on its own edge, also produce no accepted indicator or arrangement change. This
+policy gates tab moves; consumers still own authored and controlled arrangements.
+
+Dragging uses a separate DOM feedback layer, with pointer updates coalesced into animation frames
+and cached group/content/tab rectangles invalidated by scroll, resize, and consumer renders.
+Tab-strip targets show an insertion line, content-center targets show the full content area, and
+edge targets show the proposed half. An edge starts within the outer tenth and remains selected
+within one third while its candidate is accepted. Tab placement and active content stay in place
+until release, which refreshes geometry, the hit point, and the policy. Escape, pointer cancellation,
+window blur, a replacement gesture, and unmount cancel the gesture; completion, cancellation, and
+callback failures release listeners, scheduled frames, observers, and feedback. Callback failures
+are rethrown after cleanup.
