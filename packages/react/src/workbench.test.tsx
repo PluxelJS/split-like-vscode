@@ -817,6 +817,160 @@ describe("Workbench", () => {
     expect(snapshot?.areaSizes?.workbench?.["workbench:primary"]).toBe(180);
   });
 
+  it("persists a resized sidebar's expanded size while hidden and restores it after remount", () => {
+    const firstHandle = createRef<WorkbenchHandle>();
+    const options = {
+      partSizes: { primary: { default: 280, min: 220, max: 420 } },
+      storageKey: "hidden-sidebar-size",
+      views: [views[0]!],
+    };
+    const first = render(<Workbench ref={firstHandle} editor="Editor" {...options} />);
+    const sash = screen.getByRole("separator", { name: "Resize pane" });
+    fireEvent.keyDown(sash, { key: "ArrowRight" });
+    fireEvent.keyDown(sash, { key: "ArrowRight" });
+    expect(firstHandle.current?.getAreaLayout("workbench")?.sizeById["workbench:primary"]).toBe(
+      300,
+    );
+    act(() => firstHandle.current?.hidePart("primary"));
+    // Current geometry remains zero; the persisted size represents the user's expanded intent.
+    expect(firstHandle.current?.getAreaLayout("workbench")?.sizeById["workbench:primary"]).toBe(0);
+    expect(firstHandle.current?.getLayout().areaSizes?.workbench?.["workbench:primary"]).toBe(300);
+    const persisted = JSON.parse(window.localStorage.getItem(options.storageKey) ?? "null");
+    expect(persisted.value.visibleParts.primary).toBe(false);
+    expect(persisted.areaSizes.workbench["workbench:primary"]).toBe(300);
+    first.unmount();
+
+    const restoredHandle = createRef<WorkbenchHandle>();
+    render(<Workbench ref={restoredHandle} editor="Editor" {...options} />);
+    expect(restoredHandle.current?.getValue().visibleParts.primary).toBe(false);
+    expect(restoredHandle.current?.getLayout().areaSizes?.workbench?.["workbench:primary"]).toBe(
+      300,
+    );
+    act(() => restoredHandle.current?.showPart("primary"));
+    expect(restoredHandle.current?.getAreaLayout("workbench")?.sizeById["workbench:primary"]).toBe(
+      300,
+    );
+  });
+
+  it.each([
+    { defaultSize: 280, expected: 280 },
+    { defaultSize: "35%", expected: 315 },
+  ] as const)(
+    "restores an initially hidden sidebar's $defaultSize default after remount",
+    ({ defaultSize, expected }) => {
+      const firstHandle = createRef<WorkbenchHandle>();
+      const options = {
+        partSizes: { primary: { default: defaultSize, min: 220, max: 420 } },
+        storageKey: "initially-hidden-sidebar-size",
+        views: [views[0]!],
+      };
+      const first = render(
+        <Workbench
+          ref={firstHandle}
+          defaultLayout={{
+            version: 1,
+            panelPosition: "bottom",
+            value: { version: 1, visibleParts: { primary: false } },
+          }}
+          editor="Editor"
+          {...options}
+        />,
+      );
+      expect(
+        firstHandle.current?.getLayout().areaSizes?.workbench?.["workbench:primary"],
+      ).toBeUndefined();
+      first.unmount();
+
+      const restoredHandle = createRef<WorkbenchHandle>();
+      render(<Workbench ref={restoredHandle} editor="Editor" {...options} />);
+      expect(restoredHandle.current?.getValue().visibleParts.primary).toBe(false);
+      act(() => restoredHandle.current?.showPart("primary"));
+      expect(
+        restoredHandle.current?.getAreaLayout("workbench")?.sizeById["workbench:primary"],
+      ).toBe(expected);
+    },
+  );
+
+  it("keeps resized editor sizes through maximize, persistence and restoration", () => {
+    const firstHandle = createRef<WorkbenchHandle>();
+    const options = { editorTabs: flatEditorTabs, storageKey: "maximized-editor-sizes" };
+    const first = render(
+      <Workbench
+        ref={firstHandle}
+        defaultLayout={{
+          version: 1,
+          panelPosition: "bottom",
+          value: { version: 1 },
+          editorArrangement: splitArrangement,
+        }}
+        {...options}
+      />,
+    );
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize pane" }), {
+      key: "ArrowRight",
+    });
+    const before = firstHandle.current?.getLayout();
+    expect(before?.areaSizes?.editorGroups?.["workbench:editor-group:left"]).toBe(460);
+    act(() => firstHandle.current?.maximizeEditorGroup("left"));
+    expect(firstHandle.current?.getLayout().editorArrangement?.layout).toEqual(
+      before?.editorArrangement?.layout,
+    );
+    expect(firstHandle.current?.getLayout().areaSizes?.editorGroups).toEqual(
+      before?.areaSizes?.editorGroups,
+    );
+    first.unmount();
+
+    const restoredHandle = createRef<WorkbenchHandle>();
+    render(<Workbench ref={restoredHandle} {...options} />);
+    expect(restoredHandle.current?.getLayout().editorArrangement?.maximizedGroupId).toBe("left");
+    expect(restoredHandle.current?.getLayout().editorArrangement?.layout).toEqual(
+      before?.editorArrangement?.layout,
+    );
+    act(() => restoredHandle.current?.restoreEditorGroups());
+    expect(restoredHandle.current?.getAreaLayout("editorGroups")?.sizeById).toEqual({
+      "workbench:editor-group:left": 460,
+      "workbench:editor-group:right": 440,
+    });
+  });
+
+  it.each([
+    { defaultSize: 280, expected: 280 },
+    { defaultSize: "35%", expected: 315 },
+  ] as const)(
+    "ignores an old hidden zero size and first reveals the $defaultSize default",
+    ({ defaultSize, expected }) => {
+      const storageKey = "old-hidden-zero-size";
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          version: 1,
+          panelPosition: "bottom",
+          value: { version: 1, visibleParts: { primary: false } },
+          areaSizes: { workbench: { "workbench:primary": 0 } },
+        }),
+      );
+      const handle = createRef<WorkbenchHandle>();
+      render(
+        <Workbench
+          ref={handle}
+          editor="Editor"
+          views={[views[0]!]}
+          storageKey={storageKey}
+          partSizes={{ primary: { default: defaultSize, min: 220, max: 420 } }}
+        />,
+      );
+      expect(handle.current?.getValue().visibleParts.primary).toBe(false);
+      expect(handle.current?.getAreaLayout("workbench")?.sizeById["workbench:primary"]).toBe(0);
+      act(() => handle.current?.showPart("primary"));
+      expect(handle.current?.getAreaLayout("workbench")?.sizeById["workbench:primary"]).toBe(
+        expected,
+      );
+      expect(handle.current?.getLayout().areaSizes?.workbench?.["workbench:primary"]).toBe(
+        expected,
+      );
+    },
+  );
+
   it("does not emit value changes when restoring equivalent state", () => {
     const handle = createRef<WorkbenchHandle>();
     const onValueChange = vi.fn<NonNullable<ComponentProps<typeof Workbench>["onValueChange"]>>();

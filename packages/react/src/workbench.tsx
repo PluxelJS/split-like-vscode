@@ -11,7 +11,6 @@ import {
   normalizeEditorGridLayout,
   setWorkbenchPartVisibility,
   validateEditorGridLayout,
-  createSplitSizeSnapshot,
   type EditorGridDirection,
   type EditorGridLayout,
   type EditorArrangement,
@@ -58,6 +57,7 @@ import {
   normalizeLayout,
   readCurrentAreaSizes,
   readStartupLayout,
+  rememberSplitSizes,
   sameWorkbenchValue,
   toCoreValue,
   toCoreValueSnapshot,
@@ -516,12 +516,24 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       [],
     );
 
+    const rememberCurrentAreaSizes = useCallback(() => {
+      const next = readCurrentAreaSizes(
+        mainSplitRef.current?.getLayout() ?? null,
+        centerSplitRef.current?.getLayout() ?? null,
+        editorGroupsSplitRef.current?.getLayout() ?? null,
+        areaSizeSnapshotRef.current,
+      );
+      areaSizeSnapshotRef.current = next;
+      return next;
+    }, []);
+
     const commitValue = useCallback(
       (next: CoreWorkbenchValue) => {
         const previousValue = readActionValue();
         if (sameWorkbenchValue(next, previousValue)) {
           return;
         }
+        rememberCurrentAreaSizes();
         if (controlledValueRef.current) {
           pendingValueRef.current = next;
           schedulePendingReset();
@@ -533,7 +545,12 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
           toPublicValue(next, activeTabsFromArrangement(readActionEditorArrangement())),
         );
       },
-      [readActionEditorArrangement, readActionValue, schedulePendingReset],
+      [
+        readActionEditorArrangement,
+        readActionValue,
+        rememberCurrentAreaSizes,
+        schedulePendingReset,
+      ],
     );
 
     const commitEditorArrangement = useCallback(
@@ -564,12 +581,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
         nextArrangement = currentEditorArrangementRef.current,
       ): WorkbenchLayout => ({
         panelPosition: nextPanelPosition,
-        areaSizes: readCurrentAreaSizes(
-          mainSplitRef.current?.getLayout() ?? null,
-          centerSplitRef.current?.getLayout() ?? null,
-          editorGroupsSplitRef.current?.getLayout() ?? null,
-          areaSizeSnapshotRef.current,
-        ),
+        areaSizes: rememberCurrentAreaSizes(),
         editorArrangement: {
           ...nextArrangement,
           layout: snapshotEditorGridLayout(nextArrangement.layout, editorSplitRefs.current),
@@ -579,7 +591,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
         version: 1,
         value: createPublicValueSnapshot(nextValue, activeTabsFromArrangement(nextArrangement)),
       }),
-      [],
+      [rememberCurrentAreaSizes],
     );
 
     const publishLayout = useCallback(
@@ -1224,7 +1236,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       }
       areaSizeSnapshotRef.current = {
         ...areaSizeSnapshotRef.current,
-        [area]: createSplitSizeSnapshot(event.layout),
+        [area]: rememberSplitSizes(event.layout, areaSizeSnapshotRef.current[area]),
       };
       publishLayout(
         createLayout(),
@@ -1243,7 +1255,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       const next = updateEditorGridSplitSizes(
         editorLayoutRef.current,
         splitId,
-        event.layout.sizeById,
+        rememberSplitSizes(event.layout),
       );
       editorLayoutRef.current = next;
       if (event.phase === "commit") {
@@ -1253,7 +1265,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       if (root) {
         areaSizeSnapshotRef.current = {
           ...areaSizeSnapshotRef.current,
-          editorGroups: createSplitSizeSnapshot(event.layout),
+          editorGroups: rememberSplitSizes(event.layout, areaSizeSnapshotRef.current.editorGroups),
         };
       }
       publishLayout(
@@ -1858,7 +1870,8 @@ function snapshotEditorGridLayout(
   if (!layout || layout.type === "group") {
     return layout ? { ...layout } : undefined;
   }
-  const liveSizes = splitRefs.get(layout.id)?.getLayout()?.sizeById;
+  const live = splitRefs.get(layout.id)?.getLayout();
+  const liveSizes = live ? rememberSplitSizes(live) : undefined;
   return {
     ...layout,
     children: layout.children.map((child) => ({
