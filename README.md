@@ -14,8 +14,8 @@ root package stays as the workspace orchestration layer; demo dependencies belon
 package.
 
 External dependencies are managed by pncat in the root `pnpm-workspace.yaml` catalogs.
-Use `pnpm catalog:add <package>` to add dependencies and `pnpm catalog:check` to check
-declarations. Normal versions use caret ranges; published React peer ranges retain their
+Use `pnpm catalog:add <package>` to add dependencies and `pnpm catalog:detect` to report
+uncatalogized declarations. Detection is advisory and does not fail CI. Normal versions use caret ranges; published React peer ranges retain their
 broader compatibility contract. The catalogs also make this checkout independently installable
 when its library packages are included in a parent workspace. The parent must provide the
 same catalog names used by those package manifests.
