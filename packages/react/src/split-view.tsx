@@ -4,6 +4,7 @@ import {
   resizeAtSash,
   resizeSplitLayout,
   setPaneSize,
+  parsePaneSize,
   type PaneConstraints,
   type PaneSizeValue,
   type PaneSnapshot,
@@ -279,7 +280,7 @@ export const SplitView = forwardRef<SplitViewHandle, SplitViewProps>(
             ),
             sizeById: nextSizeSnapshot,
           });
-          const restoredSize = size ?? nextSizeSnapshot[id];
+          const restoredSize = size ?? preferredRestoreSize(pane, nextSizeSnapshot, containerSize);
           publishLayout(
             typeof restoredSize === "number" && Number.isFinite(restoredSize)
               ? setPaneSize(revealedLayout, id, restoredSize)
@@ -598,7 +599,11 @@ export const SplitView = forwardRef<SplitViewHandle, SplitViewProps>(
         event.preventDefault();
         revealPane(
           boundary.pane.id,
-          restoredPaneSize(boundary.pane, sizeSnapshotRef.current),
+          restoredPaneSize(
+            boundary.pane,
+            sizeSnapshotRef.current,
+            layoutRef.current?.containerSize ?? 0,
+          ),
           "keyboard",
           true,
         );
@@ -1089,8 +1094,24 @@ function separatorMax(layout: SplitLayout, sashIndex: number): number {
   );
 }
 
-function restoredPaneSize(pane: PaneSnapshot, snapshots: Record<string, number>): number {
-  return Math.max(pane.minSize, Math.min(snapshots[pane.id] ?? pane.minSize, pane.maxSize));
+function preferredRestoreSize(
+  pane: Pick<PaneConstraints, "id" | "defaultSize">,
+  snapshots: Readonly<Record<string, number>>,
+  containerSize: number,
+): number | undefined {
+  const remembered = snapshots[pane.id];
+  return typeof remembered === "number" && Number.isFinite(remembered) && remembered > 0
+    ? remembered
+    : parsePaneSize(pane.defaultSize, containerSize);
+}
+
+function restoredPaneSize(
+  pane: PaneSnapshot,
+  snapshots: Record<string, number>,
+  containerSize: number,
+): number {
+  const size = preferredRestoreSize(pane, snapshots, containerSize) ?? pane.minSize;
+  return Math.max(pane.minSize, Math.min(size, pane.maxSize));
 }
 
 function restoreNewlyVisiblePaneSizes(
@@ -1103,7 +1124,7 @@ function restoreNewlyVisiblePaneSizes(
     const wasVisible = previous.panes.some((previousPane) => {
       return previousPane.id === pane.id && previousPane.visible;
     });
-    const snapshot = snapshots[pane.id];
+    const snapshot = preferredRestoreSize(pane, snapshots, next.containerSize);
     if (pane.visible && !wasVisible && typeof snapshot === "number" && Number.isFinite(snapshot)) {
       restored = setPaneSize(restored, pane.id, snapshot);
     }

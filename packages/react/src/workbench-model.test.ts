@@ -1,15 +1,47 @@
+import { createSplitLayout } from "@worksplit/core";
 import { describe, expect, it } from "vitest";
 
 import {
   createPublicValueSnapshot,
   normalizeLayout,
+  readCurrentAreaSizes,
   toCoreValue,
   toCoreValueSnapshot,
   toPublicValue,
   type WorkbenchValue,
 } from "./workbench-model";
 
+const makeLayout = (visible: string, hidden: string) =>
+  createSplitLayout({
+    containerSize: 900,
+    panes: [
+      { id: hidden, defaultSize: 280, minSize: 220, visible: false },
+      { id: visible, defaultSize: "1fr", minSize: 320 },
+      { id: "never-opened", defaultSize: 240, visible: false },
+    ],
+  });
+
 describe("workbench model", () => {
+  it("retains only known expanded sizes for hidden panes across every area", () => {
+    const workbench = makeLayout("center", "primary");
+    const center = makeLayout("editor", "panel");
+    const editorGroups = makeLayout("focused-group", "hidden-group");
+    const sizes = readCurrentAreaSizes(workbench, center, editorGroups, {
+      workbench: { primary: 300, removed: 600, "never-opened": 0 },
+      center: { panel: 260, removed: 600 },
+      editorGroups: { "hidden-group": 450, removed: 600 },
+    });
+
+    expect(sizes).toEqual({
+      workbench: { primary: 300, center: 900 },
+      center: { panel: 260, editor: 900 },
+      editorGroups: { "hidden-group": 450, "focused-group": 900 },
+    });
+    expect(workbench.sizeById.primary).toBe(0);
+    expect(center.sizeById.panel).toBe(0);
+    expect(editorGroups.sizeById["hidden-group"]).toBe(0);
+  });
+
   it("round-trips runtime values with stable part names", () => {
     const publicValue: WorkbenchValue = {
       activeByPart: {
