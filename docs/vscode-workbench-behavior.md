@@ -161,8 +161,15 @@ not synthesize or clone application content.
 
 With `editorTabs`, one editor arrangement is the runtime owner of group ids, tab order, active tabs,
 recursive topology, and maximized group. A tab id occurs exactly once. Pointer dragging supports
-reordering within a tab strip, moving between strips, and splitting at the four edges of an editor
-group. Moving the last tab out removes the empty group and collapses redundant split nodes. Invalid
+reordering within a tab strip, moving between strips, merging into existing groups, and splitting
+within the outer 10% of content along the editor area's exterior perimeter. Internal shared edges
+merge into the existing group. Same-group content drops are no-ops unless a valid exterior split
+is proposed. A rejected split falls back to a cross-group merge; rejected moves have no preview.
+The optional `canMoveEditorTab(options, nextArrangement)` validates the actual core result after
+empty-source removal, for both preview and public moves. Release rechecks the final coordinates
+and current policy. Escape, pointer cancellation, and window blur cancel the gesture.
+Content previews cover the visible content rectangle without the tab header; insertion lines use
+the current visual boundary independently of the post-removal insertion index and do not alter layout. Moving the last tab out removes the empty group and collapses redundant split nodes. Invalid
 or already-satisfied moves are no-ops. `moveEditorTab` is available on actions and the imperative
 handle; `editorArrangement` / `onEditorArrangementChange` expose the controlled form.
 

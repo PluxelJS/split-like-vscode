@@ -15,7 +15,6 @@ import {
   type EditorGridDirection,
   type EditorGridLayout,
   type EditorArrangement,
-  type EditorTabDropTarget,
   type MoveEditorTabOptions,
   type MoveEditorGridGroupOptions,
   type PaneSizeValue,
@@ -255,6 +254,11 @@ interface WorkbenchBaseProps extends Omit<
   onValueChange?: (value: WorkbenchValue) => void;
   editorArrangement?: WorkbenchEditorArrangement;
   onEditorArrangementChange?: (arrangement: WorkbenchEditorArrangement) => void;
+  /** Validate the actual post-move arrangement, including empty-group removal. */
+  canMoveEditorTab?: (
+    options: WorkbenchEditorTabMoveOptions,
+    nextArrangement: WorkbenchEditorArrangement,
+  ) => boolean;
   renderActivityItem?: (info: WorkbenchActivityItemRenderInfo) => ReactNode;
   renderEditorTabLabel?: (info: WorkbenchEditorTabLabelRenderInfo) => ReactNode;
   renderEditorTab?: (info: WorkbenchEditorTabRenderInfo) => ReactNode;
@@ -351,6 +355,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       editorGroupMinSize = centerMinSize,
       onLayout,
       onEditorArrangementChange,
+      canMoveEditorTab,
       onEditorTabContextMenu,
       onValueChange,
       partSizes,
@@ -699,11 +704,22 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       [commitEditorLayout, readActionEditorArrangement],
     );
 
+    const movePolicyRef = useRef(canMoveEditorTab);
+    movePolicyRef.current = canMoveEditorTab;
+    const readEditorTabMove = useCallback(
+      (options: WorkbenchEditorTabMoveOptions) => {
+        const current = readActionEditorArrangement();
+        const next = moveEditorArrangementTab(current, options);
+        return next !== current && (movePolicyRef.current?.(options, next) ?? true) ? next : null;
+      },
+      [readActionEditorArrangement],
+    );
     const moveEditorTab = useCallback(
       (options: WorkbenchEditorTabMoveOptions) => {
-        commitEditorArrangement(moveEditorArrangementTab(readActionEditorArrangement(), options));
+        const next = readEditorTabMove(options);
+        if (next) commitEditorArrangement(next);
       },
-      [commitEditorArrangement, readActionEditorArrangement],
+      [commitEditorArrangement, readEditorTabMove],
     );
 
     const maximizeEditorGroup = useCallback(
@@ -1021,83 +1037,113 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
     const editorDropPreviewRef = useRef<EditorDropPreview | null>(null);
     const nextEditorGroupIdRef = useRef(1);
     const suppressEditorTabClickRef = useRef(false);
-    editorDropPreviewRef.current = editorDropPreview;
+    const cancelEditorDragRef = useRef<(() => void) | null>(null);
+    const clickSuppressionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(
+      () => () => {
+        cancelEditorDragRef.current?.();
+        if (clickSuppressionTimerRef.current !== null)
+          clearTimeout(clickSuppressionTimerRef.current);
+      },
+      [],
+    );
 
     const beginEditorTabDrag = useCallback(
       (event: ReactPointerEvent<HTMLButtonElement>, groupId: string, tabId: string) => {
-        if (event.button !== 0) {
-          return;
-        }
+        if (event.button !== 0) return;
+        cancelEditorDragRef.current?.();
+        if (clickSuppressionTimerRef.current !== null)
+          clearTimeout(clickSuppressionTimerRef.current);
+        suppressEditorTabClickRef.current = false;
         const startX = event.clientX;
         const startY = event.clientY;
+        const pointerId = event.pointerId;
+        const newGroupId = `group-${accessibilityId}-${nextEditorGroupIdRef.current++}`;
         let dragging = false;
-
-        const handleMove = (pointerEvent: PointerEvent) => {
-          if (
-            !dragging &&
-            Math.hypot(pointerEvent.clientX - startX, pointerEvent.clientY - startY) < 4
-          ) {
-            return;
-          }
-          dragging = true;
-          suppressEditorTabClickRef.current = true;
-          const preview = resolveEditorDropPreview(
+        let lastPointer = { clientX: startX, clientY: startY };
+        const optionsFor = (preview: EditorDropPreview): WorkbenchEditorTabMoveOptions => ({
+          sourceGroupId: groupId,
+          tabId,
+          target:
+            preview.kind === "split"
+              ? {
+                  kind: "split",
+                  newGroupId,
+                  position: preview.position,
+                  targetGroupId: preview.groupId,
+                }
+              : { kind: "tab-strip", groupId: preview.groupId, index: preview.index },
+        });
+        const resolve = (pointerEvent: { clientX: number; clientY: number }) =>
+          resolveEditorDropPreview(
             rootRef.current,
             groupId,
             tabId,
             pointerEvent.clientX,
             pointerEvent.clientY,
+            (preview) => readEditorTabMove(optionsFor(preview)) !== null,
           );
+        const publishPreview = (preview: EditorDropPreview | null) => {
+          if (sameEditorDropPreview(editorDropPreviewRef.current, preview)) return;
           editorDropPreviewRef.current = preview;
           setEditorDropPreview(preview);
+        };
+        const handleMove = (pointerEvent: PointerEvent) => {
+          if (pointerEvent.pointerId !== pointerId) return;
+          if (
+            !dragging &&
+            Math.hypot(pointerEvent.clientX - startX, pointerEvent.clientY - startY) < 4
+          )
+            return;
+          dragging = true;
+          lastPointer = pointerEvent;
+          suppressEditorTabClickRef.current = true;
+          rootRef.current?.setAttribute("data-worksplit-editor-dragging", "true");
+          publishPreview(resolve(pointerEvent));
           pointerEvent.preventDefault();
         };
-
-        const finish = () => {
+        const handleScroll = () => {
+          if (dragging) publishPreview(resolve(lastPointer));
+        };
+        const cleanup = () => {
+          document.removeEventListener("scroll", handleScroll, true);
           document.removeEventListener("pointermove", handleMove);
           document.removeEventListener("pointerup", handleUp);
           document.removeEventListener("pointercancel", cancel);
-          const preview = editorDropPreviewRef.current;
-          editorDropPreviewRef.current = null;
-          setEditorDropPreview(null);
-          if (dragging) {
-            globalThis.setTimeout(() => {
+          document.removeEventListener("keydown", handleKeyDown);
+          window.removeEventListener("blur", cancel);
+          cancelEditorDragRef.current = null;
+          rootRef.current?.removeAttribute("data-worksplit-editor-dragging");
+          publishPreview(null);
+          if (dragging)
+            clickSuppressionTimerRef.current = setTimeout(() => {
               suppressEditorTabClickRef.current = false;
+              clickSuppressionTimerRef.current = null;
             }, 0);
-          }
-          if (!dragging || !preview) {
-            return;
-          }
-          const target: EditorTabDropTarget =
-            preview.kind === "split"
-              ? {
-                  kind: "split",
-                  newGroupId: `group-${accessibilityId}-${nextEditorGroupIdRef.current++}`,
-                  position: preview.position,
-                  targetGroupId: preview.groupId,
-                }
-              : {
-                  groupId: preview.groupId,
-                  index: preview.index,
-                  kind: "tab-strip",
-                };
-          moveEditorTab({ sourceGroupId: groupId, tabId, target });
         };
-        const handleUp = () => finish();
-        const cancel = () => {
-          dragging = false;
-          editorDropPreviewRef.current = null;
-          setEditorDropPreview(null);
-          document.removeEventListener("pointermove", handleMove);
-          document.removeEventListener("pointerup", handleUp);
-          document.removeEventListener("pointercancel", cancel);
+        const handleUp = (pointerEvent: PointerEvent) => {
+          if (pointerEvent.pointerId !== pointerId) return;
+          // The release position and latest policy are authoritative, not the last preview.
+          const preview = dragging ? resolve(pointerEvent) : null;
+          cleanup();
+          if (preview) moveEditorTab(optionsFor(preview));
         };
-
+        const cancel = () => cleanup();
+        const handleKeyDown = (keyEvent: KeyboardEvent) => {
+          if (keyEvent.key === "Escape") {
+            keyEvent.preventDefault();
+            cancel();
+          }
+        };
+        cancelEditorDragRef.current = cancel;
+        document.addEventListener("scroll", handleScroll, true);
         document.addEventListener("pointermove", handleMove);
-        document.addEventListener("pointerup", handleUp, { once: true });
+        document.addEventListener("pointerup", handleUp);
         document.addEventListener("pointercancel", cancel, { once: true });
+        document.addEventListener("keydown", handleKeyDown);
+        window.addEventListener("blur", cancel, { once: true });
       },
-      [accessibilityId, moveEditorTab],
+      [accessibilityId, moveEditorTab, readEditorTabMove],
     );
 
     const renderPartPane = (part: CoreWorkbenchPart) => {
@@ -1338,16 +1384,8 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
                   type: "button",
                 };
                 const fullRenderedTab = renderEditorTab?.({ ...tabInfo, tabProps });
-                const showInsertion =
-                  editorDropPreview?.kind === "tab-strip" &&
-                  editorDropPreview.groupId === group.id &&
-                  editorDropPreview.index === editorTabIndex;
-
                 return (
                   <Fragment key={tab.id}>
-                    {showInsertion && (
-                      <span aria-hidden className="worksplit-workbench-editor-tab-drop" />
-                    )}
                     {fullRenderedTab ?? (
                       <button {...tabProps}>
                         {renderedTab ?? (
@@ -1361,11 +1399,6 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
                   </Fragment>
                 );
               })}
-              {editorDropPreview?.kind === "tab-strip" &&
-                editorDropPreview.groupId === group.id &&
-                editorDropPreview.index === group.tabs.length && (
-                  <span aria-hidden className="worksplit-workbench-editor-tab-drop" />
-                )}
             </div>
           )}
           <div
@@ -1384,10 +1417,16 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
               value: publicValue,
             })}
           </div>
-          {editorDropPreview?.kind === "split" && editorDropPreview.groupId === group.id && (
+          {editorDropPreview?.groupId === group.id && (
             <span
               aria-hidden
-              className={`worksplit-workbench-editor-drop worksplit-workbench-editor-drop-${editorDropPreview.position}`}
+              data-worksplit-editor-drop={editorDropPreview.kind}
+              className={
+                editorDropPreview.kind === "tab-strip"
+                  ? "worksplit-workbench-editor-tab-drop"
+                  : `worksplit-workbench-editor-drop worksplit-workbench-editor-drop-${editorDropPreview.kind === "split" ? editorDropPreview.position : "merge"}`
+              }
+              style={editorDropPreview.bounds}
             />
           )}
         </section>
@@ -1592,9 +1631,12 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
   },
 );
 
-type EditorDropPreview =
+type EditorDropBounds = { left: number; top: number; width: number; height: number };
+type EditorDropPreview = { bounds: EditorDropBounds } & (
   | { groupId: string; index: number; kind: "tab-strip" }
-  | { groupId: string; kind: "split"; position: EditorGridDirection };
+  | { groupId: string; index: number; kind: "merge" }
+  | { groupId: string; kind: "split"; position: EditorGridDirection }
+);
 
 function validateEditorTabCatalog(tabs: readonly WorkbenchEditorTab[]): WorkbenchEditorTab[] {
   const ids = new Set<string>();
@@ -1701,49 +1743,109 @@ function sameEditorArrangement(left: EditorArrangement, right: EditorArrangement
   );
 }
 
+function sameEditorDropPreview(
+  left: EditorDropPreview | null,
+  right: EditorDropPreview | null,
+): boolean {
+  if (!left || !right) return left === right;
+  if (left.kind !== right.kind || left.groupId !== right.groupId) return false;
+  if (
+    Object.keys(left.bounds).some(
+      (key) =>
+        left.bounds[key as keyof EditorDropBounds] !== right.bounds[key as keyof EditorDropBounds],
+    )
+  )
+    return false;
+  return left.kind === "split" && right.kind === "split"
+    ? left.position === right.position
+    : left.kind !== "split" && right.kind !== "split" && left.index === right.index;
+}
+
 function resolveEditorDropPreview(
   root: HTMLElement | null,
   sourceGroupId: string,
   sourceTabId: string,
   clientX: number,
   clientY: number,
+  accepts: (preview: EditorDropPreview) => boolean,
 ): EditorDropPreview | null {
   const target = root?.ownerDocument.elementFromPoint(clientX, clientY);
   const groupElement = target?.closest<HTMLElement>("[data-worksplit-editor-group]");
   const groupId = groupElement?.getAttribute("data-worksplit-editor-group");
-  if (!root || !groupElement || !groupId || !root.contains(groupElement)) {
-    return null;
-  }
+  if (!root || !groupElement || !groupId || !root.contains(groupElement)) return null;
   const tabStrip = target?.closest<HTMLElement>("[data-worksplit-editor-tabs]");
   const tabElements = [
     ...groupElement.querySelectorAll<HTMLElement>("[data-worksplit-editor-tab]"),
   ];
   if (tabStrip && groupElement.contains(tabStrip)) {
-    let index = resolveTabInsertionIndex(
-      tabElements.map((tab) => tab.getBoundingClientRect()),
-      clientX,
-    );
+    const tabRects = tabElements.map((tab) => {
+      let slot = tab;
+      while (slot.parentElement && slot.parentElement !== tabStrip) slot = slot.parentElement;
+      return slot.getBoundingClientRect();
+    });
+    const rawIndex = resolveTabInsertionIndex(tabRects, clientX);
+    let index = rawIndex;
+    const stripRect = tabStrip.getBoundingClientRect();
+    const groupRect = groupElement.getBoundingClientRect();
+    const boundary = tabRects[rawIndex]?.left ?? tabRects.at(-1)?.right ?? stripRect.left;
+    const bounds = {
+      left: Math.max(stripRect.left, Math.min(boundary, stripRect.right - 2)) - groupRect.left,
+      top: stripRect.top - groupRect.top,
+      width: 2,
+      height: stripRect.height,
+    };
     if (groupId === sourceGroupId) {
       const sourceIndex = tabElements.findIndex(
         (tab) => tab.getAttribute("data-worksplit-editor-tab") === sourceTabId,
       );
-      if (sourceIndex >= 0 && index > sourceIndex) {
-        index -= 1;
-      }
+      if (sourceIndex >= 0 && index > sourceIndex) index -= 1;
     }
-    return { groupId, index, kind: "tab-strip" };
+    const preview: EditorDropPreview = { groupId, index, kind: "tab-strip", bounds };
+    return accepts(preview) ? preview : null;
   }
-  const position = resolveEditorGroupDropPosition(
-    groupElement.getBoundingClientRect(),
-    clientX,
-    clientY,
+  const content = groupElement.querySelector<HTMLElement>(
+    ":scope > .worksplit-workbench-editor-content",
   );
-  if (position === "center") {
-    const index =
-      groupId === sourceGroupId ? Math.max(0, tabElements.length - 1) : tabElements.length;
-    return { groupId, index, kind: "tab-strip" };
+  if (!content || !target || !content.contains(target)) return null;
+  const contentRect = content.getBoundingClientRect();
+  const groupRect = groupElement.getBoundingClientRect();
+  const bounds = {
+    left: contentRect.left - groupRect.left,
+    top: contentRect.top - groupRect.top,
+    width: contentRect.width,
+    height: contentRect.height,
+  };
+  const position = resolveEditorGroupDropPosition(contentRect, clientX, clientY);
+  if (position !== "center") {
+    // Only the outer perimeter creates new space. Internal shared borders merge
+    // into the existing group even when the pointer is near its content edge.
+    const rect = groupElement.getBoundingClientRect();
+    const visibleRects = [...root.querySelectorAll<HTMLElement>("[data-worksplit-editor-group]")]
+      .filter(
+        (element) =>
+          element.ownerDocument.defaultView?.getComputedStyle(element).visibility !== "hidden",
+      )
+      .map((element) => element.getBoundingClientRect())
+      .filter((item) => item.width > 0 && item.height > 0);
+    const extreme = (position === "left" || position === "top" ? Math.min : Math.max)(
+      ...visibleRects.map((item) => item[position]),
+    );
+    if (Math.abs(rect[position] - extreme) <= 1) {
+      const splitBounds = { ...bounds };
+      if (position === "left" || position === "right") {
+        splitBounds.width /= 2;
+        if (position === "right") splitBounds.left += splitBounds.width;
+      } else {
+        splitBounds.height /= 2;
+        if (position === "bottom") splitBounds.top += splitBounds.height;
+      }
+      const preview: EditorDropPreview = { groupId, kind: "split", position, bounds: splitBounds };
+      if (accepts(preview)) return preview;
+    }
   }
-  return { groupId, kind: "split", position };
+  if (groupId === sourceGroupId) return null;
+  const merge: EditorDropPreview = { groupId, index: tabElements.length, kind: "merge", bounds };
+  return accepts(merge) ? merge : null;
 }
 
 function normalizeView(view: WorkbenchView): WorkbenchResolvedView {

@@ -15,7 +15,7 @@ export function resolveEditorGroupDropPosition(
   rect: EditorDropRect,
   clientX: number,
   clientY: number,
-  edgeRatio = 0.24,
+  edgeRatio = 0.1,
 ): EditorGroupDropPosition {
   if (rect.width <= 0 || rect.height <= 0) {
     return "center";

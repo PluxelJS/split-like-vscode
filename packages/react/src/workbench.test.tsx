@@ -837,3 +837,203 @@ describe("Workbench", () => {
     expect(onValueChange).not.toHaveBeenCalled();
   });
 });
+
+function rect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  };
+}
+
+describe("editor drop acceptance", () => {
+  const initial = {
+    groups: [
+      { id: "left", tabIds: ["app", "other"], activeTabId: "app" },
+      { id: "right", tabIds: ["preview"], activeTabId: "preview" },
+    ],
+  };
+  function setup(
+    policy: NonNullable<ComponentProps<typeof Workbench>["canMoveEditorTab"]> = () => true,
+  ) {
+    const handle = createRef<WorkbenchHandle>();
+    const gate = vi.fn<NonNullable<ComponentProps<typeof Workbench>["canMoveEditorTab"]>>(policy);
+    const view = render(
+      <Workbench
+        ref={handle}
+        editorTabs={[
+          ...flatEditorTabs,
+          { id: "other", title: "Other", renderContent: () => <div>Other editor</div> },
+        ]}
+        defaultLayout={{
+          version: 1,
+          panelPosition: "bottom",
+          value: { version: 1 },
+          editorArrangement: initial,
+        }}
+        canMoveEditorTab={gate}
+      />,
+    );
+    const group = (id: string) =>
+      view.container.querySelector<HTMLElement>(`[data-worksplit-editor-group="${id}"]`)!;
+    const content = (id: string) =>
+      group(id).querySelector<HTMLElement>(".worksplit-workbench-editor-content")!;
+    for (const [id, x] of [
+      ["left", 0],
+      ["right", 454],
+    ] as const) {
+      vi.spyOn(group(id), "getBoundingClientRect").mockReturnValue(rect(x, 0, 450, 600));
+      vi.spyOn(content(id), "getBoundingClientRect").mockReturnValue(rect(x, 35, 450, 565));
+    }
+    let hit: Element = content("right");
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn<() => Element>(() => hit),
+    });
+    const start = (name = "App.tsx") =>
+      fireEvent.pointerDown(view.getByRole("tab", { name }), {
+        button: 0,
+        clientX: 20,
+        clientY: 10,
+        pointerId: 1,
+      });
+    const move = (target: Element, x: number, y: number) => {
+      hit = target;
+      fireEvent.pointerMove(document, { clientX: x, clientY: y, pointerId: 1 });
+    };
+    const up = (target: Element, x: number, y: number) => {
+      hit = target;
+      fireEvent.pointerUp(document, { clientX: x, clientY: y, pointerId: 1 });
+    };
+    return { handle, gate, view, group, content, start, move, up };
+  }
+
+  it("merges at an internal border instead of proposing another split", () => {
+    const test = setup();
+    test.start("Preview");
+    test.move(test.content("left"), 449, 300);
+    expect(test.group("left").querySelector("[data-worksplit-editor-drop=merge]")).toBeTruthy();
+    test.up(test.content("left"), 449, 300);
+    expect(test.handle.current!.getLayout().editorArrangement!.groups).toEqual([
+      { id: "left", tabIds: ["app", "other", "preview"], activeTabId: "preview" },
+    ]);
+  });
+
+  it("falls back from a rejected outer split to a valid cross-group merge", () => {
+    const test = setup((_options, next) => next.groups.length <= 2);
+    test.start();
+    test.move(test.content("right"), 902, 300);
+    expect(test.group("right").querySelector("[data-worksplit-editor-drop=merge]")).toBeTruthy();
+    expect(test.view.container.querySelector("[data-worksplit-editor-drop=split]")).toBeNull();
+    test.up(test.content("right"), 902, 300);
+    expect(
+      test.handle.current!.getLayout().editorArrangement!.groups.find((row) => row.id === "right")!
+        .tabIds,
+    ).toEqual(["preview", "app"]);
+  });
+
+  it("validates after an empty source group is removed, including public moves", () => {
+    const test = setup((_options, next) => next.groups.length <= 2);
+    test.start("Preview");
+    test.move(test.content("left"), 2, 300);
+    expect(test.group("left").querySelector(".worksplit-workbench-editor-drop-left")).toBeTruthy();
+    test.up(test.content("left"), 2, 300);
+    expect(test.handle.current!.getLayout().editorArrangement!.groups).toHaveLength(2);
+    expect(test.gate.mock.calls.every(([_options, next]) => next.groups.length === 2)).toBe(true);
+    const before = test.handle.current!.getLayout().editorArrangement;
+    act(() =>
+      test.handle.current!.moveEditorTab({
+        sourceGroupId: "left",
+        tabId: "app",
+        target: { kind: "split", newGroupId: "third", targetGroupId: "left", position: "bottom" },
+      }),
+    );
+    expect(test.handle.current!.getLayout().editorArrangement).toEqual(before);
+  });
+
+  it("does not highlight or reorder a same-group content drop", () => {
+    const test = setup(() => false);
+    test.start();
+    test.move(test.content("left"), 2, 300);
+    expect(test.view.container.querySelector(".worksplit-workbench-editor-drop")).toBeNull();
+    test.up(test.content("left"), 225, 300);
+    expect(test.handle.current!.getLayout().editorArrangement!.groups[0]!.tabIds).toEqual([
+      "app",
+      "other",
+    ]);
+  });
+
+  it("keeps content previews outside the scroll owner", () => {
+    const test = setup();
+    test.content("right").scrollTop = 120;
+    test.start();
+    test.move(test.content("right"), 650, 300);
+    const preview = test
+      .group("right")
+      .querySelector<HTMLElement>("[data-worksplit-editor-drop=merge]")!;
+    expect(preview.parentElement).toBe(test.group("right"));
+    expect(preview.style.top).toBe("35px");
+    expect(preview.style.height).toBe("565px");
+  });
+
+  it("uses the visual insertion boundary separately from the final index, updating on scroll", () => {
+    const test = setup();
+    const strip = test.group("left").querySelector<HTMLElement>("[data-worksplit-editor-tabs]")!;
+    const tabs = [...strip.querySelectorAll<HTMLElement>("[data-worksplit-editor-tab]")];
+    vi.spyOn(strip, "getBoundingClientRect").mockReturnValue(rect(0, 0, 450, 35));
+    vi.spyOn(tabs[0]!, "getBoundingClientRect").mockReturnValue(rect(0, 0, 100, 35));
+    const second = vi
+      .spyOn(tabs[1]!, "getBoundingClientRect")
+      .mockReturnValue(rect(100, 0, 100, 35));
+    test.start();
+    test.move(tabs[1]!, 180, 10);
+    const marker = () =>
+      test.group("left").querySelector<HTMLElement>("[data-worksplit-editor-drop=tab-strip]")!;
+    expect(marker().style.left).toBe("200px");
+    second.mockReturnValue(rect(80, 0, 100, 35));
+    fireEvent.scroll(strip);
+    expect(marker().style.left).toBe("180px");
+    test.up(tabs[1]!, 180, 10);
+    expect(test.handle.current!.getLayout().editorArrangement!.groups[0]!.tabIds).toEqual([
+      "other",
+      "app",
+    ]);
+  });
+
+  it("resolves the release coordinates rather than committing a stale preview", () => {
+    const test = setup();
+    test.start();
+    test.move(test.content("right"), 650, 300);
+    expect(test.view.container.querySelector("[data-worksplit-editor-drop=merge]")).toBeTruthy();
+    test.up(test.content("left"), 225, 300);
+    expect(test.handle.current!.getLayout().editorArrangement!.groups[0]!.tabIds).toEqual([
+      "app",
+      "other",
+    ]);
+  });
+
+  it.each(["escape", "blur", "cancel"] as const)(
+    "cleans the gesture on %s and ignores later pointerup",
+    (cause) => {
+      const test = setup();
+      test.start();
+      test.move(test.content("right"), 650, 300);
+      if (cause === "escape") fireEvent.keyDown(document, { key: "Escape" });
+      if (cause === "blur") fireEvent(window, new Event("blur"));
+      if (cause === "cancel") fireEvent.pointerCancel(document, { pointerId: 1 });
+      expect(test.view.container.querySelector("[data-worksplit-editor-dragging]")).toBeNull();
+      expect(test.view.container.querySelector(".worksplit-workbench-editor-drop")).toBeNull();
+      test.up(test.content("right"), 650, 300);
+      expect(test.handle.current!.getLayout().editorArrangement!.groups[0]!.tabIds).toEqual([
+        "app",
+        "other",
+      ]);
+    },
+  );
+});
