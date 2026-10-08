@@ -13,13 +13,13 @@
   },
   "dependencies": {
     "@worksplit/react": "workspace:*",
-    "lucide-react": "^1.37.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "lucide-react": "catalog:frontend",
+    "react": "catalog:frontend",
+    "react-dom": "catalog:frontend"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^6.1.1",
-    "typescript": "^7.0.2",
-    "vite": "^8.2.2"
+    "@vitejs/plugin-react": "catalog:tooling",
+    "typescript": "catalog:tooling",
+    "vite": "catalog:tooling"
   }
 }

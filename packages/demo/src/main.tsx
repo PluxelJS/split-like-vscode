@@ -258,8 +258,6 @@ function PanelHeader(props: {
   part: WorkbenchPart;
   view: WorkbenchView;
 }) {
-  const CloseIcon = closeIconByPart(props.part);
-
   return (
     <header className={["panelHeader", props.part === "panel" ? "terminalHeader" : ""].join(" ")}>
       <span>
@@ -294,7 +292,7 @@ function PanelHeader(props: {
           onClick={props.onClose}
           type="button"
         >
-          <CloseIcon size={16} />
+          {closeIconByPart(props.part)}
         </button>
       </div>
     </header>
@@ -303,12 +301,12 @@ function PanelHeader(props: {
 
 function closeIconByPart(part: WorkbenchPart) {
   if (part === "primary") {
-    return PanelLeftClose;
+    return <PanelLeftClose size={16} />;
   }
   if (part === "secondary") {
-    return PanelRightClose;
+    return <PanelRightClose size={16} />;
   }
-  return PanelBottomClose;
+  return <PanelBottomClose size={16} />;
 }
 
 const sampleCode = `const views: WorkbenchView[] = [

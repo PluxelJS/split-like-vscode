@@ -13,6 +13,13 @@ pnpm workspaces manage package linking. Turbo coordinates package task graphs an
 root package stays as the workspace orchestration layer; demo dependencies belong in the demo
 package.
 
+External dependencies are managed by pncat in the root `pnpm-workspace.yaml` catalogs.
+Use `pnpm catalog:add <package>` to add dependencies and `pnpm catalog:check` to check
+declarations. Normal versions use caret ranges; published React peer ranges retain their
+broader compatibility contract. The catalogs also make this checkout independently installable
+when its library packages are included in a parent workspace. The parent must provide the
+same catalog names used by those package manifests.
+
 The VS Code-like behavior contract is tracked in
 [docs/vscode-workbench-behavior.md](./docs/vscode-workbench-behavior.md).
 
@@ -42,8 +49,9 @@ pnpm build
 ### SplitView
 
 ```tsx
-import { useRef } from "react";
 import { Pane, SplitView, type SplitViewHandle } from "@worksplit/react";
+import { useRef } from "react";
+
 import "@worksplit/react/style.css";
 
 export function Workspace() {
@@ -96,6 +104,7 @@ import {
   type WorkbenchLayout,
   type WorkbenchView,
 } from "@worksplit/react";
+
 import "@worksplit/react/style.css";
 
 const views: WorkbenchView[] = [

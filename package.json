@@ -12,19 +12,24 @@
     "lint:fix": "oxlint -c oxlint.config.ts . --fix",
     "source-declarations:check": "node scripts/check-source-declarations.mjs",
     "test": "turbo run test",
-    "typecheck": "turbo run typecheck && tsc -p tsconfig.typecheck.json --noEmit"
+    "typecheck": "turbo run typecheck && tsc -p tsconfig.typecheck.json --noEmit",
+    "catalog:add": "pncat add",
+    "catalog:check": "pncat detect --yes",
+    "catalog:migrate": "pncat migrate --yes",
+    "catalog:clean": "pncat clean --yes"
   },
   "devDependencies": {
-    "@tsdown/css": "^0.22.14",
-    "@types/node": "^26.4.0",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.5",
-    "oxfmt": "^0.65.0",
-    "oxlint": "^1.80.0",
-    "tsdown": "^0.22.14",
-    "turbo": "^2.10.12",
-    "typescript": "^7.0.2",
-    "vitest": "5.0.0"
+    "@tsdown/css": "catalog:tooling",
+    "@types/node": "catalog:tooling",
+    "@types/react": "catalog:frontend",
+    "@types/react-dom": "catalog:frontend",
+    "oxfmt": "catalog:tooling",
+    "oxlint": "catalog:tooling",
+    "pncat": "catalog:tooling",
+    "tsdown": "catalog:tooling",
+    "turbo": "catalog:tooling",
+    "typescript": "catalog:tooling",
+    "vitest": "catalog:test"
   },
   "packageManager": "pnpm@11.8.0"
 }
