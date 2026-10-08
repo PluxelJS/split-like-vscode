@@ -1,6 +1,5 @@
 import {
   WORKBENCH_PARTS,
-  createSplitSizeSnapshot,
   normalizeEditorGridLayout,
   normalizeEditorArrangement,
   type EditorArrangement,
@@ -197,12 +196,31 @@ export function readCurrentAreaSizes(
   fallback: WorkbenchAreaSizeSnapshot,
 ): WorkbenchAreaSizeSnapshot {
   return {
-    center: centerLayout ? createSplitSizeSnapshot(centerLayout) : fallback.center,
+    center: centerLayout ? rememberSplitSizes(centerLayout, fallback.center) : fallback.center,
     editorGroups: editorGroupsLayout
-      ? createSplitSizeSnapshot(editorGroupsLayout)
+      ? rememberSplitSizes(editorGroupsLayout, fallback.editorGroups)
       : fallback.editorGroups,
-    workbench: workbenchLayout ? createSplitSizeSnapshot(workbenchLayout) : fallback.workbench,
+    workbench: workbenchLayout
+      ? rememberSplitSizes(workbenchLayout, fallback.workbench)
+      : fallback.workbench,
   };
+}
+
+/** Hidden geometry does not replace an expanded size or create a zero-sized restore preference. */
+export function rememberSplitSizes(
+  layout: SplitLayout,
+  previous?: Readonly<Record<string, number>>,
+): Record<string, number> {
+  return Object.fromEntries(
+    layout.panes.flatMap((pane) => {
+      const size = pane.visible ? pane.size : previous?.[pane.id];
+      return typeof size === "number" &&
+        Number.isFinite(size) &&
+        (pane.visible ? size >= 0 : size > 0)
+        ? [[pane.id, size]]
+        : [];
+    }),
+  );
 }
 
 export function cloneAreaSizeSnapshot(

@@ -20,6 +20,16 @@ describe("editor drag geometry", () => {
     expect(resolveEditorGroupDropPosition(rect, 120, 20)).toBe("top");
   });
 
+  it("starts a split only in the outer tenth and retains it within one third", () => {
+    expect(resolveEditorGroupDropPosition(rect, 101, 300)).toBe("center");
+    expect(resolveEditorGroupDropPosition(rect, 100, 300)).toBe("left");
+    expect(resolveEditorGroupDropPosition(rect, 300, 300, 0.1, "left")).toBe("left");
+    expect(resolveEditorGroupDropPosition(rect, 334, 300, 0.1, "left")).toBe("center");
+    expect(resolveEditorGroupDropPosition(rect, 700, 300, 0.1, "right")).toBe("right");
+    expect(resolveEditorGroupDropPosition(rect, 500, 190, 0.1, "top")).toBe("top");
+    expect(resolveEditorGroupDropPosition(rect, 500, 210, 0.1, "top")).toBe("center");
+  });
+
   it("resolves insertion points from tab midpoints", () => {
     const tabs = [
       { left: 0, right: 100 },

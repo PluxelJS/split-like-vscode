@@ -166,8 +166,25 @@ group. Moving the last tab out removes the empty group and collapses redundant s
 or already-satisfied moves are no-ops. `moveEditorTab` is available on actions and the imperative
 handle; `editorArrangement` / `onEditorArrangementChange` expose the controlled form.
 
+`canMoveEditorTab(options, nextArrangement)` gates both pointer feedback and imperative tab moves
+before pending placement, callbacks, or persistence. Its complete core candidate already removes
+an emptied source group. Rejected or already-satisfied moves display no accepted drop indicator.
+The policy does not normalize authored/controlled layouts; those remain consumer-owned.
+
+Pointer feedback uses an imperative DOM layer rather than Workbench React state. One animation
+frame consumes the latest point; cached group, content, strip, and tab rectangles refresh after
+scroll, resize, or a consumer render. Rectangle reads finish before feedback writes. Strips show
+insertion lines, center content shows a full-area overlay, and accepted edges show half-area
+overlays. Edge entry uses the outer tenth of content; an accepted edge remains selected within one
+third. Neither placement nor active content changes before release. Release reads fresh geometry
+and the latest hit point and policy; Escape, pointer cancellation, blur, replacement, and unmount
+cancel. Every completion or cancellation releases listeners, frames, observer ownership, and
+feedback. A hit-test or policy failure also cleans up before being rethrown.
+
 The default renderer supplies linked tab/tabpanel semantics and keyboard navigation. A complete
-replacement can use `renderEditorTab`, which receives the required `tabProps`. Applications may use
+replacement can use `renderEditorTab`, which receives the required `tabProps`. Tab wrappers may
+contain independent menu buttons; arrow/Home/End navigation finds sibling tabs through the group
+tab strip and keeps activation and keyboard focus together. Applications may use
 that slot or `onEditorTabContextMenu` to compose a product menu, but close, pin, dirty-document, and
 other lifecycle rules remain application-owned.
 

@@ -78,6 +78,7 @@
 
 .worksplit-workbench {
   --worksplit-workbench-activity-size: 48px;
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   width: 100%;
@@ -267,6 +268,7 @@
 }
 
 .worksplit-workbench-editor-tab {
+  touch-action: none;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -304,49 +306,57 @@
 }
 
 .worksplit-workbench-editor-tab-drop {
-  z-index: 3;
-  flex: 0 0 2px;
-  align-self: stretch;
+  position: absolute;
   background: Highlight;
-  pointer-events: none;
 }
 
 .worksplit-workbench-editor-drop {
   position: absolute;
-  z-index: 4;
   border: 1px solid Highlight;
   background: color-mix(in srgb, Highlight 18%, transparent);
+}
+
+.worksplit-workbench-editor-drag-layer {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  overflow: hidden;
+  contain: strict;
   pointer-events: none;
 }
 
-.worksplit-workbench-editor-drop-left,
-.worksplit-workbench-editor-drop-right {
+.worksplit-workbench-editor-drag-ghost {
+  position: absolute;
   top: 0;
-  bottom: 0;
-  width: 50%;
-}
-
-.worksplit-workbench-editor-drop-left {
   left: 0;
+  max-width: 240px;
+  overflow: hidden;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, CanvasText 24%, transparent);
+  border-radius: 4px;
+  background: Canvas;
+  color: CanvasText;
+  box-shadow: 0 3px 10px rgb(0 0 0 / 20%);
+  font:
+    12px/18px system-ui,
+    sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.worksplit-workbench-editor-drop-right {
-  right: 0;
+.worksplit-workbench-editor-drag-ghost.worksplit-workbench-editor-drag-blocked::before {
+  content: "⊘";
+  margin-right: 6px;
 }
 
-.worksplit-workbench-editor-drop-top,
-.worksplit-workbench-editor-drop-bottom {
-  right: 0;
-  left: 0;
-  height: 50%;
+.worksplit-workbench-editor-dragging,
+.worksplit-workbench-editor-dragging * {
+  cursor: grabbing !important;
 }
 
-.worksplit-workbench-editor-drop-top {
-  top: 0;
-}
-
-.worksplit-workbench-editor-drop-bottom {
-  bottom: 0;
+.worksplit-workbench-editor-dragging.worksplit-workbench-editor-drag-blocked,
+.worksplit-workbench-editor-dragging.worksplit-workbench-editor-drag-blocked * {
+  cursor: not-allowed !important;
 }
 
 .worksplit-workbench-collapsed-part {
