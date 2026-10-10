@@ -65,6 +65,67 @@ async function focus(element: HTMLElement) {
 }
 
 describe("Workbench editing context", () => {
+  it("renders an empty catalog fallback without an editor identity through open and close transitions", async () => {
+    const handle = createRef<WorkbenchHandle>();
+    const onChange = observeContext(handle);
+    const fallback = <button type="button">Open a document</button>;
+    const { container, rerender, unmount } = render(
+      <Workbench
+        ref={handle}
+        editorTabs={[]}
+        editor={fallback}
+        onEditingContextChange={onChange}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Open a document" })).toBeTruthy();
+    expect(handle.current?.getLayout().editorArrangement?.groups).toEqual([]);
+    expect(handle.current?.getValue().activeEditorTabs).toEqual({});
+    expect(handle.current?.getEditingContext()).toMatchObject({
+      activeGroupId: null,
+      activeTabId: null,
+    });
+    expect(container.querySelector("[data-worksplit-editor-group]")).toBeNull();
+    await focus(screen.getByRole("button", { name: "Open a document" }));
+    expect(handle.current?.getEditingContext()).toMatchObject({
+      activeGroupId: null,
+      activeTabId: null,
+      focusedArea: "editor",
+    });
+
+    rerender(
+      <Workbench
+        ref={handle}
+        editorTabs={tabs}
+        editor={fallback}
+        onEditingContextChange={onChange}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Open a document" })).toBeNull();
+    expect(handle.current?.getEditingContext().activeTabId).toBe("origin");
+
+    rerender(
+      <Workbench
+        ref={handle}
+        editorTabs={[]}
+        editor={fallback}
+        onEditingContextChange={onChange}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Open a document" })).toBeTruthy();
+    expect(handle.current?.getLayout().editorArrangement?.groups).toEqual([]);
+    expect(handle.current?.getEditingContext()).toMatchObject({
+      activeGroupId: null,
+      activeTabId: null,
+    });
+
+    unmount();
+    render(<Workbench ref={handle} editor="Single editor" />);
+    expect(handle.current?.getEditingContext()).toMatchObject({
+      activeGroupId: "main",
+      activeTabId: "editor",
+    });
+  });
+
   it("initializes a valid editor and changes global group for an already selected tab", () => {
     const handle = createRef<WorkbenchHandle>();
     const onChange = observeContext(handle);

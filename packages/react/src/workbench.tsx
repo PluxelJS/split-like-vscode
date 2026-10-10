@@ -292,7 +292,8 @@ export type WorkbenchProps =
       editorTabs?: never;
     })
   | (WorkbenchBaseProps & {
-      editor?: never;
+      /** Empty-state content when the tab catalog has no editor layout. */
+      editor?: ReactNode;
       editorGroups?: never;
       editorTabs: readonly WorkbenchEditorTab[];
     });
@@ -1527,7 +1528,11 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
 
     const renderEditorArea = () => (
       <div className="worksplit-workbench-editor worksplit-workbench-editor-grid">
-        {editorLayout ? renderEditorLayoutNode(editorLayout, true) : null}
+        {editorLayout ? (
+          renderEditorLayoutNode(editorLayout, true)
+        ) : editor === undefined ? null : (
+          <div className="worksplit-workbench-editor-content">{editor}</div>
+        )}
       </div>
     );
 

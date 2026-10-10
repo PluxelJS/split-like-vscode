@@ -257,6 +257,16 @@ ownership when an application needs it. `renderEditorTab` receives the complete 
 `tabProps`; `onEditorTabContextMenu` is available when the application only needs a menu hook.
 Worksplit intentionally does not define close, pin, dirty-document, or product menu semantics.
 
+For an empty workspace, keep the catalog API and provide `editor` as fallback content:
+
+```tsx
+<Workbench editorTabs={editorTabs} editor={<EmptyWorkspace />} />
+```
+
+When `editorTabs` is empty, this renders the fallback in the scrollable editor area without creating
+a tab or group: `getEditingContext()` reports null editor ids. Once tabs exist, only their layout
+is rendered. Passing only `editor` still uses the simple single-editor surface.
+
 `Workbench` also owns the last active editor independently of DOM focus. Read it synchronously
 through `handle.getEditingContext()`, or project the final committed context into application UI:
 

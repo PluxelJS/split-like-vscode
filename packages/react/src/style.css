@@ -231,6 +231,7 @@
 }
 
 .worksplit-workbench-editor-grid > .worksplit-workbench-editor-group,
+.worksplit-workbench-editor-grid > .worksplit-workbench-editor-content,
 .worksplit-workbench-editor-split,
 .worksplit-workbench-editor-group-pane > .worksplit-workbench-editor-group,
 .worksplit-workbench-editor-group-pane > .worksplit-workbench-editor-split {

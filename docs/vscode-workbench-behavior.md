@@ -135,9 +135,15 @@ The editor area supports three inputs:
 - `editorGroups` for static application-authored groups with tabs
 - `editorTabs` for a flat content catalog whose placement is owned by an editor arrangement
 
-The inputs are mutually exclusive. `editor` is a convenience path for a single editor surface.
+`editorGroups` and `editorTabs` are mutually exclusive. Passing only `editor` is a convenience path
+for a single editor surface.
 `editorGroups` remains compatible with authored layouts. `editorTabs` is the user-driven model: the
 application owns tab descriptors and lifecycle, while Worksplit owns placement and topology.
+
+With `editorTabs`, optional `editor` supplies empty-state content. An explicitly empty catalog
+keeps its arrangement empty and its editing-context ids null; it never synthesizes the convenience
+`main` group or `editor` tab. If there is no editor layout, the fallback fills the editor area and
+scrolls using the native content container. When tabs create a layout, the fallback is not rendered.
 
 Each editor group owns its active tab. Without an authored `editorLayout`, multiple groups are
 rendered as a horizontal split inside the center area for backward compatibility. An editor layout
