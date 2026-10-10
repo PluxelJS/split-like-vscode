@@ -155,9 +155,8 @@ deduplicated, single-child splits are collapsed, and newly declared groups are a
 group beside a direct target in a split with the same orientation inserts it into that split instead
 of creating redundant nesting.
 
-The workbench owns only spatial topology. Group descriptors, tabs, documents, sessions, and their
-lifecycle remain consumer-owned. The editor-grid actions therefore rearrange existing groups and do
-not synthesize or clone application content.
+The editor grid rearranges existing groups without synthesizing or cloning application content.
+Group and tab descriptors, documents, sessions, and their lifecycle remain consumer-owned.
 
 With `editorTabs`, one editor arrangement is the runtime owner of group ids, tab order, active tabs,
 recursive topology, and maximized group. A tab id occurs exactly once. Pointer dragging supports
@@ -192,6 +191,47 @@ Maximizing a group temporarily expands the branch leading to it and hides siblin
 changing the topology or unmounting sibling DOM. Equalization acts independently at every split
 node. `getAreaLayout("editorGroups")` continues to expose the root editor split for compatibility;
 nested split sizes are represented by `WorkbenchLayout.editorLayout`.
+
+## Editing context
+
+Worksplit owns the last operated editor separately from the currently focused DOM area:
+
+```ts
+type WorkbenchEditingContext = {
+  activeGroupId: string | null;
+  activeTabId: string | null;
+  focusedArea: "editor" | "primary" | "secondary" | "panel" | null;
+  windowFocused: boolean;
+};
+```
+
+`WorkbenchHandle.getEditingContext()` reads a valid context synchronously. The active tab is
+derived from the accepted arrangement, including in controlled mode; proposed placement never
+creates a nonexistent editor identity. The initial context selects a valid group. Native tab
+clicks, roving keys, context menus, editor-content focus and pointer presses, and
+`activateEditorTab` share that selection. Activating an already selected tab still makes its group
+the current editor. A successful tab drop or `moveEditorTab` selects its destination; vetoed,
+cancelled, and already-satisfied moves preserve the context. External arrangement changes follow
+the current tab when it moves. Closing the current tab retains its group's next selection; removing
+the group chooses a surviving editor, and removing all tabs yields null group and tab ids.
+
+`onEditingContextChange(context)` runs in a layout effect after the handle is available, and only
+when the final committed context changes. Several synchronous actions are batched by React: an
+application can place a background preview and finally activate the origin without publishing an
+intermediate editor. The getter remains synchronous during those actions. Layout sizing,
+maximization and equalization do not change editor selection by themselves; activate a target tab
+explicitly when a command should also change the current editor.
+
+DOM focus in a sidebar, part header, activity bar, or outside the workbench does not discard the
+last editor. Native DOM listeners include portals mounted into a workbench part from another React
+tree, and are removed on unmount. Window blur preserves group and tab ids, sets `windowFocused`
+false, and reports no focused area until the window gains focus. Editing context is transient and
+is not serialized in layout snapshots.
+
+Each group exposes `data-worksplit-current-editor-group="true"` or `"false"`. The root exposes
+`data-worksplit-focused-area` using the area name or `"none"`, and
+`data-worksplit-window-focused="true"` or `"false"`. These hooks let consumers style the selected
+tab differently in the current group and in other groups without dimming editor content.
 
 ## Persistence
 

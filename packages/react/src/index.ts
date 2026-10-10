@@ -20,6 +20,7 @@ export {
   type WorkbenchCommandContext,
   type WorkbenchCollapsedPartRenderInfo,
   type WorkbenchEditorGroup,
+  type WorkbenchEditingContext,
   type WorkbenchEditorGroupDirection,
   type WorkbenchEditorGroupMoveOptions,
   type WorkbenchEditorArrangement,

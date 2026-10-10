@@ -257,6 +257,26 @@ ownership when an application needs it. `renderEditorTab` receives the complete 
 `tabProps`; `onEditorTabContextMenu` is available when the application only needs a menu hook.
 Worksplit intentionally does not define close, pin, dirty-document, or product menu semantics.
 
+`Workbench` also owns the last active editor independently of DOM focus. Read it synchronously
+through `handle.getEditingContext()`, or project the final committed context into application UI:
+
+```tsx
+import { Workbench, type WorkbenchEditingContext } from "@worksplit/react";
+
+<Workbench
+  editorTabs={editorTabs}
+  onEditingContextChange={(context: WorkbenchEditingContext) => {
+    // Use context.activeTabId for routing and contextual commands.
+    // context.focusedArea describes DOM focus without clearing that editor.
+    updateEditorContext(context);
+  }}
+/>;
+```
+
+The callback runs in a layout effect after the final React commit and skips unchanged contexts.
+Synchronous actions may read the getter immediately. Sidebars, portals mounted into a workbench
+part, and window blur retain the active editor. See the [editing-context contract](docs/vscode-workbench-behavior.md#editing-context) for controlled arrangements and styling hooks.
+
 `canMoveEditorTab(options, nextArrangement)` lets the application reject a complete tab-move
 candidate before either pointer feedback or imperative submission. The candidate includes removal
 of an empty source group. Returning `false` displays a blocked drag ghost and suppresses the drop

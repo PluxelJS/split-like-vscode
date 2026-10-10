@@ -29,6 +29,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useId,
   useMemo,
   useRef,
@@ -52,6 +53,10 @@ import {
   type SplitViewPaneVisibilityChange,
 } from "./split-view";
 import {
+  useWorkbenchEditingContext,
+  type WorkbenchEditingContext,
+} from "./workbench-editing-context";
+import {
   cloneAreaSizeSnapshot,
   createPublicValueSnapshot,
   normalizeLayout,
@@ -71,6 +76,7 @@ import {
 } from "./workbench-model";
 
 export { WORKBENCH_PARTS } from "./workbench-model";
+export type { WorkbenchEditingContext } from "./workbench-editing-context";
 export type {
   WorkbenchAreaLayoutId,
   WorkbenchAreaSizeSnapshot,
@@ -222,6 +228,8 @@ export interface WorkbenchCollapsedPartRenderInfo {
 }
 
 export interface WorkbenchHandle extends WorkbenchActions {
+  /** Reads valid editor selection and current DOM focus synchronously. */
+  getEditingContext(): WorkbenchEditingContext;
   getValue(): WorkbenchValue;
   getLayout(): WorkbenchLayout;
   restoreLayout(layout: WorkbenchLayout): void;
@@ -252,6 +260,8 @@ interface WorkbenchBaseProps extends Omit<
   editorGroupMinSize?: number;
   onLayout?: (layout: WorkbenchLayout) => void;
   onValueChange?: (value: WorkbenchValue) => void;
+  /** Emits the final editing context after a React commit, only when it changes. */
+  onEditingContextChange?: (context: WorkbenchEditingContext) => void;
   editorArrangement?: WorkbenchEditorArrangement;
   onEditorArrangementChange?: (arrangement: WorkbenchEditorArrangement) => void;
   /** Vetoes the complete candidate before pointer feedback or an imperative tab move. */
@@ -358,6 +368,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       onEditorArrangementChange,
       onEditorTabContextMenu,
       onValueChange,
+      onEditingContextChange,
       partSizes,
       renderActivityItem,
       renderCollapsedPart,
@@ -494,6 +505,15 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
     onValueChangeRef.current = onValueChange;
     onLayoutRef.current = onLayout;
     storageKeyRef.current = storageKey;
+
+    const activateEditorTabRef = useRef<WorkbenchActions["activateEditorTab"]>(() => {});
+    const { editingContext, getEditingContext, activateEditingContext, publishEditingContext } =
+      useWorkbenchEditingContext({
+        arrangementRef: currentEditorArrangementRef,
+        rootRef,
+        activateEditorTabRef,
+        onChange: onEditingContextChange,
+      });
 
     const schedulePendingReset = useCallback(() => {
       if (pendingResetScheduledRef.current) {
@@ -690,15 +710,20 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
         const current = readActionEditorArrangement();
         const groupIndex = current.groups.findIndex((group) => group.id === groupId);
         const group = current.groups[groupIndex];
-        if (!group?.tabIds.includes(tabId) || group.activeTabId === tabId) {
+        if (!group?.tabIds.includes(tabId)) {
+          return;
+        }
+        activateEditingContext(groupId, tabId);
+        if (group.activeTabId === tabId) {
           return;
         }
         const groups = [...current.groups];
         groups[groupIndex] = { ...group, activeTabId: tabId };
         commitEditorArrangement({ ...current, groups });
       },
-      [commitEditorArrangement, readActionEditorArrangement],
+      [activateEditingContext, commitEditorArrangement, readActionEditorArrangement],
     );
+    activateEditorTabRef.current = activateEditorTab;
 
     const commitEditorLayout = useCallback(
       (next: EditorGridLayout | undefined) => {
@@ -733,14 +758,25 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       [readActionEditorArrangement],
     );
 
+    const commitEditorTabMove = useCallback(
+      (options: WorkbenchEditorTabMoveOptions, next: WorkbenchEditorArrangement) => {
+        commitEditorArrangement(next);
+        const target = next.groups.find((group) => group.tabIds.includes(options.tabId));
+        if (target) {
+          activateEditingContext(target.id, options.tabId);
+        }
+      },
+      [activateEditingContext, commitEditorArrangement],
+    );
+
     const moveEditorTab = useCallback(
       (options: WorkbenchEditorTabMoveOptions) => {
         const next = resolveEditorTabMove(options);
         if (next) {
-          commitEditorArrangement(next);
+          commitEditorTabMove(options, next);
         }
       },
-      [commitEditorArrangement, resolveEditorTabMove],
+      [commitEditorTabMove, resolveEditorTabMove],
     );
 
     const maximizeEditorGroup = useCallback(
@@ -873,6 +909,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
             activateEditorTab,
             activateView,
             createLayout,
+            getEditingContext,
             equalizeEditorGroups,
             publicValue: toPublicValue(
               currentValueRef.current,
@@ -905,6 +942,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
         commandRegistry,
         createLayout,
         equalizeEditorGroups,
+        getEditingContext,
         hidePart,
         maximizeEditorGroup,
         moveEditorGroup,
@@ -927,6 +965,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
         activateEditorTab,
         activateView,
         equalizeEditorGroups,
+        getEditingContext,
         getLayout: createLayout,
         getAreaLayout: (id) =>
           readAreaLayout(id, mainSplitRef, centerSplitRef, editorGroupsSplitRef),
@@ -955,6 +994,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
         activateView,
         createLayout,
         equalizeEditorGroups,
+        getEditingContext,
         hidePart,
         maximizeEditorGroup,
         moveEditorGroup,
@@ -971,6 +1011,8 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
         toggleView,
       ],
     );
+
+    useLayoutEffect(() => publishEditingContext(editingContext));
 
     const actions = useMemo<WorkbenchActions>(
       () => ({
@@ -1100,7 +1142,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
           title: tab?.title ?? tabId,
           readArrangement: readActionEditorArrangement,
           resolveMove: resolveEditorTabMove,
-          onDrop: (_options, next) => commitEditorArrangement(next),
+          onDrop: commitEditorTabMove,
           onDragStart: () => {
             suppressEditorTabClickRef.current = true;
           },
@@ -1116,7 +1158,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
           },
         });
       },
-      [accessibilityId, commitEditorArrangement, readActionEditorArrangement, resolveEditorTabMove],
+      [accessibilityId, commitEditorTabMove, readActionEditorArrangement, resolveEditorTabMove],
     );
 
     const renderPartPane = (part: CoreWorkbenchPart) => {
@@ -1174,6 +1216,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
 
       return (
         <Pane
+          data-worksplit-part={part}
           id={PART_PANE_ID[part]}
           key={part}
           minSize={sizing.min}
@@ -1289,6 +1332,7 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       return (
         <section
           data-worksplit-editor-group={group.id}
+          data-worksplit-current-editor-group={editingContext.activeGroupId === group.id}
           className={["worksplit-workbench-editor-group", group.className]
             .filter(Boolean)
             .join(" ")}
@@ -1491,6 +1535,8 @@ export const Workbench = forwardRef<WorkbenchHandle, WorkbenchProps>(
       <div
         {...rest}
         ref={rootRef}
+        data-worksplit-focused-area={editingContext.focusedArea ?? "none"}
+        data-worksplit-window-focused={editingContext.windowFocused}
         className={rootClassName}
         role="application"
         tabIndex={tabIndex ?? -1}
@@ -1989,6 +2035,7 @@ function createCommandContext(options: {
   createLayout: WorkbenchHandle["getLayout"];
   editorGroupsSplitRef: RefObject<SplitViewHandle | null>;
   equalizeEditorGroups: WorkbenchHandle["equalizeEditorGroups"];
+  getEditingContext: WorkbenchHandle["getEditingContext"];
   hidePart: WorkbenchHandle["hidePart"];
   mainSplitRef: RefObject<SplitViewHandle | null>;
   maximizeEditorGroup: WorkbenchHandle["maximizeEditorGroup"];
@@ -2010,6 +2057,7 @@ function createCommandContext(options: {
     activateEditorTab: options.activateEditorTab,
     activateView: options.activateView,
     equalizeEditorGroups: options.equalizeEditorGroups,
+    getEditingContext: options.getEditingContext,
     getLayout: options.createLayout,
     getAreaLayout: (id) =>
       readAreaLayout(
