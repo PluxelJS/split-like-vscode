@@ -130,14 +130,16 @@ receipt settles on that refusal. Native navigation promises retain upstream sema
 
 ## Content decisions, commands and resources
 
-Register a stable lifecycle with `useWorkbenchContentLifecycle`. `isDirty` is read when a document decision
-is needed. Dirty documents without `beforeLeave` are refused. A clean document closes directly.
+Register a stable lifecycle with `useWorkbenchContentLifecycle`. `isDirty` is read for content
+closing and document route-leave decisions. Dirty content without `beforeLeave` is refused.
+A clean document or tool closes directly.
 The application validates its own editing revision and save receipt before returning approval:
 
 ```tsx
 const lifecycle = useMemo(
   () => ({
     isDirty: () => draft.current.text !== draft.current.saved,
+    getCloseRevision: () => draft.current.version,
     beforeLeave: async () => {
       const version = draft.current.version;
       return (await askToDiscard()) && version === draft.current.version;
@@ -158,14 +160,26 @@ useWorkbenchContentLifecycle(lifecycle);
 This fragment belongs inside a routed component; `draft`, `input`, confirmation and business
 resources are application owned. The executable demo implements it without a second controller.
 The registration ends on route/content unmount; cleanup runs once, and its failures are reported.
-Keep `lifecycle` stable to avoid ending resources on every render. Tools may register disposal
-resources; dirty/save/focus callbacks apply to document operations. A closeable tool is removed
-directly. Use native `enableClose: false` when it should only hide. At shutdown, dispose the
-instance and then unmount the React root to end component effects and binding subscriptions.
+Keep `lifecycle` stable to avoid ending resources on every render. `getCloseRevision` reads an
+application-owned string/number that changes with its edits; Worksplit neither generates nor
+persists it. When closing multiple content instances, every dirty member needs this getter or
+the request returns `rejected` with `revision-required` before any decisions. Tokens are captured
+before the batch and checked again after all decisions, so edits to an earlier approved member
+invalidate the whole request while a later dialog waits. A member that becomes dirty also
+invalidates approval. For single close, `beforeLeave` still validates its own editing revision.
+
+Tools may register guarded closing and disposal resources; they need no Router to be dirty.
+Save and document focus callbacks apply to document operations. Use native `enableClose: false`
+when a tool should only hide. At shutdown, dispose the instance and then unmount the React root
+to end component effects and binding subscriptions.
 
 `close(id)` shares a pending decision for that instance and rechecks committed route content and
-registration before removal. New editing invalidates approval through the application callback;
-new route content invalidates it in the library. `closed` includes `cleanupErrors`, so post-removal
+registration before removal. Native pin and `enableClose: false` are respected; `close` does not
+force-remove those tabs. New editing invalidates approval through the application callback;
+new route content invalidates it in the library. Native whole-Tabset and pure deletion batches
+use the same coordinator: decisions finish before any member is removed. Identical pending requests
+share the decision; overlapping requests return `rejected` with reason `closing`. Membership or
+closeability changes during a decision invalidate approval. `closed` includes `cleanupErrors`, so post-removal
 cleanup failure never masquerades as refusal or restores a discarded instance. Closing a
 background document does not take focus; active close selects same-group MRU, then other MRU,
 then the configured home URL with an empty editing context. Late navigation cannot revive closed
@@ -188,20 +202,73 @@ A global tool uses one id; explicit multiple tools use distinct registrations/id
 Native Border tab selection collapses or expands content; removing a tool is a separate operation.
 Empty Borders auto-hide when `borderEnableAutoHide` is enabled.
 
-`dispatch(Actions...)` accepts native selection, movement, pin, maximize, weights, Border sizing
-and Border mode. Document removal routes through `close`. Identity changes, adding arbitrary
-nodes, action batches, grouping, floating/popouts and whole-Tabset close are rejected. Set
-`tabSetEnableClose: false` (or per-Tabset `enableClose: false`) in custom JSON. Initial/restored
-layouts enabling group close or popouts fail clearly. `allowDrop(tabs, target, location)` applies
-to all members of a moved group, native preview, program moves, initial admission and restoration.
-It is a trusted pure policy: do not mutate native nodes/Model. Tab groups and sublayouts are
-outside the supported snapshot shape for this release.
+Import `Actions`, `DockLocation`, native JSON types and menu helpers directly from `flexlayout-react`.
+`dispatch(Actions...)` keeps their native meaning: selection, movement, pin, maximize, weights,
+Border sizing/mode, TabGroup creation/membership/ungrouping, and ordinary node/model attributes.
+For example, a native display option needs no Worksplit-specific counterpart:
+
+```tsx
+import { Actions } from "flexlayout-react";
+
+const result = await workbench.dispatch(
+  Actions.updateModelAttributes({ tabSetEnableTabWrap: true }),
+);
+if (result.status !== "applied") console.error(result);
+```
+
+Group names, colors and collapse state stay in the native Model. TabSets and Borders can contain
+native TabGroups, including in snapshots. `getEditingContext().activeGroupId` identifies the
+containing TabSet or Border, rather than a TabGroup inside its strip. Activating a document in a
+collapsed TabGroup expands it through a native Action. Renaming a tab changes its displayed title;
+a later accepted Router location may apply its route metadata title again.
+
+Pure layout `Actions.group` batches are supported. When a batch changes or explicitly requests
+selection, document activation follows the selected document of the final central active TabSet.
+Worksplit does not reconstruct cross-space focus from intermediate Actions. A single
+`Actions.selectTab` can explicitly activate a Border document. Selecting a tool preserves the
+document URL.
+
+`deleteTabset` and batches containing only
+deletions go through guarded closing. TabSet close preserves its non-closeable direct children,
+including an entire TabGroup if any member cannot close. A pure `deleteTab` batch requires all
+its targets to be closeable; otherwise none are removed. Mixed layout/deletion
+batches are rejected; they do not apply layout changes before asking to discard content. The
+installed version needs a narrow leaf-deletion adaptation for grouped TabSet close; see the
+[coordination boundary](docs/vscode-workbench-behavior.md#coordination-boundary).
+
+`allowDrop(tabs, target, location)` applies to all members of a moved group, native preview,
+program moves, initial admission and restoration. It is a trusted pure policy: do not mutate
+native nodes/Model. A TabGroup target is checked as the actual native node and against its containing
+TabSet or Border, so grouping does not bypass a container policy. When supplied, a multi-step batch
+containing movement or grouping is rejected:
+native batches offer no per-step policy hook, and later steps can depend on earlier layout changes.
+Submit those operations individually. Without this policy, native pure layout batches stay native.
+
+Worksplit protects node identity, document component/config and document lifetimes. New routed
+documents use `open`; arbitrary node insertion and Model replacement/undo are outside this
+boundary. Floating, popouts and sublayouts remain disabled, including initial/restored JSON.
+Other native display and sizing attributes remain available through their native Actions.
 
 `getLayout()` returns a detached native snapshot. Ordinary content gets its identity and lifecycle
-registration, not the mutable Model. The optional `native` presentation slots intentionally expose
-native nodes and `getModel()`: they are trusted extensions and must not mutate the owned Model.
+registration, not the mutable Model. `Workbench.native` uses the upstream `ILayoutProps` presentation
+and interaction options, including context/overflow menus, drag rendering, resize options and
+`onModelChange`. Worksplit supplies `model`, `factory` and `onAction`; external tab insertion and
+multi-window options are excluded. These native slots intentionally expose native nodes and
+`getModel()`: they are trusted extensions and must not mutate the owned Model. `onModelChange`
+is an observer, not another layout owner. The React binding reports exceptions from
+`native.onModelChange` through `onIssue`. Other native Model/Node observers remain trusted upstream
+code; their mutations and callback failures are not sandboxed or rolled back.
 TypeScript readonly declarations cannot isolate those child references. Route hooks similarly
 expose the native Router; keep workspace ownership rules when using its escape hatches.
+
+FlexLayout exposes `onContextMenu` and menu helpers, rather than installing a context menu itself.
+The [demo](packages/demo/src/main.tsx) uses `ContextMenuBuilder` and `showPopupMenu` directly through
+`native.onContextMenu`. Pass the builder an `onAction` callback that submits to `workbench.dispatch`
+and handles its receipt; the upstream default callback would call `Model.doAction` directly and
+bypass dirty decisions. Worksplit adds no parallel menu API. Native bulk menu actions enumerate
+the visible strip tabs, so collapsed group members are not targets of “close others/right/all”.
+Whole-Tabset close covers hidden members too. Border groups are valid native layout nodes;
+the upstream standard Border menu does not offer group creation/membership commands.
 
 `getEditingContext()` distinguishes active document/group, focused document/tool/shell, and
 window focus. Tools and shell focus preserve the active document. `useWorkbenchState(instance,

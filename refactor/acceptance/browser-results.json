@@ -93,6 +93,422 @@
   },
   "suites": [
     {
+      "title": "native-layout.spec.ts",
+      "file": "native-layout.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "native menus create, rename, color, join, remove, collapse and ungroup tabs",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1480,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T18:31:39.366Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4c9e38fb9f5cdb62c0b4-8701b812156fa7aa943c",
+          "file": "native-layout.spec.ts",
+          "line": 98,
+          "column": 1
+        },
+        {
+          "title": "moving a native group through TabSet and Border retains DOM, input, scroll and resources",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 777,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T18:31:40.906Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4c9e38fb9f5cdb62c0b4-9f381a10a62012d1a149",
+          "file": "native-layout.spec.ts",
+          "line": 160,
+          "column": 1
+        },
+        {
+          "title": "native Close to the Right and Close Others coordinate the whole dirty batch",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 747,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T18:31:41.692Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4c9e38fb9f5cdb62c0b4-e3e09f246d2caa0f22e1",
+          "file": "native-layout.spec.ts",
+          "line": 237,
+          "column": 1
+        },
+        {
+          "title": "native TabSet close visits multiple dirty grouped documents and a rejection closes none",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 811,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T18:31:42.447Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4c9e38fb9f5cdb62c0b4-7987ed9d25a9b562b496",
+          "file": "native-layout.spec.ts",
+          "line": 264,
+          "column": 1
+        },
+        {
+          "title": "native TabSet close preserves a group containing a non-closeable global tool",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 494,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T18:31:43.265Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4c9e38fb9f5cdb62c0b4-521459a2ba0495f7f7de",
+          "file": "native-layout.spec.ts",
+          "line": 312,
+          "column": 1
+        },
+        {
+          "title": "editing or adding a member while TabSet close waits invalidates its approval",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 548,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T18:31:43.767Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4c9e38fb9f5cdb62c0b4-b82d64741c3481a9b702",
+          "file": "native-layout.spec.ts",
+          "line": 345,
+          "column": 1
+        },
+        {
+          "title": "editing an approved member while the next batch decision waits rejects the entire close",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 558,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T18:31:44.322Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4c9e38fb9f5cdb62c0b4-317c8b0586661b9468a4",
+          "file": "native-layout.spec.ts",
+          "line": 373,
+          "column": 1
+        },
+        {
+          "title": "a native route commit while bulk close waits keeps the new content and the other members",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 567,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T18:31:44.888Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4c9e38fb9f5cdb62c0b4-ca87e321599e940988dc",
+          "file": "native-layout.spec.ts",
+          "line": 407,
+          "column": 1
+        },
+        {
+          "title": "grouping a global tool and changing its native attributes keeps document URL ownership",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 504,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T18:31:45.462Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4c9e38fb9f5cdb62c0b4-d37d5e39f5f664772cdc",
+          "file": "native-layout.spec.ts",
+          "line": 434,
+          "column": 1
+        },
+        {
+          "title": "group snapshots restore native names, colors and collapsed state without unsupported windows",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1223,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T18:31:45.974Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4c9e38fb9f5cdb62c0b4-36129a4d673c032f90f7",
+          "file": "native-layout.spec.ts",
+          "line": 463,
+          "column": 1
+        },
+        {
+          "title": "narrow switching resolves grouped tabs to their native TabSets and preserves desktop layout",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1560,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T18:31:47.205Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4c9e38fb9f5cdb62c0b4-dd48e94ef96198c31bde",
+          "file": "native-layout.spec.ts",
+          "line": 499,
+          "column": 1
+        },
+        {
+          "title": "narrow moving the same active group into a native split reveals its new TabSet",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 629,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-10T18:31:48.772Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4c9e38fb9f5cdb62c0b4-e670614b2ca506998b22",
+          "file": "native-layout.spec.ts",
+          "line": 539,
+          "column": 1
+        }
+      ]
+    },
+    {
       "title": "workbench.spec.mjs",
       "file": "workbench.spec.mjs",
       "column": 0,
@@ -114,12 +530,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 763,
+                  "duration": 565,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:30.972Z",
+                  "startTime": "2026-10-10T18:31:49.428Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -148,12 +564,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1175,
+                  "duration": 718,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:31.813Z",
+                  "startTime": "2026-10-10T18:31:50.001Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -182,12 +598,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 660,
+                  "duration": 410,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:32.999Z",
+                  "startTime": "2026-10-10T18:31:50.728Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -216,12 +632,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 799,
+                  "duration": 692,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:33.676Z",
+                  "startTime": "2026-10-10T18:31:51.148Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -250,12 +666,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 2380,
+                  "duration": 2359,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:34.484Z",
+                  "startTime": "2026-10-10T18:31:51.849Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -284,12 +700,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 925,
+                  "duration": 872,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:36.873Z",
+                  "startTime": "2026-10-10T18:31:54.215Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -318,12 +734,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 587,
+                  "duration": 665,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:37.806Z",
+                  "startTime": "2026-10-10T18:31:55.094Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -352,12 +768,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1845,
+                  "duration": 1839,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:38.401Z",
+                  "startTime": "2026-10-10T18:31:55.767Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -386,12 +802,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 608,
+                  "duration": 556,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:40.254Z",
+                  "startTime": "2026-10-10T18:31:57.613Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -420,12 +836,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1588,
+                  "duration": 1557,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:40.871Z",
+                  "startTime": "2026-10-10T18:31:58.176Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -454,12 +870,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 545,
+                  "duration": 564,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:42.466Z",
+                  "startTime": "2026-10-10T18:31:59.743Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -488,12 +904,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 621,
+                  "duration": 580,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:43.022Z",
+                  "startTime": "2026-10-10T18:32:00.317Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -522,12 +938,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1205,
+                  "duration": 1230,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:43.650Z",
+                  "startTime": "2026-10-10T18:32:00.904Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -556,12 +972,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 855,
+                  "duration": 806,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:44.862Z",
+                  "startTime": "2026-10-10T18:32:02.142Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -590,12 +1006,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 635,
+                  "duration": 603,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:45.726Z",
+                  "startTime": "2026-10-10T18:32:02.956Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -605,7 +1021,7 @@
           ],
           "id": "df3b554a21e21ca13c43-5a3c0d01cca2906be470",
           "file": "workbench.spec.mjs",
-          "line": 337,
+          "line": 334,
           "column": 1
         },
         {
@@ -624,12 +1040,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 823,
+                  "duration": 851,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:46.369Z",
+                  "startTime": "2026-10-10T18:32:03.567Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -639,7 +1055,7 @@
           ],
           "id": "df3b554a21e21ca13c43-332abaed7ce12e0b58bf",
           "file": "workbench.spec.mjs",
-          "line": 353,
+          "line": 350,
           "column": 1
         },
         {
@@ -658,12 +1074,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 451,
+                  "duration": 474,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:47.199Z",
+                  "startTime": "2026-10-10T18:32:04.426Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -673,7 +1089,7 @@
           ],
           "id": "df3b554a21e21ca13c43-9df3709dad2b4d6ed26d",
           "file": "workbench.spec.mjs",
-          "line": 384,
+          "line": 381,
           "column": 1
         },
         {
@@ -692,12 +1108,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1163,
+                  "duration": 1142,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:47.658Z",
+                  "startTime": "2026-10-10T18:32:04.908Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -726,12 +1142,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1199,
+                  "duration": 1111,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:48.829Z",
+                  "startTime": "2026-10-10T18:32:06.059Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -760,12 +1176,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 614,
+                  "duration": 569,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:50.036Z",
+                  "startTime": "2026-10-10T18:32:07.176Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -794,12 +1210,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 911,
+                  "duration": 882,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-10T15:23:50.658Z",
+                  "startTime": "2026-10-10T18:32:07.752Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -817,9 +1233,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-10T15:23:30.498Z",
-    "duration": 21119.831,
-    "expected": 21,
+    "startTime": "2026-10-10T18:31:38.876Z",
+    "duration": 29811.174000000003,
+    "expected": 33,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

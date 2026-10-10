@@ -8,8 +8,10 @@ import {
 import { createStore } from "@tanstack/react-store";
 import {
   Actions,
+  BorderNode,
   DockLocation,
   Model,
+  TabGroupNode,
   TabNode,
   TabSetNode,
   type Action,
@@ -20,6 +22,7 @@ import type { ReactNode } from "react";
 
 import { BrowserHistoryCoordinator } from "./browser-history";
 import { createDocumentHistory, navigateDocument } from "./document-history";
+import { actionsIn, closedGroup, tabContainer, tabsIn } from "./native-layout";
 
 export interface WorkbenchRouteMetadata {
   title?: string;
@@ -61,11 +64,16 @@ export type NavigationResult =
   | { status: "failed"; stage: "load" | "navigate"; error: unknown };
 export type CloseResult =
   | { status: "closed"; id: string; cleanupErrors: readonly unknown[] }
-  | { status: "rejected"; reason: "decision" | "changed" }
+  | {
+      status: "rejected";
+      reason: "decision" | "changed" | "closing" | "not-closeable" | "revision-required";
+    }
   | { status: "superseded" }
   | { status: "failed"; error: unknown };
 export interface WorkbenchContentLifecycle {
   isDirty?: () => boolean;
+  /** Existing application editing revision. Dirty multi-content close requires this token. */
+  getCloseRevision?: () => string | number;
   /** The application must recheck its editing revision/save receipt before approving. */
   beforeLeave?: (reason: "close" | "navigate") => boolean | Promise<boolean>;
   focus?: () => void;
@@ -120,7 +128,6 @@ type DocumentSession = {
   multi: boolean;
   operation: number;
   contentVersion: number;
-  closing?: Promise<CloseResult> | undefined;
   lifecycle?: WorkbenchContentLifecycle | undefined;
   release: (() => void)[];
 };
@@ -138,6 +145,16 @@ type Internal = {
   modelAction: (action: Action) => undefined;
   report: (error: unknown) => void;
 };
+type CloseActionResult = CloseResult | { status: "applied" };
+type CloseScope = {
+  node: TabNode | TabSetNode;
+  members: readonly TabNode[];
+  closing: readonly TabNode[];
+};
+function sameMembers(before: readonly TabNode[], after: readonly TabNode[]) {
+  const expected = new Set(before);
+  return expected.size === after.length && after.every((tab) => expected.has(tab));
+}
 const instances = new WeakMap<object, Internal>();
 export function integrationState(instance: object): Internal {
   const state = instances.get(instance);
@@ -151,10 +168,9 @@ export const defaultWorkbenchLayout = (): IJsonModel => ({
   global: {
     tabEnableFloat: false,
     tabEnablePopout: false,
-    tabEnableRename: false,
     tabEnablePin: true,
     tabSetEnableDeleteWhenEmpty: false,
-    tabSetEnableClose: false,
+    tabSetEnableTabGroups: true,
   },
   borders: [],
   layout: { type: "row", children: [{ type: "tabset", id: "main", children: [] }] },
@@ -178,6 +194,10 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   private readonly mru: string[] = [];
   private readonly modelListener: (action: Action) => void;
   private readonly pending = new Set<AnyRouter>();
+  private readonly closing = new Map<
+    string,
+    { key: string; promise: Promise<CloseActionResult> }
+  >();
   private disposePromise: Promise<readonly unknown[]> | undefined;
 
   constructor(private readonly options: WorkbenchOptions<TRouter>) {
@@ -219,10 +239,6 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     };
     instances.set(this, this.state);
     model.visitNodes((node) => {
-      if (node instanceof TabSetNode && node.isEnableClose())
-        throw new Error(
-          `Disable whole-tabset close at ${node.getId()} (tabSetEnableClose/enableClose)`,
-        );
       if (!(node instanceof TabNode)) return;
       if (node.isEnableFloat() || node.isEnablePopout())
         throw new Error(`Disable unsupported popouts at ${node.getId()}`);
@@ -254,9 +270,15 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         if (
           node instanceof TabNode &&
           node.getParent() &&
-          !options.allowDrop!([node], node.getParent()!, DockLocation.CENTER)
+          !this.allowMove(node, node.getParent()!, DockLocation.CENTER)
         )
           throw new Error(`Snapshot violates docking policy at ${node.getId()}`);
+        if (
+          node instanceof TabGroupNode &&
+          node.getParent() &&
+          !this.allowMove(node, node.getParent()!, DockLocation.CENTER)
+        )
+          throw new Error(`Snapshot violates group docking policy at ${node.getId()}`);
       });
     }
     this.resolver = options.createRouter(
@@ -278,10 +300,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         (model.getNodeById(id) as TabNode).isSelected()
       )
         this.activate(id);
-      if (!this.selecting && action.type === Actions.SET_ACTIVE_TABSET) {
-        const selected = model.getActiveTabset()?.getSelectedNode();
-        if (selected && documents.has(selected.getId())) this.activate(selected.getId());
-      }
+      if (!this.selecting && action.type === Actions.SET_ACTIVE_TABSET)
+        this.activateSelected(model.getActiveTabset());
     };
     model.addChangeListener(this.modelListener);
   }
@@ -306,7 +326,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     return {
       id,
       href: session.href,
-      title: metadata?.title ?? (this.state.model.getNodeById(id) as TabNode).getName(),
+      title: (this.state.model.getNodeById(id) as TabNode).getName(),
       navigationKey: metadata?.navigationKey ?? null,
     };
   }
@@ -321,7 +341,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     const s = this.state.store.get();
     const node = s.activeDocumentId ? this.state.model.getNodeById(s.activeDocumentId) : undefined;
     return {
-      activeGroupId: node?.getParent()?.getId() ?? null,
+      activeGroupId: tabContainer(node)?.getId() ?? null,
       activeTabId: s.activeDocumentId,
       focusedArea: s.focusedArea,
       focusedTabId: s.focusedTabId,
@@ -339,8 +359,11 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     if (!(node instanceof TabNode)) return;
     this.selecting = true;
     try {
+      const hidden = closedGroup(node);
+      if (hidden)
+        this.state.model.doAction(Actions.updateNodeAttributes(hidden.getId(), { opened: true }));
       if (!node.isSelected()) this.state.model.doAction(Actions.selectTab(id));
-      const group = node.getParent();
+      const group = tabContainer(node);
       if (group instanceof TabSetNode && this.state.model.getActiveTabset() !== group)
         this.state.model.doAction(Actions.setActiveTabset(group.getId()));
     } finally {
@@ -367,69 +390,148 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   }
 
   async close(id: string): Promise<CloseResult> {
-    const session = this.state.documents.get(id);
-    if (!session) return { status: "superseded" };
-    if (session.closing) return session.closing;
-    const closing = this.closeSessions([session]);
-    session.closing = closing;
-    try {
-      const result = await closing;
-      if (result.status === "failed") this.issue("operation-failed", result.error, id);
-      if (result.status === "closed")
-        result.cleanupErrors.forEach((error) => this.issue("operation-failed", error, id));
-      return result;
-    } finally {
-      if (session.closing === closing) session.closing = undefined;
-    }
+    if (!this.state.documents.has(id)) return { status: "superseded" };
+    return this.closeAction(Actions.deleteTab(id)) as Promise<CloseResult>;
   }
 
   async dispatch(action: Action): Promise<CloseResult | { status: "applied" | "rejected" }> {
     if (this.disposed) return { status: "rejected" };
-    if (action.type === Actions.DELETE_TAB) {
-      const id = action.data.node as string;
-      if (this.state.documents.has(id)) return this.close(id);
-      if (!this.state.tools.has(id) || !this.state.model.getNodeById(id)?.isCloseable())
-        return { status: "rejected" };
-      const errors = await this.releaseTool(id);
-      this.state.model.doAction(action);
-      this.clearRemovedFocus(new Set([id]));
-      return { status: "closed", id, cleanupErrors: errors };
-    }
-    // Whole-group deletion is intentionally disabled: per-tab close is the audited removal path.
-    if (action.type === Actions.DELETE_TABSET) return { status: "rejected" };
-    const allowed = [
-      Actions.SELECT_TAB,
-      Actions.SET_ACTIVE_TABSET,
-      Actions.MOVE_NODE,
-      Actions.SET_TAB_PINNED,
-      Actions.ADJUST_WEIGHTS,
-      Actions.ADJUST_BORDER_SPLIT,
-      Actions.MAXIMIZE_TOGGLE,
-      Actions.SET_BORDER_TYPE,
-    ];
-    if (!allowed.includes(action.type)) return { status: "rejected" };
-    if (action.type === Actions.MOVE_NODE) {
-      const from = this.state.model.getNodeById(action.data.fromNode as string);
-      const to = this.state.model.getNodeById(action.data.toNode as string);
-      if (
-        !from ||
-        !to ||
-        !this.allowMove(
-          from,
-          to,
-          [
-            DockLocation.CENTER,
-            DockLocation.LEFT,
-            DockLocation.RIGHT,
-            DockLocation.TOP,
-            DockLocation.BOTTOM,
-          ].find((location) => location.getName() === action.data.location)!,
-        )
+    const actions = actionsIn(action);
+    const removals = actions.filter(
+      (a) => a.type === Actions.DELETE_TAB || a.type === Actions.DELETE_TABSET,
+    );
+    if (removals.length > 0)
+      return removals.length === actions.length ? this.closeAction(action) : { status: "rejected" };
+    // Policy callbacks can depend on the current Model. Do not simulate a second layout to
+    // predict multi-step docking batches, or partially apply them before rejecting a later step.
+    if (
+      this.options.allowDrop &&
+      actions.length > 1 &&
+      actions.some((a) =>
+        [
+          Actions.MOVE_NODE,
+          Actions.ADD_TAB_TO_NEW_GROUP,
+          Actions.UNGROUP,
+          Actions.REMOVE_TAB_FROM_GROUP,
+        ].includes(a.type),
       )
-        return { status: "rejected" };
-    }
-    this.state.model.doAction(action);
+    )
+      return { status: "rejected" };
+    if (!actions.every((a) => this.allowLayoutAction(a))) return { status: "rejected" };
+    this.applyLayoutAction(action);
     return { status: "applied" };
+  }
+
+  private allowLayoutAction(action: Action): boolean {
+    const model = this.state.model;
+    const data = action.data;
+    switch (action.type) {
+      case Actions.MOVE_NODE: {
+        const from = model.getNodeById(data.fromNode as string);
+        const to = model.getNodeById(data.toNode as string);
+        const location = [
+          DockLocation.CENTER,
+          DockLocation.LEFT,
+          DockLocation.RIGHT,
+          DockLocation.TOP,
+          DockLocation.BOTTOM,
+        ].find((candidate) => candidate.getName() === data.location);
+        return !!from && !!to && !!location && this.allowMove(from, to, location);
+      }
+      case Actions.ADD_TAB_TO_NEW_GROUP:
+      case Actions.REMOVE_TAB_FROM_GROUP:
+      case Actions.UNGROUP: {
+        const node = model.getNodeById(data.node as string);
+        if (!node) return false;
+        const target = action.type === Actions.UNGROUP ? node.getParent() : tabContainer(node);
+        return !!target && this.allowMove(node, target, DockLocation.CENTER);
+      }
+      case Actions.UPDATE_NODE_ATTRIBUTES: {
+        const node = model.getNodeById(data.node as string);
+        const json = data.json as Record<string, unknown>;
+        if (!node || !json || typeof json !== "object" || Array.isArray(json)) return false;
+        // Preserve native display/layout attributes. Identity and document session configuration
+        // belong to the coordinator; floating/sub-layout content has a different lifetime owner.
+        if (["id", "type", "component", "subLayoutId", "children"].some((key) => key in json))
+          return false;
+        if (node instanceof TabNode && this.state.documents.has(node.getId()) && "config" in json)
+          return false;
+        return !["enableFloat", "enablePopout"].some((key) => key in json && json[key] !== false);
+      }
+      case Actions.UPDATE_MODEL_ATTRIBUTES: {
+        const json = data.json as Record<string, unknown>;
+        return (
+          !!json &&
+          typeof json === "object" &&
+          !Array.isArray(json) &&
+          !["tabEnableFloat", "tabEnablePopout"].some((key) => key in json && json[key] !== false)
+        );
+      }
+      case Actions.RENAME_TAB:
+      case Actions.SELECT_TAB:
+      case Actions.SET_ACTIVE_TABSET:
+      case Actions.SET_TAB_PINNED:
+      case Actions.ADJUST_WEIGHTS:
+      case Actions.ADJUST_BORDER_SPLIT:
+      case Actions.MAXIMIZE_TOGGLE:
+      case Actions.SET_BORDER_TYPE:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private activateSelected(container: TabSetNode | BorderNode | undefined) {
+    const selected = container?.getSelectedNode();
+    if (selected && this.state.documents.has(selected.getId())) this.activate(selected.getId());
+  }
+
+  private applyLayoutAction(action: Action) {
+    const model = this.state.model;
+    const activeSet = model.getActiveTabset();
+    const previousSet = activeSet?.getId();
+    const previousSelected = activeSet?.getSelectedNode()?.getId();
+    const activeId = this.state.store.get().activeDocumentId;
+    const current = activeId ? model.getNodeById(activeId) : undefined;
+    const container = tabContainer(current);
+    const selectedHere = container?.getSelectedNode()?.getId();
+    const selecting = this.selecting;
+    this.selecting = true;
+    try {
+      model.doAction(action);
+    } finally {
+      this.selecting = selecting;
+    }
+    if (selecting) return;
+    // Native batches notify only once. Derive the final selection instead of replaying their
+    // pipeline or keeping a second selection table. Tools retain the last document URL.
+    const actions = actionsIn(action);
+    const explicit = actions.some(
+      (a) => a.type === Actions.SELECT_TAB || a.type === Actions.SET_ACTIVE_TABSET,
+    );
+    const selected =
+      actions.length === 1 && action.type === Actions.SELECT_TAB
+        ? model.getNodeById(action.data.tabNode as string)
+        : undefined;
+    const finalSet = model.getActiveTabset();
+    const centralChanged =
+      previousSet !== finalSet?.getId() ||
+      previousSelected !== finalSet?.getSelectedNode()?.getId();
+    if (
+      selected instanceof TabNode &&
+      selected.isSelected() &&
+      this.state.documents.has(selected.getId()) &&
+      tabContainer(selected) instanceof BorderNode
+    ) {
+      this.activate(selected.getId());
+    } else if (centralChanged || explicit) {
+      this.activateSelected(finalSet);
+    } else if (
+      selectedHere === activeId &&
+      container?.getSelectedNode()?.getId() !== selectedHere
+    ) {
+      this.activateSelected(container);
+    }
   }
 
   async executeCommand(id: string, options: { contentId?: string } = {}) {
@@ -658,7 +760,6 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
             config: { href: session.href, multi: session.multi },
             enableFloat: false,
             enablePopout: false,
-            enableRename: false,
           },
           target,
           DockLocation.CENTER,
@@ -849,48 +950,218 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     if (!session.lifecycle?.isDirty?.()) return true;
     return session.lifecycle.beforeLeave ? await session.lifecycle.beforeLeave(reason) : false;
   }
-  private async closeSessions(sessions: DocumentSession[]): Promise<CloseResult> {
+  /** Interpret removal effects only. Model remains the sole layout authority. */
+  private closeAction(action: Action): Promise<CloseActionResult> {
+    const model = this.state.model;
+    const actions = actionsIn(action);
+    const key = JSON.stringify(actions.map((a) => [a.type, a.data.node]).toSorted());
+    for (const a of actions) {
+      const pending = this.closing.get(a.data.node as string);
+      if (pending)
+        return Promise.resolve(
+          pending.key === key ? pending.promise : { status: "rejected", reason: "closing" },
+        );
+    }
+    const scopes: CloseScope[] = [];
+    for (const a of actions) {
+      const node = model.getNodeById(a.data.node as string);
+      if (a.type === Actions.DELETE_TAB && node instanceof TabNode) {
+        if (!node.isCloseable())
+          return Promise.resolve({ status: "rejected", reason: "not-closeable" });
+        scopes.push({ node, members: [node], closing: [node] });
+      } else if (a.type === Actions.DELETE_TABSET && node instanceof TabSetNode) {
+        if (!node.isEnableClose())
+          return Promise.resolve({ status: "rejected", reason: "not-closeable" });
+        scopes.push({
+          node,
+          members: tabsIn(node),
+          // Native Tabset close skips non-closeable children, including a group with a
+          // non-closeable member. Preserve that meaning; don't close part of that group.
+          closing: node
+            .getChildren()
+            .filter((child) => child.isCloseable())
+            .flatMap(tabsIn),
+        });
+      } else return Promise.resolve({ status: "superseded" });
+    }
+    const tabs = [
+      ...new Map(
+        scopes.flatMap((scope) => scope.closing).map((tab) => [tab.getId(), tab]),
+      ).values(),
+    ];
+    const reserved = new Set(
+      scopes.flatMap((scope) => [scope.node.getId(), ...scope.members.map((tab) => tab.getId())]),
+    );
+    for (const id of reserved) {
+      const pending = this.closing.get(id);
+      if (pending) return Promise.resolve({ status: "rejected", reason: "closing" });
+    }
+    let finish!: (result: CloseActionResult) => void;
+    const promise = new Promise<CloseActionResult>((resolve) => {
+      finish = resolve;
+    });
+    for (const id of reserved) this.closing.set(id, { key, promise });
+    // Reserve before invoking application decisions, including synchronous/reentrant ones.
+    void this.runCloseAction(scopes, tabs).then((result) => {
+      for (const id of reserved)
+        if (this.closing.get(id)?.promise === promise) this.closing.delete(id);
+      finish(result);
+      if (result.status === "failed") this.issue("operation-failed", result.error);
+      if (result.status === "closed")
+        result.cleanupErrors.forEach((error) => this.issue("operation-failed", error, result.id));
+      return undefined;
+    });
+    return promise;
+  }
+
+  private async runCloseAction(scopes: CloseScope[], tabs: TabNode[]): Promise<CloseActionResult> {
+    const sessions = tabs.flatMap((tab) => {
+      const session = this.state.documents.get(tab.getId());
+      return session ? [session] : [];
+    });
     const versions = sessions.map((s) => s.contentVersion);
     const lifecycles = sessions.map((s) => s.lifecycle);
+    const tools = tabs.filter((tab) => this.state.tools.has(tab.getId()));
+    const toolLifecycles = tools.map((tab) => this.toolLifecycles.get(tab.getId()));
     try {
-      for (const session of sessions)
-        if (!(await this.decide(session, "close")))
+      const contentLifecycles = tabs.map(
+        (tab) =>
+          this.state.documents.get(tab.getId())?.lifecycle ?? this.toolLifecycles.get(tab.getId()),
+      );
+      const dirty = contentLifecycles.map((lifecycle) => lifecycle?.isDirty?.() ?? false);
+      const revisions = contentLifecycles.map((lifecycle) => lifecycle?.getCloseRevision?.());
+      if (
+        tabs.length > 1 &&
+        contentLifecycles.some((lifecycle, i) => dirty[i] && !lifecycle?.getCloseRevision)
+      )
+        return { status: "rejected", reason: "revision-required" };
+      for (const lifecycle of contentLifecycles) {
+        if (this.disposed) return { status: "superseded" };
+        if (!lifecycle?.isDirty?.()) continue;
+        if (tabs.length > 1 && !lifecycle.getCloseRevision)
+          return { status: "rejected", reason: "revision-required" };
+        // eslint-disable-next-line no-await-in-loop -- Dirty decisions may display a dialog; ask in strip order.
+        if (!(await lifecycle.beforeLeave?.("close")))
           return { status: "rejected", reason: "decision" };
-      if (sessions.some((s) => this.state.documents.get(s.id) !== s))
+      }
+      if (this.disposed || sessions.some((s) => this.state.documents.get(s.id) !== s))
         return { status: "superseded" };
       if (
-        sessions.some((s, i) => s.contentVersion !== versions[i] || s.lifecycle !== lifecycles[i])
+        sessions.some(
+          (s, i) => s.contentVersion !== versions[i] || s.lifecycle !== lifecycles[i],
+        ) ||
+        tools.some((tab, i) => this.toolLifecycles.get(tab.getId()) !== toolLifecycles[i]) ||
+        contentLifecycles.some(
+          (lifecycle, i) =>
+            (lifecycle?.getCloseRevision &&
+              !Object.is(lifecycle.getCloseRevision(), revisions[i])) ||
+            (!dirty[i] && lifecycle?.isDirty?.()),
+        ) ||
+        tabs.some(
+          (tab) => !tab.isCloseable() || this.state.model.getNodeById(tab.getId()) !== tab,
+        ) ||
+        scopes.some((scope) => {
+          if (this.state.model.getNodeById(scope.node.getId()) !== scope.node) return true;
+          if (scope.node instanceof TabNode) return false;
+          return (
+            !scope.node.isEnableClose() ||
+            !sameMembers(scope.members, tabsIn(scope.node)) ||
+            !sameMembers(
+              scope.closing,
+              scope.node
+                .getChildren()
+                .filter((child) => child.isCloseable())
+                .flatMap(tabsIn),
+            )
+          );
+        })
       )
         return { status: "rejected", reason: "changed" };
       const active = this.state.store.get().activeDocumentId;
-      const activeSession = sessions.find((s) => s.id === active);
-      const group = activeSession
-        ? this.state.model.getNodeById(activeSession.id)?.getParent()?.getId()
+      const group = active
+        ? tabContainer(this.state.model.getNodeById(active))?.getId()
         : undefined;
-      for (const session of sessions) {
-        this.state.documents.delete(session.id);
-        const remembered = this.mru.indexOf(session.id);
-        if (remembered !== -1) this.mru.splice(remembered, 1);
-        ++session.operation;
-        this.state.model.doAction(Actions.deleteTab(session.id));
+      // FlexLayout 0.11.1 DELETE_TABSET calls .delete() on a TabGroup, which has no such method.
+      // Expand approved leaves through native Actions, then let the native Tabset action tidy
+      // its empty/group-free or non-closeable remainder. No custom layout repair or fork.
+      const removals = [
+        ...tabs.map((tab) => Actions.deleteTab(tab.getId())),
+        ...[
+          ...new Set(
+            scopes
+              .filter((scope) => scope.node instanceof TabSetNode)
+              .map((scope) => scope.node.getId()),
+          ),
+        ].map((id) => Actions.deleteTabset(id)),
+      ];
+      const selecting = this.selecting;
+      const errors: unknown[] = [];
+      let removed = tabs;
+      this.selecting = true;
+      try {
+        if (removals.length > 0)
+          this.state.model.doAction(removals.length === 1 ? removals[0]! : Actions.group(removals));
+      } catch (error) {
+        // An observer can throw after native mutation. Inspect the actual native tree and
+        // settle removed lifetimes rather than reporting a refusal and leaking their Routers.
+        const live = new Set<string>();
+        this.state.model.visitNodes((node) => {
+          if (node instanceof TabNode) live.add(node.getId());
+        });
+        removed = tabs.filter((tab) => !live.has(tab.getId()));
+        if (removed.length === 0) return { status: "failed", error };
+        errors.push(error);
+      } finally {
+        this.selecting = selecting;
       }
-      this.clearRemovedFocus(new Set(sessions.map((session) => session.id)));
-      if (activeSession) {
-        const remaining = [...this.state.documents.values()];
-        const successor =
-          this.preferred(
-            remaining.filter(
-              (s) => this.state.model.getNodeById(s.id)?.getParent()?.getId() === group,
-            ),
-          ) ?? this.preferred(remaining);
-        this.state.store.setState((s) => ({ ...s, activeDocumentId: null }));
-        ++this.focusEpoch;
-        if (successor) this.activate(successor.id);
-        else this.browser?.publish(this.options.home ?? "/", undefined, true);
+      const ids = new Set(removed.map((tab) => tab.getId()));
+      for (const session of sessions)
+        if (ids.has(session.id)) {
+          this.state.documents.delete(session.id);
+          ++session.operation;
+        }
+      try {
+        for (let i = this.mru.length - 1; i >= 0; --i)
+          if (ids.has(this.mru[i]!)) this.mru.splice(i, 1);
+        this.clearRemovedFocus(ids);
+        const activeNow = this.state.store.get().activeDocumentId;
+        if (activeNow !== null && ids.has(activeNow)) {
+          const remaining = [...this.state.documents.values()];
+          const successor =
+            this.preferred(
+              remaining.filter(
+                (s) => tabContainer(this.state.model.getNodeById(s.id))?.getId() === group,
+              ),
+            ) ?? this.preferred(remaining);
+          this.state.store.setState((s) => ({ ...s, activeDocumentId: null }));
+          ++this.focusEpoch;
+          if (successor) this.activate(successor.id);
+          else this.browser?.publish(this.options.home ?? "/", undefined, true);
+        }
+        this.changed();
+      } catch (error) {
+        errors.push(error);
       }
-      this.changed();
-      const cleanupErrors = (await Promise.all(sessions.map((s) => this.releaseSession(s)))).flat();
-      return { status: "closed", id: sessions[0]!.id, cleanupErrors };
+      const cleanupErrors = (
+        await Promise.all([
+          ...sessions.filter((s) => ids.has(s.id)).map((s) => this.releaseSession(s)),
+          ...tools
+            .filter((tab) => ids.has(tab.getId()))
+            .map((tab) => this.releaseTool(tab.getId())),
+        ])
+      ).flat();
+      cleanupErrors.push(...errors);
+      if (removed.length !== tabs.length)
+        return {
+          status: "failed",
+          error: new AggregateError(
+            cleanupErrors,
+            `Native close partially applied; removed ${[...ids].join(", ")}`,
+          ),
+        };
+      return removed.length > 0
+        ? { status: "closed", id: removed[0]!.getId(), cleanupErrors }
+        : { status: "applied" };
     } catch (error) {
       return { status: "failed", error };
     }
@@ -925,7 +1196,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   private register(id: string, lifecycle: WorkbenchContentLifecycle) {
     const session = this.state.documents.get(id);
     if (session) session.lifecycle = lifecycle;
-    else if (this.state.tools.has(id)) this.toolLifecycles.set(id, lifecycle);
+    else if (this.state.tools.has(id) && this.state.model.getNodeById(id) instanceof TabNode)
+      this.toolLifecycles.set(id, lifecycle);
     else throw new Error(`Cannot register closed content ${id}`);
     return () => {
       if (session?.lifecycle !== lifecycle && this.toolLifecycles.get(id) !== lifecycle) return;
@@ -998,11 +1270,14 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   }
   private preferred(sessions: DocumentSession[]) {
     const active = this.state.store.get().activeDocumentId;
-    return (
-      sessions.find((s) => s.id === active) ??
-      this.mru.map((id) => sessions.find((s) => s.id === id)).find(Boolean) ??
-      sessions[0]
-    );
+    const current = sessions.find((s) => s.id === active);
+    if (current) return current;
+    const candidates = new Map(sessions.map((s) => [s.id, s]));
+    for (const id of this.mru) {
+      const candidate = candidates.get(id);
+      if (candidate) return candidate;
+    }
+    return sessions[0];
   }
   private freshId() {
     let id: string;
@@ -1026,13 +1301,14 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     ]);
   }
   private allowMove(drag: Node, target: Node, location: DockLocation) {
-    const tabs: TabNode[] = [];
-    const collect = (node: Node) => {
-      if (node instanceof TabNode) tabs.push(node);
-      else node.getChildren().forEach(collect);
-    };
-    collect(drag);
-    return this.options.allowDrop?.(tabs, target, location) ?? true;
+    const policy = this.options.allowDrop;
+    if (!policy) return true;
+    const tabs = tabsIn(drag);
+    if (!policy(tabs, target, location)) return false;
+    // Keep the actual native drop target, and also check the containing space. A TabGroup
+    // nested in a Border must not bypass a central-only docking policy.
+    const container = tabContainer(target);
+    return !container || container === target || policy(tabs, container, location);
   }
   private checkHref(href: string) {
     if (!href.startsWith("/") || href.startsWith("//"))
@@ -1060,8 +1336,14 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   private validateLayout(layout: IJsonModel) {
     if (layout.layout?.type !== "row" || !Array.isArray(layout.layout.children))
       throw new Error("Snapshot requires a native FlexLayout root row");
-    if (layout.subLayouts && Object.keys(layout.subLayouts).length > 0)
+    const popouts = (layout as IJsonModel & { popouts?: Record<string, unknown> }).popouts;
+    if (
+      (layout.subLayouts && Object.keys(layout.subLayouts).length > 0) ||
+      (popouts && Object.keys(popouts).length > 0)
+    )
       throw new Error("Snapshot popouts and sublayouts are unsupported");
+    if (layout.global?.tabEnableFloat || layout.global?.tabEnablePopout)
+      throw new Error("Worksplit does not support floating or popout content");
     const ids = new Set<string>();
     const validate = (value: unknown, allowed: string[], path: string) => {
       if (!value || typeof value !== "object") throw new Error(`Invalid snapshot node at ${path}`);
@@ -1076,6 +1358,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       if (node.type === "tab") {
         if (typeof node.id !== "string" || typeof node.component !== "string")
           throw new Error(`Snapshot tab requires id and component at ${path}`);
+        if (node.subLayoutId !== undefined)
+          throw new Error(`Snapshot sublayout content is unsupported at ${path}`);
         return;
       }
       if (!Array.isArray(node.children))
@@ -1083,7 +1367,11 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       node.children.forEach((child, index) =>
         validate(
           child,
-          node.type === "row" ? ["row", "tabset"] : ["tab"],
+          node.type === "row"
+            ? ["row", "tabset"]
+            : node.type === "tabgroup"
+              ? ["tab"]
+              : ["tab", "tabgroup"],
           `${path}.children[${index}]`,
         ),
       );

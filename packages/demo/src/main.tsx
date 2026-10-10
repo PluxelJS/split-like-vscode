@@ -19,7 +19,17 @@ import {
   type WorkbenchContentLifecycle,
   type WorkbenchInstance,
 } from "@worksplit/react";
-import { Actions, DockLocation, type IJsonModel } from "flexlayout-react";
+import {
+  Actions,
+  BorderNode,
+  ContextMenuBuilder,
+  DockLocation,
+  showPopupMenu,
+  TabGroupNode,
+  TabNode,
+  TabSetNode,
+  type IJsonModel,
+} from "flexlayout-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -203,6 +213,7 @@ function DocumentPage() {
   const lifecycle = useMemo<WorkbenchContentLifecycle>(
     () => ({
       isDirty: () => editing.current.draft !== editing.current.saved,
+      getCloseRevision: () => editing.current.version,
       beforeLeave: async (reason) => {
         const version = editing.current.version;
         const allowed = await confirmLeave(id, reason);
@@ -352,11 +363,13 @@ function Inspector() {
 const layout: IJsonModel = {
   global: {
     tabEnablePin: true,
-    tabEnableRename: false,
+    tabEnableRename: true,
     tabEnableFloat: false,
     tabEnablePopout: false,
     tabSetEnableDeleteWhenEmpty: false,
-    tabSetEnableClose: false,
+    tabSetEnableClose: true,
+    tabSetEnableCloseButton: true,
+    tabSetEnableTabGroups: true,
     borderEnableAutoHide: true,
     tabSetMinWidth: 120,
     tabSetMinHeight: 140,
@@ -514,12 +527,47 @@ function Navigation() {
   );
 }
 const nativePresentation: NonNullable<import("@worksplit/react").WorkbenchProps["native"]> = {
+  onContextMenu(node, event) {
+    if (
+      !(node instanceof TabNode) &&
+      !(node instanceof TabSetNode) &&
+      !(node instanceof TabGroupNode) &&
+      !(node instanceof BorderNode)
+    )
+      return;
+    event.preventDefault();
+    event.stopPropagation();
+    const items = new ContextMenuBuilder(node, {
+      onAction: (action) => {
+        void workbench
+          .dispatch(action)
+          .then((result) => message(`Layout: ${result.status}`))
+          .catch((error: unknown) => message(`Layout failed: ${String(error)}`));
+      },
+      closeMenu: () => hide(),
+    })
+      .addStandard()
+      .addDivider()
+      .add("closeAll")
+      .add("closeRight")
+      .add("closeOthers")
+      .build();
+    const hide = showPopupMenu({
+      anchor: { x: event.clientX, y: event.clientY },
+      container: node.getLayoutRef()!,
+      items,
+      title: "Layout actions",
+      onClose: () => {},
+    });
+  },
   onRenderTab(node, values) {
     const doc = workbench.getDocument(node.getId());
     if (doc)
       values.content = (
         <span data-testid={`tab-${doc.id}`}>
-          {doc.href.split("?")[0]?.replace("/documents/", "") || "Welcome"}
+          {doc.title === "Document"
+            ? doc.href.split("?")[0]?.replace("/documents/", "")
+            : doc.title}
         </span>
       );
   },
@@ -554,6 +602,7 @@ function App() {
         <span>FlexLayout + TanStack</span>
       </header>
       <div className="toolbar">
+        <span>Right-click a tab or group for native layout actions.</span>
         <button
           onClick={() => active && void workbench.dispatch(Actions.setTabPinned(active, true))}
         >

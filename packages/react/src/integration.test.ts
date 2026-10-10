@@ -135,11 +135,10 @@ describe("real Router session coordination", () => {
     expect(workbench.getEditingContext().focusedTabId).toBeNull();
   });
 
-  it("blocks whole-group deletion and identity rewrites while allowing native layout actions", async () => {
+  it("protects identities and native closeability while passing layout actions", async () => {
     const { workbench, open } = setup();
     const result = await open("A");
     if (result.status !== "committed") throw new Error("Fixture open failed");
-    expect(await workbench.dispatch(Actions.deleteTabset("main"))).toEqual({ status: "rejected" });
     expect(
       await workbench.dispatch(
         Actions.updateNodeAttributes(result.document.id, { component: "other" }),
@@ -148,12 +147,23 @@ describe("real Router session coordination", () => {
     expect(await workbench.dispatch(Actions.setTabPinned(result.document.id, true))).toEqual({
       status: "applied",
     });
+    expect(await workbench.close(result.document.id)).toEqual({
+      status: "rejected",
+      reason: "not-closeable",
+    });
+    await workbench.dispatch(Actions.setTabPinned(result.document.id, false));
     expect(
       await workbench.dispatch(
         Actions.moveNode(result.document.id, "main", DockLocation.RIGHT, -1),
       ),
     ).toEqual({ status: "applied" });
     expect(workbench.getDocument(result.document.id)?.href).toContain("/documents/A");
+    const parent = integrationState(workbench).model.getNodeById(result.document.id)!.getParent()!;
+    expect(await workbench.dispatch(Actions.deleteTabset(parent.getId()))).toMatchObject({
+      status: "closed",
+    });
+    expect(workbench.getDocuments()).toHaveLength(0);
+    expect(integrationState(workbench).model.getFirstTabSet()).toBeDefined();
   });
 
   it("restores lazy background tabs and rejects incompatible content or format", async () => {

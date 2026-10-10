@@ -28,15 +28,27 @@ type RenderInstance = Pick<
 >;
 const ContentContext = createContext<{ id: string; instance: RenderInstance } | null>(null);
 const defaultEmpty = <p>Open a document to begin.</p>;
+const rejectExternalDrag = () => undefined;
 
 export interface WorkbenchProps {
   workbench: RenderInstance;
   navigation?: ReactNode;
   empty?: ReactNode;
-  /** Trusted native presentation slots expose nodes whose getModel() is mutable. Do not mutate it. */
-  native?: Pick<
+  /** Native Layout props. Callbacks borrow trusted nodes/Model; submit mutations through dispatch. */
+  native?: Omit<
     ILayoutProps,
-    "onRenderTab" | "onRenderTabSet" | "icons" | "i18nTranslator" | "classNameMapper" | "keyMap"
+    | "model"
+    | "factory"
+    | "onAction"
+    | "onExternalDrag"
+    | "supportsPopout"
+    | "popoutClassName"
+    | "popoutURL"
+    | "popoutWindowName"
+    | "constrainFloatPanels"
+    | "renderPopoutContent"
+    | "onPopoutOpen"
+    | "onPopoutClose"
   >;
 }
 
@@ -119,6 +131,17 @@ export function Workbench({ workbench, navigation, empty = defaultEmpty, native 
   );
   const placeholder = useMemo(() => () => <div className="worksplit-empty">{empty}</div>, [empty]);
   const [narrow, setNarrow] = useState(false);
+  const modelObserver = native?.onModelChange;
+  const observeModel = useMemo<NonNullable<ILayoutProps["onModelChange"]>>(
+    () => (model, action) => {
+      try {
+        modelObserver?.(model, action);
+      } catch (error) {
+        internal.report(error);
+      }
+    },
+    [internal, modelObserver],
+  );
   useStore(internal.store, (s) => s.revision);
   useEffect(() => {
     const element = root.current;
@@ -213,9 +236,11 @@ export function Workbench({ workbench, navigation, empty = defaultEmpty, native 
             model={internal.model}
             factory={factory}
             onAction={internal.modelAction}
+            onModelChange={observeModel}
+            onExternalDrag={rejectExternalDrag}
             supportsPopout={false}
-            invalidateTabContentOnParentRender={false}
-            onTabSetPlaceHolder={placeholder}
+            invalidateTabContentOnParentRender={native?.invalidateTabContentOnParentRender ?? false}
+            onTabSetPlaceHolder={native?.onTabSetPlaceHolder ?? placeholder}
           />
         </div>
       </div>

@@ -9,6 +9,7 @@
     "packages/core/vitest.config.mts",
     "packages/react/tsdown.config.mts",
     "packages/react/vitest.config.mts",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "packages/demo/tests/**/*.ts"
   ]
 }

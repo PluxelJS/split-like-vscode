@@ -11,9 +11,9 @@
   "results": [
     {
       "count": 2,
-      "openMs": 66.70000000111759,
+      "openMs": 55.20000000298023,
       "switchCount": 20,
-      "switchMs": 666.5999999996275,
+      "switchMs": 666.5999999977648,
       "opened": {
         "requests": 2,
         "renders": 2,
@@ -47,8 +47,8 @@
         "disposed": 0,
         "historySubscriptions": 2
       },
-      "closeReceiptMs": 28.40000000037253,
-      "closeWithFramesMs": 33.20000000111759,
+      "closeReceiptMs": 14.300000000745058,
+      "closeWithFramesMs": 16,
       "closed": {
         "requests": 2,
         "renders": 2,
@@ -72,14 +72,14 @@
         }
       ],
       "httpRequests": 2,
-      "heapBeforeBytes": 11144244,
-      "heapAfterCloseBytes": 15265108
+      "heapBeforeBytes": 11210136,
+      "heapAfterCloseBytes": 15359496
     },
     {
       "count": 10,
-      "openMs": 684.5,
+      "openMs": 331.19999999925494,
       "switchCount": 20,
-      "switchMs": 783.1000000014901,
+      "switchMs": 666.6999999992549,
       "opened": {
         "requests": 10,
         "renders": 10,
@@ -113,8 +113,8 @@
         "disposed": 0,
         "historySubscriptions": 10
       },
-      "closeReceiptMs": 152.59999999962747,
-      "closeWithFramesMs": 161.90000000037253,
+      "closeReceiptMs": 59.899999998509884,
+      "closeWithFramesMs": 64.59999999776483,
       "closed": {
         "requests": 10,
         "renders": 10,
@@ -170,14 +170,14 @@
         }
       ],
       "httpRequests": 10,
-      "heapBeforeBytes": 11156440,
-      "heapAfterCloseBytes": 17223500
+      "heapBeforeBytes": 11217972,
+      "heapAfterCloseBytes": 21053380
     },
     {
       "count": 50,
-      "openMs": 3751.4000000003725,
+      "openMs": 1758.699999999255,
       "switchCount": 20,
-      "switchMs": 1433.4000000003725,
+      "switchMs": 716.6000000014901,
       "opened": {
         "requests": 50,
         "renders": 50,
@@ -211,8 +211,8 @@
         "disposed": 0,
         "historySubscriptions": 50
       },
-      "closeReceiptMs": 778.8000000007451,
-      "closeWithFramesMs": 850.6999999992549,
+      "closeReceiptMs": 412.30000000074506,
+      "closeWithFramesMs": 446.1000000014901,
       "closed": {
         "requests": 50,
         "renders": 50,
@@ -428,8 +428,8 @@
         }
       ],
       "httpRequests": 50,
-      "heapBeforeBytes": 11157076,
-      "heapAfterCloseBytes": 40976528
+      "heapBeforeBytes": 11217176,
+      "heapAfterCloseBytes": 32618300
     }
   ]
 }

@@ -1,0 +1,923 @@
+{
+  "environment": {
+    "measuredAt": "2026-10-10T18:32:58.598Z",
+    "browser": "156.0.8078.4",
+    "node": "v24.21.0",
+    "platform": "linux x64",
+    "cpu": "11th Gen Intel(R) Core(TM) i5-11400H @ 2.70GHz",
+    "baseURL": "http://127.0.0.1:5188",
+    "server": "Vite development, local HTTP, warm server/module cache, separate cold browser contexts",
+    "viewport": "1440x900",
+    "conditions": [
+      "One real fetch per loader; zero injected delay; staleTime Infinity; two native TabSets; every opened document displayed before proceeding.",
+      "Append-open time excludes the first startup document and includes two RAF waits per open plus one final two-RAF settlement. All counters include the first document.",
+      "Groups are made with native Actions.group; no allowDrop callback. Grouping time includes one public getLayout JSON clone and traversal to find auto-generated native group ids; that lookup is also reported separately.",
+      "20 collapse/expand cycles affect both groups: 40 native GROUP batches and 80 attribute Actions, with two RAF waits after every batch.",
+      "Each native group moves to the other TabSet and back: four native GROUP batches/MoveNode Actions, with two RAF waits after every move. The grouped document ids are then selected round-robin 20 times with two RAF waits each.",
+      "Close uses a single native GROUP containing DELETE_TABSET for both TabSets. Clean documents have no confirmation delay. Receipt and two-RAF settlement times are reported separately; instance.dispose is measured afterwards.",
+      "Render counters are business component committed effects, not speculative attempts or all shell/native renders. Subscription counters cover demo business services and public history.subscribers, not all Router/Store internals.",
+      "One sample per document count. RAF waits, dev tooling, shell updates, local scheduling and JSON work are included; durations are not pure CPU costs, production throughput or P95 comparisons.",
+      "CDP Performance heap readings have no forced GC and are diagnostic observations, not proof of absence of leaks. The Inspector and host React root remain mounted until the browser context closes."
+    ]
+  },
+  "results": [
+    {
+      "count": 2,
+      "started": {
+        "requests": 1,
+        "renders": 1,
+        "mounts": 1,
+        "unmounts": 0,
+        "subscriptions": 1,
+        "routersCreated": 2,
+        "liveRouters": 2,
+        "disposed": 0,
+        "historySubscriptions": 1
+      },
+      "openMs": 46.100000001490116,
+      "opened": {
+        "requests": 2,
+        "renders": 2,
+        "mounts": 2,
+        "unmounts": 0,
+        "subscriptions": 2,
+        "routersCreated": 3,
+        "liveRouters": 3,
+        "disposed": 0,
+        "historySubscriptions": 2
+      },
+      "grouping": {
+        "nativeGroupCount": 2,
+        "createActionCount": 2,
+        "joinActionCount": 0,
+        "batchCount": 1,
+        "createReceiptMs": 7.399999998509884,
+        "joinReceiptMs": 0,
+        "groupLookupMs": 0.30000000074505806,
+        "totalWithFramesMs": 33.5,
+        "createReceipt": {
+          "status": "applied"
+        },
+        "joinReceipt": null,
+        "grouped": {
+          "requests": 2,
+          "renders": 2,
+          "mounts": 2,
+          "unmounts": 0,
+          "subscriptions": 2,
+          "routersCreated": 3,
+          "liveRouters": 3,
+          "disposed": 0,
+          "historySubscriptions": 2
+        }
+      },
+      "collapseExpand": {
+        "cycles": 20,
+        "batchCount": 40,
+        "nodeAttributeActionCount": 80,
+        "receiptMs": 337.6000000014901,
+        "totalWithFramesMs": 1333.199999999255,
+        "receipts": [
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          }
+        ],
+        "after": {
+          "requests": 2,
+          "renders": 2,
+          "mounts": 2,
+          "unmounts": 0,
+          "subscriptions": 2,
+          "routersCreated": 3,
+          "liveRouters": 3,
+          "disposed": 0,
+          "historySubscriptions": 2
+        }
+      },
+      "movement": {
+        "groupCount": 2,
+        "batchCount": 4,
+        "nodeMoveActionCount": 4,
+        "receiptMs": 21,
+        "totalWithFramesMs": 133.30000000074506,
+        "receipts": [
+          {
+            "groupId": "#144b48ed-7087-4628-a786-a269b5d226d0",
+            "target": "right",
+            "receipt": {
+              "status": "applied"
+            }
+          },
+          {
+            "groupId": "#144b48ed-7087-4628-a786-a269b5d226d0",
+            "target": "left",
+            "receipt": {
+              "status": "applied"
+            }
+          },
+          {
+            "groupId": "#3392edbc-e54e-427f-8448-b789d64a75ff",
+            "target": "left",
+            "receipt": {
+              "status": "applied"
+            }
+          },
+          {
+            "groupId": "#3392edbc-e54e-427f-8448-b789d64a75ff",
+            "target": "right",
+            "receipt": {
+              "status": "applied"
+            }
+          }
+        ],
+        "after": {
+          "requests": 2,
+          "renders": 2,
+          "mounts": 2,
+          "unmounts": 0,
+          "subscriptions": 2,
+          "routersCreated": 3,
+          "liveRouters": 3,
+          "disposed": 0,
+          "historySubscriptions": 2
+        }
+      },
+      "switching": {
+        "count": 20,
+        "totalWithFramesMs": 666.5999999977648,
+        "after": {
+          "requests": 2,
+          "renders": 2,
+          "mounts": 2,
+          "unmounts": 0,
+          "subscriptions": 2,
+          "routersCreated": 3,
+          "liveRouters": 3,
+          "disposed": 0,
+          "historySubscriptions": 2
+        }
+      },
+      "closing": {
+        "batchCount": 1,
+        "tabsetDeleteActionCount": 2,
+        "closeReceiptMs": 9.599999997764826,
+        "closeWithFramesMs": 28.5,
+        "closed": {
+          "requests": 2,
+          "renders": 2,
+          "mounts": 2,
+          "unmounts": 2,
+          "subscriptions": 0,
+          "routersCreated": 3,
+          "liveRouters": 1,
+          "disposed": 2,
+          "historySubscriptions": 0
+        },
+        "remaining": 0,
+        "receipt": {
+          "status": "closed",
+          "id": "document-f0dfdb3ea14b929b201a660b2810e1a7-1",
+          "cleanupErrors": []
+        }
+      },
+      "disposal": {
+        "disposeReceiptMs": 2.5,
+        "disposeWithFramesMs": 30.5,
+        "cleanupErrors": [],
+        "disposed": {
+          "requests": 2,
+          "renders": 2,
+          "mounts": 2,
+          "unmounts": 2,
+          "subscriptions": 0,
+          "routersCreated": 3,
+          "liveRouters": 0,
+          "disposed": 2,
+          "historySubscriptions": 0
+        }
+      },
+      "httpRequests": 2,
+      "heapBeforeBytes": 11212044,
+      "heapAfterLayoutBytes": 18791576,
+      "heapAfterCloseBytes": 12812232,
+      "heapAfterDisposeBytes": 13153416
+    },
+    {
+      "count": 10,
+      "started": {
+        "requests": 1,
+        "renders": 1,
+        "mounts": 1,
+        "unmounts": 0,
+        "subscriptions": 1,
+        "routersCreated": 2,
+        "liveRouters": 2,
+        "disposed": 0,
+        "historySubscriptions": 1
+      },
+      "openMs": 324.70000000298023,
+      "opened": {
+        "requests": 10,
+        "renders": 10,
+        "mounts": 10,
+        "unmounts": 0,
+        "subscriptions": 10,
+        "routersCreated": 11,
+        "liveRouters": 11,
+        "disposed": 0,
+        "historySubscriptions": 10
+      },
+      "grouping": {
+        "nativeGroupCount": 2,
+        "createActionCount": 2,
+        "joinActionCount": 8,
+        "batchCount": 2,
+        "createReceiptMs": 22.100000001490116,
+        "joinReceiptMs": 21.299999997019768,
+        "groupLookupMs": 0.30000000074505806,
+        "totalWithFramesMs": 50.100000001490116,
+        "createReceipt": {
+          "status": "applied"
+        },
+        "joinReceipt": {
+          "status": "applied"
+        },
+        "grouped": {
+          "requests": 10,
+          "renders": 10,
+          "mounts": 10,
+          "unmounts": 0,
+          "subscriptions": 10,
+          "routersCreated": 11,
+          "liveRouters": 11,
+          "disposed": 0,
+          "historySubscriptions": 10
+        }
+      },
+      "collapseExpand": {
+        "cycles": 20,
+        "batchCount": 40,
+        "nodeAttributeActionCount": 80,
+        "receiptMs": 491.09999999403954,
+        "totalWithFramesMs": 1333.199999999255,
+        "receipts": [
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          }
+        ],
+        "after": {
+          "requests": 10,
+          "renders": 10,
+          "mounts": 10,
+          "unmounts": 0,
+          "subscriptions": 10,
+          "routersCreated": 11,
+          "liveRouters": 11,
+          "disposed": 0,
+          "historySubscriptions": 10
+        }
+      },
+      "movement": {
+        "groupCount": 2,
+        "batchCount": 4,
+        "nodeMoveActionCount": 4,
+        "receiptMs": 19.200000002980232,
+        "totalWithFramesMs": 133.30000000074506,
+        "receipts": [
+          {
+            "groupId": "#9d7e0823-1730-423b-82cb-4a0ccc0f0233",
+            "target": "right",
+            "receipt": {
+              "status": "applied"
+            }
+          },
+          {
+            "groupId": "#9d7e0823-1730-423b-82cb-4a0ccc0f0233",
+            "target": "left",
+            "receipt": {
+              "status": "applied"
+            }
+          },
+          {
+            "groupId": "#284c6e34-9780-465f-a9d0-bb64afcb4c36",
+            "target": "left",
+            "receipt": {
+              "status": "applied"
+            }
+          },
+          {
+            "groupId": "#284c6e34-9780-465f-a9d0-bb64afcb4c36",
+            "target": "right",
+            "receipt": {
+              "status": "applied"
+            }
+          }
+        ],
+        "after": {
+          "requests": 10,
+          "renders": 10,
+          "mounts": 10,
+          "unmounts": 0,
+          "subscriptions": 10,
+          "routersCreated": 11,
+          "liveRouters": 11,
+          "disposed": 0,
+          "historySubscriptions": 10
+        }
+      },
+      "switching": {
+        "count": 20,
+        "totalWithFramesMs": 666.5999999977648,
+        "after": {
+          "requests": 10,
+          "renders": 10,
+          "mounts": 10,
+          "unmounts": 0,
+          "subscriptions": 10,
+          "routersCreated": 11,
+          "liveRouters": 11,
+          "disposed": 0,
+          "historySubscriptions": 10
+        }
+      },
+      "closing": {
+        "batchCount": 1,
+        "tabsetDeleteActionCount": 2,
+        "closeReceiptMs": 11.800000000745058,
+        "closeWithFramesMs": 29.5,
+        "closed": {
+          "requests": 10,
+          "renders": 10,
+          "mounts": 10,
+          "unmounts": 10,
+          "subscriptions": 0,
+          "routersCreated": 11,
+          "liveRouters": 1,
+          "disposed": 10,
+          "historySubscriptions": 0
+        },
+        "remaining": 0,
+        "receipt": {
+          "status": "closed",
+          "id": "document-1d9df99e946be04455c5f8cea8b8154c-1",
+          "cleanupErrors": []
+        }
+      },
+      "disposal": {
+        "disposeReceiptMs": 2.600000001490116,
+        "disposeWithFramesMs": 30.800000000745058,
+        "cleanupErrors": [],
+        "disposed": {
+          "requests": 10,
+          "renders": 10,
+          "mounts": 10,
+          "unmounts": 10,
+          "subscriptions": 0,
+          "routersCreated": 11,
+          "liveRouters": 0,
+          "disposed": 10,
+          "historySubscriptions": 0
+        }
+      },
+      "httpRequests": 10,
+      "heapBeforeBytes": 11225328,
+      "heapAfterLayoutBytes": 21483320,
+      "heapAfterCloseBytes": 22595024,
+      "heapAfterDisposeBytes": 22932240
+    },
+    {
+      "count": 50,
+      "started": {
+        "requests": 1,
+        "renders": 1,
+        "mounts": 1,
+        "unmounts": 0,
+        "subscriptions": 1,
+        "routersCreated": 2,
+        "liveRouters": 2,
+        "disposed": 0,
+        "historySubscriptions": 1
+      },
+      "openMs": 1781.0999999977648,
+      "opened": {
+        "requests": 50,
+        "renders": 50,
+        "mounts": 50,
+        "unmounts": 0,
+        "subscriptions": 50,
+        "routersCreated": 51,
+        "liveRouters": 51,
+        "disposed": 0,
+        "historySubscriptions": 50
+      },
+      "grouping": {
+        "nativeGroupCount": 2,
+        "createActionCount": 2,
+        "joinActionCount": 48,
+        "batchCount": 2,
+        "createReceiptMs": 21.900000002235174,
+        "joinReceiptMs": 38,
+        "groupLookupMs": 0.5999999977648258,
+        "totalWithFramesMs": 69.20000000298023,
+        "createReceipt": {
+          "status": "applied"
+        },
+        "joinReceipt": {
+          "status": "applied"
+        },
+        "grouped": {
+          "requests": 50,
+          "renders": 50,
+          "mounts": 50,
+          "unmounts": 0,
+          "subscriptions": 50,
+          "routersCreated": 51,
+          "liveRouters": 51,
+          "disposed": 0,
+          "historySubscriptions": 50
+        }
+      },
+      "collapseExpand": {
+        "cycles": 20,
+        "batchCount": 40,
+        "nodeAttributeActionCount": 80,
+        "receiptMs": 864.8999999985099,
+        "totalWithFramesMs": 1480.5999999977648,
+        "receipts": [
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          },
+          {
+            "status": "applied"
+          }
+        ],
+        "after": {
+          "requests": 50,
+          "renders": 50,
+          "mounts": 50,
+          "unmounts": 0,
+          "subscriptions": 50,
+          "routersCreated": 51,
+          "liveRouters": 51,
+          "disposed": 0,
+          "historySubscriptions": 50
+        }
+      },
+      "movement": {
+        "groupCount": 2,
+        "batchCount": 4,
+        "nodeMoveActionCount": 4,
+        "receiptMs": 49.100000001490116,
+        "totalWithFramesMs": 133.10000000149012,
+        "receipts": [
+          {
+            "groupId": "#8985f79c-713a-4143-98b3-1854350f92a6",
+            "target": "right",
+            "receipt": {
+              "status": "applied"
+            }
+          },
+          {
+            "groupId": "#8985f79c-713a-4143-98b3-1854350f92a6",
+            "target": "left",
+            "receipt": {
+              "status": "applied"
+            }
+          },
+          {
+            "groupId": "#96e7f087-0b1e-4a1e-bab7-00a96ed8d1c4",
+            "target": "left",
+            "receipt": {
+              "status": "applied"
+            }
+          },
+          {
+            "groupId": "#96e7f087-0b1e-4a1e-bab7-00a96ed8d1c4",
+            "target": "right",
+            "receipt": {
+              "status": "applied"
+            }
+          }
+        ],
+        "after": {
+          "requests": 50,
+          "renders": 50,
+          "mounts": 50,
+          "unmounts": 0,
+          "subscriptions": 50,
+          "routersCreated": 51,
+          "liveRouters": 51,
+          "disposed": 0,
+          "historySubscriptions": 50
+        }
+      },
+      "switching": {
+        "count": 20,
+        "totalWithFramesMs": 833.3999999985099,
+        "after": {
+          "requests": 50,
+          "renders": 50,
+          "mounts": 50,
+          "unmounts": 0,
+          "subscriptions": 50,
+          "routersCreated": 51,
+          "liveRouters": 51,
+          "disposed": 0,
+          "historySubscriptions": 50
+        }
+      },
+      "closing": {
+        "batchCount": 1,
+        "tabsetDeleteActionCount": 2,
+        "closeReceiptMs": 19.099999997764826,
+        "closeWithFramesMs": 29.399999998509884,
+        "closed": {
+          "requests": 50,
+          "renders": 50,
+          "mounts": 50,
+          "unmounts": 50,
+          "subscriptions": 0,
+          "routersCreated": 51,
+          "liveRouters": 1,
+          "disposed": 50,
+          "historySubscriptions": 0
+        },
+        "remaining": 0,
+        "receipt": {
+          "status": "closed",
+          "id": "document-3f021ec713b048885a4abd65c9efb417-1",
+          "cleanupErrors": []
+        }
+      },
+      "disposal": {
+        "disposeReceiptMs": 1.6000000014901161,
+        "disposeWithFramesMs": 31.5,
+        "cleanupErrors": [],
+        "disposed": {
+          "requests": 50,
+          "renders": 50,
+          "mounts": 50,
+          "unmounts": 50,
+          "subscriptions": 0,
+          "routersCreated": 51,
+          "liveRouters": 0,
+          "disposed": 50,
+          "historySubscriptions": 0
+        }
+      },
+      "httpRequests": 50,
+      "heapBeforeBytes": 11218652,
+      "heapAfterLayoutBytes": 45337700,
+      "heapAfterCloseBytes": 47055472,
+      "heapAfterDisposeBytes": 47200092
+    }
+  ]
+}

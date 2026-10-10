@@ -1,0 +1,1164 @@
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+  type AnyRouter,
+  type RouterHistory,
+} from "@tanstack/react-router";
+import {
+  Actions,
+  BorderNode,
+  DockLocation,
+  Model,
+  TabGroupNode,
+  TabNode,
+  TabSetNode,
+  type Node,
+} from "flexlayout-react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { createWorkbench, type WorkbenchContentLifecycle, type WorkbenchOptions } from "./index";
+import { integrationState } from "./integration";
+import { connectResponsiveLayout } from "./responsive-layout";
+import { installTestResizeObserver } from "./test-resize-observer";
+
+const disposals: (() => Promise<unknown>)[] = [];
+const pendingGates: (() => void)[] = [];
+const originalResizeObserver = globalThis.ResizeObserver;
+afterEach(async () => {
+  pendingGates.splice(0).forEach((finish) => finish());
+  await Promise.all(disposals.splice(0).map((dispose) => dispose()));
+  window.history.replaceState(null, "", "/");
+  globalThis.ResizeObserver = originalResizeObserver;
+  vi.unstubAllGlobals();
+});
+
+function deferred<T>(fallback: T) {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((finish) => {
+    resolve = finish;
+  });
+  pendingGates.push(() => resolve(fallback));
+  return { promise, resolve };
+}
+
+function setup(
+  options: Partial<Omit<WorkbenchOptions<AnyRouter>, "createRouter">> = {},
+  load: (id: string) => string | Promise<string> = (id) => id,
+) {
+  const root = createRootRoute();
+  const page = createRoute({
+    getParentRoute: () => root,
+    path: "/documents/$id",
+    validateSearch: (search: Record<string, unknown>) => ({
+      view: typeof search.view === "string" ? search.view : "edit",
+    }),
+    loader: ({ params }) => load(params.id),
+    staticData: { worksplit: { title: "Document", navigationKey: "documents" } },
+  });
+  const routeTree = root.addChildren([page]);
+  const makeRouter = (history: RouterHistory) =>
+    createRouter({ routeTree, history, defaultPendingMinMs: 0, defaultStaleTime: Infinity });
+  const workbench = createWorkbench({ createRouter: makeRouter, ...options });
+  disposals.push(() => workbench.dispose());
+  const open = async (id: string, target?: string) => {
+    const result = await workbench.open(
+      { to: "/documents/$id", params: { id }, search: { view: "edit" } },
+      target === undefined ? {} : { target },
+    );
+    if (result.status !== "committed") throw new Error(`Fixture open failed: ${result.status}`);
+    return result.document.id;
+  };
+  return { workbench, open, makeRouter };
+}
+
+type Fixture = ReturnType<typeof setup>;
+function native(workbench: Fixture["workbench"]) {
+  return Model.fromJson(workbench.getLayout());
+}
+function tab(workbench: Fixture["workbench"], id: string) {
+  const node = native(workbench).getNodeById(id);
+  if (!(node instanceof TabNode)) throw new Error(`Missing native tab ${id}`);
+  return node;
+}
+function container(node: Node): TabSetNode | BorderNode {
+  let current: Node | undefined = node;
+  while (current && !(current instanceof TabSetNode) && !(current instanceof BorderNode))
+    current = current.getParent();
+  if (!current) throw new Error("Tab has no native container");
+  return current as TabSetNode | BorderNode;
+}
+async function group(workbench: Fixture["workbench"], id: string) {
+  expect(await workbench.dispatch(Actions.addTabToNewGroup(id, "Research", "#3366cc"))).toEqual({
+    status: "applied",
+  });
+  const parent = tab(workbench, id).getParent();
+  if (!(parent instanceof TabGroupNode)) throw new Error("Native group was not created");
+  return parent.getId();
+}
+
+const withBorder: NonNullable<WorkbenchOptions<AnyRouter>["layout"]> = {
+  global: {
+    tabEnableFloat: false,
+    tabEnablePopout: false,
+    tabEnablePin: true,
+    tabSetEnableClose: true,
+    tabSetEnableDeleteWhenEmpty: false,
+  },
+  borders: [{ type: "border", location: "bottom", children: [] }],
+  layout: {
+    type: "row",
+    children: [
+      { type: "tabset", id: "main", children: [] },
+      { type: "tabset", id: "other", children: [] },
+    ],
+  },
+};
+
+describe("native FlexLayout ownership", () => {
+  it("uses native grouping, pinning, selection and container identities", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    const a = await open("A", "main");
+    const b = await open("B", "main");
+    const groupId = await group(workbench, a);
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1))).toEqual(
+      { status: "applied" },
+    );
+    expect(workbench.getActiveDocument()?.id).toBe(b);
+    integrationState(workbench).focus(b, "document");
+    expect(workbench.getEditingContext()).toMatchObject({
+      activeGroupId: "main",
+      activeTabId: b,
+      focusedTabId: b,
+    });
+    expect(container(tab(workbench, b)).getId()).toBe("main");
+    expect(await workbench.dispatch(Actions.setTabPinned(b, true))).toEqual({ status: "applied" });
+    expect(tab(workbench, b).isPinned()).toBe(true);
+    expect(tab(workbench, b).getParent()).toBeInstanceOf(TabSetNode);
+    expect(tab(workbench, a).getParent()).toBeInstanceOf(TabGroupNode);
+    expect(workbench.getActiveDocument()?.id).toBe(b);
+    expect(
+      await workbench.dispatch(Actions.moveNode(groupId, "border_bottom", DockLocation.CENTER, -1)),
+    ).toEqual({ status: "applied" });
+    workbench.activate(a);
+    expect(workbench.getEditingContext().activeGroupId).toBe("border_bottom");
+    expect(await workbench.dispatch(Actions.ungroup(groupId))).toEqual({ status: "applied" });
+    expect(tab(workbench, a).getParent()).toBeInstanceOf(BorderNode);
+    expect(workbench.getDocument(a)?.href).toContain("/documents/A");
+    expect(workbench.getDocument(b)?.href).toContain("/documents/B");
+  });
+
+  it("synchronizes collapse and grouped selection with the active document and browser URL", async () => {
+    const { workbench, open } = setup();
+    workbench.connectBrowser();
+    const a = await open("A");
+    const b = await open("B");
+    const c = await open("C");
+    const groupId = await group(workbench, a);
+    await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
+    expect(workbench.getActiveDocument()?.id).toBe(b);
+    expect(window.location.pathname).toBe("/documents/B");
+    expect(
+      await workbench.dispatch(Actions.updateNodeAttributes(groupId, { opened: false })),
+    ).toEqual({
+      status: "applied",
+    });
+    expect(native(workbench).getActiveTabset()?.getSelectedNode()?.getId()).toBe(c);
+    expect(workbench.getActiveDocument()?.id).toBe(c);
+    expect(window.location.pathname).toBe("/documents/C");
+    workbench.activate(a);
+    const parent = tab(workbench, a).getParent();
+    expect(parent).toBeInstanceOf(TabGroupNode);
+    expect((parent as TabGroupNode).isOpened()).toBe(true);
+    expect(tab(workbench, a).isSelected()).toBe(true);
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(window.location.pathname).toBe("/documents/A");
+    expect(workbench.getDocuments()).toHaveLength(3);
+  });
+
+  it("uses container-wide MRU when the active grouped member closes", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    const a = await open("A", "main");
+    const b = await open("B", "main");
+    const c = await open("C", "main");
+    const d = await open("D", "other");
+    const groupId = await group(workbench, a);
+    await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
+    workbench.activate(d);
+    workbench.activate(a);
+    workbench.activate(c);
+    workbench.activate(b);
+    expect(await workbench.close(b)).toMatchObject({ status: "closed" });
+    expect(workbench.getActiveDocument()?.id).toBe(c);
+    expect(workbench.getEditingContext().activeGroupId).toBe("main");
+    expect(workbench.getDocument(a)).not.toBeNull();
+  });
+
+  it("persists the actual group model and keeps restored document routers lazy", async () => {
+    const { workbench, open, makeRouter } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    const groupId = await group(workbench, a);
+    await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
+    await workbench.dispatch(
+      Actions.updateNodeAttributes(groupId, {
+        name: "Saved group",
+        color: "#ab12ef",
+        opened: false,
+      }),
+    );
+    const snapshot = workbench.snapshot();
+    const factory = vi.fn<typeof makeRouter>(makeRouter);
+    const restored = createWorkbench({ createRouter: factory, snapshot });
+    disposals.push(() => restored.dispose());
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(restored.getLayout()).toEqual(snapshot.layout);
+    expect(restored.getDocuments()).toHaveLength(2);
+    expect(native(restored).getNodeById(groupId)).toBeInstanceOf(TabGroupNode);
+    const restoredGroup = native(restored).getNodeById(groupId) as TabGroupNode;
+    expect(restoredGroup.getName()).toBe("Saved group");
+    expect(restoredGroup.getColor()).toBe("#ab12ef");
+    expect(restoredGroup.isOpened()).toBe(false);
+    expect(await restored.start("/documents/A?view=edit")).toMatchObject({ status: "committed" });
+    expect(factory).toHaveBeenCalledTimes(2);
+    expect(restored.getEditingContext().activeGroupId).toBe("main");
+    expect(tab(restored, a).isSelected()).toBe(true);
+  });
+
+  it("validates an entire restored or initial group against the aggregate native docking policy", async () => {
+    const { workbench, open, makeRouter } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    const groupId = await group(workbench, a);
+    await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
+    const policy = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["allowDrop"]>>(
+      (tabs) => tabs.length === 1,
+    );
+    const aNode = tab(workbench, a);
+    const bNode = tab(workbench, b);
+    expect(policy([aNode], container(aNode), DockLocation.CENTER)).toBe(true);
+    expect(policy([bNode], container(bNode), DockLocation.CENTER)).toBe(true);
+    policy.mockClear();
+    const snapshot = workbench.snapshot();
+    const factory = vi.fn<typeof makeRouter>(makeRouter);
+    expect(() => createWorkbench({ createRouter: factory, snapshot, allowDrop: policy })).toThrow(
+      "group docking policy",
+    );
+    expect(() =>
+      createWorkbench({ createRouter: factory, layout: snapshot.layout, allowDrop: policy }),
+    ).toThrow("group docking policy");
+    expect(
+      policy.mock.calls.some(
+        ([tabs]) =>
+          tabs
+            .map((node) => node.getId())
+            .toSorted()
+            .join() === [a, b].toSorted().join(),
+      ),
+    ).toBe(true);
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("maximizes the native container on narrow screens and restores the desktop choice", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    const a = await open("A", "main");
+    const b = await open("B", "main");
+    const groupId = await group(workbench, a);
+    await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
+    await workbench.dispatch(Actions.maximizeToggle("other"));
+    workbench.activate(a);
+    const element = document.createElement("div");
+    Object.defineProperty(element, "clientWidth", { configurable: true, value: 390 });
+    installTestResizeObserver({ width: 390, height: 844 });
+    const narrow = vi.fn<(value: boolean) => void>();
+    const disconnect = connectResponsiveLayout(integrationState(workbench), element, narrow);
+    expect(narrow).toHaveBeenLastCalledWith(true);
+    expect(native(workbench).getMaximizedTabset()?.getId()).toBe("main");
+    expect(Model.fromJson(workbench.snapshot().layout).getMaximizedTabset()?.getId()).toBe("other");
+    disconnect();
+    expect(native(workbench).getMaximizedTabset()?.getId()).toBe("other");
+    expect(tab(workbench, a).getParent()).toBeInstanceOf(TabGroupNode);
+  });
+
+  it("maximizes the new native container when an active group splits without changing the document id", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    const groupId = await group(workbench, a);
+    await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
+    workbench.activate(a);
+    const router = integrationState(workbench).documents.get(a)?.router;
+    const element = document.createElement("div");
+    Object.defineProperty(element, "clientWidth", { configurable: true, value: 390 });
+    installTestResizeObserver({ width: 390, height: 844 });
+    const disconnect = connectResponsiveLayout(
+      integrationState(workbench),
+      element,
+      () => undefined,
+    );
+    expect(native(workbench).getMaximizedTabset()?.getId()).toBe("main");
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(
+      await workbench.dispatch(Actions.moveNode(groupId, "main", DockLocation.RIGHT, -1)),
+    ).toEqual({ status: "applied" });
+    const newContainer = container(tab(workbench, a)).getId();
+    expect(newContainer).not.toBe("main");
+    expect(native(workbench).getMaximizedTabset()?.getId()).toBe(newContainer);
+    expect(workbench.getEditingContext()).toMatchObject({
+      activeTabId: a,
+      activeGroupId: newContainer,
+    });
+    expect(integrationState(workbench).documents.get(a)?.router).toBe(router);
+    expect(tab(workbench, a).getParent()?.getId()).toBe(groupId);
+    expect(Model.fromJson(workbench.snapshot().layout).getMaximizedTabset()).toBeUndefined();
+    disconnect();
+    expect(native(workbench).getMaximizedTabset()).toBeUndefined();
+  });
+
+  it("passes group members and actual native targets through the docking policy", async () => {
+    const policy = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["allowDrop"]>>(
+      (tabs, target) =>
+        target.getType() !== "border" || tabs.every((node) => node.getName() === "Tool"),
+    );
+    const { workbench, open, makeRouter } = setup({ layout: withBorder, allowDrop: policy });
+    const a = await open("A", "main");
+    const b = await open("B", "main");
+    const groupId = await group(workbench, a);
+    policy.mockClear();
+    expect(await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1))).toEqual(
+      { status: "applied" },
+    );
+    expect(
+      policy.mock.calls.some(
+        ([tabs, target, location]) =>
+          tabs.length === 1 &&
+          tabs[0]?.getId() === b &&
+          target instanceof TabGroupNode &&
+          target.getId() === groupId &&
+          location === DockLocation.CENTER,
+      ),
+    ).toBe(true);
+    policy.mockClear();
+    const before = workbench.getLayout();
+    expect(
+      await workbench.dispatch(Actions.moveNode(groupId, "border_bottom", DockLocation.CENTER, -1)),
+    ).toEqual({ status: "rejected" });
+    expect(
+      policy.mock.calls.some(
+        ([tabs, target]) =>
+          target instanceof BorderNode &&
+          tabs
+            .map((node) => node.getId())
+            .toSorted()
+            .join() === [a, b].toSorted().join(),
+      ),
+    ).toBe(true);
+    expect(workbench.getLayout()).toEqual(before);
+    policy.mockClear();
+    expect(await workbench.dispatch(Actions.removeTabFromGroup(b))).toEqual({ status: "applied" });
+    expect(
+      policy.mock.calls.some(
+        ([tabs, target]) => tabs[0]?.getId() === b && target.getId() === "main",
+      ),
+    ).toBe(true);
+    expect(await workbench.dispatch(Actions.ungroup(groupId))).toEqual({ status: "applied" });
+    expect(tab(workbench, a).getParent()).toBeInstanceOf(TabSetNode);
+    const snapshot = workbench.snapshot();
+    const invalid = Model.fromJson(snapshot.layout);
+    invalid.doAction(Actions.addTabToNewGroup(a, "Invalid"));
+    const movedGroup = invalid.getNodeById(a)?.getParent();
+    if (!(movedGroup instanceof TabGroupNode)) throw new Error("Missing snapshot group");
+    invalid.doAction(
+      Actions.moveNode(movedGroup.getId(), "border_bottom", DockLocation.CENTER, -1),
+    );
+    const factory = vi.fn<typeof makeRouter>(makeRouter);
+    expect(() =>
+      createWorkbench({
+        createRouter: factory,
+        snapshot: { ...snapshot, layout: invalid.toJson() },
+        allowDrop: policy,
+      }),
+    ).toThrow("policy");
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("allows native display attributes and pure batches while rejecting identity and float changes atomically", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    const a = await open("A", "main");
+    const b = await open("B", "main");
+    expect(
+      await workbench.dispatch(
+        Actions.group([
+          Actions.setTabPinned(a, true),
+          Actions.updateNodeAttributes("main", { name: "Editor", minWidth: 180 }),
+          Actions.updateModelAttributes({ tabGroupType: "underline" }),
+        ]),
+      ),
+    ).toEqual({ status: "applied" });
+    expect(tab(workbench, a).isPinned()).toBe(true);
+    expect(native(workbench).getNodeById("main")?.toJson()).toMatchObject({
+      name: "Editor",
+      minWidth: 180,
+    });
+    expect(workbench.getLayout().global).toMatchObject({ tabGroupType: "underline" });
+    const before = workbench.getLayout();
+    const unsafe = [
+      Actions.addTab(
+        {
+          type: "tab",
+          id: "rogue",
+          component: "worksplit.document",
+          config: { href: "/documents/R" },
+        },
+        "main",
+        DockLocation.CENTER,
+        -1,
+      ),
+      Actions.updateNodeAttributes(b, { component: "other" }),
+      Actions.updateNodeAttributes(b, { config: { href: "/documents/Other" } }),
+      Actions.updateNodeAttributes(b, { id: "other-id" }),
+      Actions.updateNodeAttributes(b, { enableFloat: true }),
+      Actions.updateModelAttributes({ tabEnablePopout: true }),
+      Actions.popoutTab(b, "float"),
+      Actions.createSubLayout(
+        { type: "row", children: [] },
+        { x: 0, y: 0, width: 100, height: 100 },
+        "tab",
+      ),
+      Actions.moveNode("missing", "main", DockLocation.CENTER, -1),
+    ];
+    const rejected = await Promise.all(
+      unsafe.map((action) =>
+        workbench.dispatch(Actions.group([Actions.setTabPinned(b, true), action])),
+      ),
+    );
+    expect(rejected).toEqual(unsafe.map(() => ({ status: "rejected" })));
+    expect(workbench.getLayout()).toEqual(before);
+    expect(workbench.getDocument(b)?.href).toContain("/documents/B");
+    expect(
+      await workbench.dispatch(
+        Actions.group([Actions.deleteTab(a), Actions.setTabPinned(b, true)]),
+      ),
+    ).toEqual({ status: "rejected" });
+    expect(workbench.getLayout()).toEqual(before);
+  });
+
+  it("rejects policy-dependent multi-step docking batches before changing the native Model", async () => {
+    const policy = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["allowDrop"]>>(() => true);
+    const { workbench, open } = setup({ layout: withBorder, allowDrop: policy });
+    const a = await open("A", "main");
+    const b = await open("B", "main");
+    const before = workbench.getLayout();
+    const results = await Promise.all([
+      workbench.dispatch(
+        Actions.group([
+          Actions.moveNode(a, "other", DockLocation.CENTER, -1),
+          Actions.moveNode(b, "other", DockLocation.CENTER, -1),
+        ]),
+      ),
+      workbench.dispatch(
+        Actions.group([
+          Actions.updateNodeAttributes("other", { name: "Changed before drop" }),
+          Actions.moveNode(a, "other", DockLocation.CENTER, -1),
+        ]),
+      ),
+    ]);
+    expect(results).toEqual([{ status: "rejected" }, { status: "rejected" }]);
+    expect(workbench.getLayout()).toEqual(before);
+    expect(
+      await workbench.dispatch(
+        Actions.group([Actions.renameTab(a, "Renamed"), Actions.selectTab(a)]),
+      ),
+    ).toEqual({ status: "applied" });
+    expect(tab(workbench, a).getName()).toBe("Renamed");
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+  });
+
+  it("rejects floating capabilities even in an initially empty native Model", () => {
+    const { makeRouter } = setup();
+    const factory = vi.fn<typeof makeRouter>(makeRouter);
+    expect(() =>
+      createWorkbench({
+        createRouter: factory,
+        layout: { ...withBorder, global: { ...withBorder.global, tabEnableFloat: true } },
+      }),
+    ).toThrow(/floating|popout/u);
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("rejects legacy popouts and nested sublayout content before creating restored routers", () => {
+    const { workbench, makeRouter } = setup();
+    const snapshot = workbench.snapshot();
+    const factory = vi.fn<typeof makeRouter>(makeRouter);
+    expect(() =>
+      createWorkbench({
+        createRouter: factory,
+        snapshot: {
+          ...snapshot,
+          layout: {
+            ...snapshot.layout,
+            popouts: {
+              ghost: { type: "float", layout: { type: "row", children: [] } },
+            },
+          },
+        },
+      }),
+    ).toThrow(/popouts|sublayouts/u);
+    expect(() =>
+      createWorkbench({
+        createRouter: factory,
+        snapshot: {
+          ...snapshot,
+          layout: {
+            global: { tabEnableFloat: false, tabEnablePopout: false },
+            layout: {
+              type: "row",
+              children: [
+                {
+                  type: "tabset",
+                  id: "main",
+                  children: [
+                    {
+                      type: "tab",
+                      id: "nested",
+                      component: "worksplit.document",
+                      config: { href: "/documents/A" },
+                      subLayoutId: "ghost",
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toThrow(/sublayout/u);
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("keeps native background titles and selections from taking the document URL", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    workbench.connectBrowser();
+    const a = await open("A", "main");
+    const b = await open("B", "other");
+    await open("C", "other");
+    workbench.activate(a);
+    expect(await workbench.dispatch(Actions.renameTab(b, "Background title"))).toEqual({
+      status: "applied",
+    });
+    expect(tab(workbench, b).getName()).toBe("Background title");
+    expect(
+      await workbench.dispatch(Actions.updateNodeAttributes("other", { selected: 0 })),
+    ).toEqual({ status: "applied" });
+    expect((native(workbench).getNodeById("other") as TabSetNode).getSelectedNode()?.getId()).toBe(
+      b,
+    );
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(window.location.pathname).toBe("/documents/A");
+    const router = integrationState(workbench).documents.get(b)?.router;
+    if (!router) throw new Error("Missing background document Router");
+    await router.navigate({ href: "/documents/B?view=preview" });
+    expect(tab(workbench, b).getName()).toBe("Document");
+    expect(workbench.getDocument(b)?.href).toContain("view=preview");
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(window.location.pathname).toBe("/documents/A");
+  });
+
+  it("projects a pure batch's final native active tabset without replaying an earlier selection", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    workbench.connectBrowser();
+    const a = await open("A", "main");
+    const b = await open("B", "other");
+    expect(
+      await workbench.dispatch(
+        Actions.group([Actions.selectTab(a), Actions.setActiveTabset("other")]),
+      ),
+    ).toEqual({ status: "applied" });
+    expect(native(workbench).getActiveTabset()?.getId()).toBe("other");
+    expect(native(workbench).getActiveTabset()?.getSelectedNode()?.getId()).toBe(b);
+    expect(workbench.getActiveDocument()?.id).toBe(b);
+    expect(window.location.pathname).toBe("/documents/B");
+  });
+
+  it.each(["central then border", "border then central"] as const)(
+    "projects a cross-space batch (%s) from the final native central selection",
+    async (order) => {
+      const { workbench, open } = setup({ layout: withBorder });
+      workbench.connectBrowser();
+      const a = await open("A", "main");
+      const b = await open("B", "other");
+      const c = await open("C", "border_bottom");
+      await workbench.dispatch(Actions.selectTab(c)); // Start with the border hidden.
+      workbench.activate(order === "central then border" ? a : b);
+      const actions =
+        order === "central then border"
+          ? [Actions.selectTab(a), Actions.selectTab(c)]
+          : [Actions.selectTab(c), Actions.setActiveTabset("other")];
+      expect(await workbench.dispatch(Actions.group(actions))).toEqual({ status: "applied" });
+      const expected = order === "central then border" ? a : b;
+      const expectedContainer = order === "central then border" ? "main" : "other";
+      expect(native(workbench).getActiveTabset()?.getId()).toBe(expectedContainer);
+      expect(native(workbench).getActiveTabset()?.getSelectedNode()?.getId()).toBe(expected);
+      expect(
+        (native(workbench).getNodeById("border_bottom") as BorderNode).getSelectedNode()?.getId(),
+      ).toBe(c);
+      expect(workbench.getActiveDocument()?.id).toBe(expected);
+      expect(window.location.pathname).toBe(
+        order === "central then border" ? "/documents/A" : "/documents/B",
+      );
+      await workbench.dispatch(Actions.selectTab(c)); // Hide, then explicitly select the border document.
+      expect(await workbench.dispatch(Actions.selectTab(c))).toEqual({ status: "applied" });
+      expect(workbench.getActiveDocument()?.id).toBe(c);
+      expect(window.location.pathname).toBe("/documents/C");
+      expect(native(workbench).getActiveTabset()?.getId()).toBe(expectedContainer);
+    },
+  );
+
+  it("projects the final native move selection after a batch's earlier border selection", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    workbench.connectBrowser();
+    const a = await open("A", "main");
+    await open("B", "other");
+    const c = await open("C", "border_bottom");
+    await workbench.dispatch(Actions.selectTab(c));
+    workbench.activate(a);
+    expect(
+      await workbench.dispatch(
+        Actions.group([
+          Actions.selectTab(c),
+          Actions.moveNode(a, "other", DockLocation.CENTER, -1),
+        ]),
+      ),
+    ).toEqual({ status: "applied" });
+    expect(native(workbench).getActiveTabset()?.getId()).toBe("other");
+    expect(native(workbench).getActiveTabset()?.getSelectedNode()?.getId()).toBe(a);
+    expect(
+      (native(workbench).getNodeById("border_bottom") as BorderNode).getSelectedNode()?.getId(),
+    ).toBe(c);
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(window.location.pathname).toBe("/documents/A");
+    expect(workbench.getEditingContext().activeGroupId).toBe("other");
+  });
+
+  it("follows the final native move selection and keeps subsequent background selected attributes local", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    workbench.connectBrowser();
+    const a = await open("A", "main");
+    const d = await open("D", "main");
+    const b = await open("B", "main");
+    const c = await open("C", "other");
+    const groupId = await group(workbench, c);
+    expect(
+      await workbench.dispatch(
+        Actions.group([
+          Actions.selectTab(a),
+          Actions.moveNode(b, groupId, DockLocation.CENTER, -1),
+        ]),
+      ),
+    ).toEqual({ status: "applied" });
+    expect(native(workbench).getActiveTabset()?.getId()).toBe("other");
+    expect(native(workbench).getActiveTabset()?.getSelectedNode()?.getId()).toBe(b);
+    expect(workbench.getActiveDocument()?.id).toBe(b);
+    expect(window.location.pathname).toBe("/documents/B");
+    expect(await workbench.dispatch(Actions.updateNodeAttributes("main", { selected: 1 }))).toEqual(
+      { status: "applied" },
+    );
+    expect((native(workbench).getNodeById("main") as TabSetNode).getSelectedNode()?.getId()).toBe(
+      d,
+    );
+    expect(native(workbench).getActiveTabset()?.getId()).toBe("other");
+    expect(workbench.getActiveDocument()?.id).toBe(b);
+    expect(window.location.pathname).toBe("/documents/B");
+    expect(workbench.getDocuments()).toHaveLength(4);
+  });
+});
+
+describe("native close coordination", () => {
+  it("finishes resource cleanup after a native after-action observer throws following deletion", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const cleanup = vi.fn<() => void>();
+    integrationState(workbench).register(a, { dispose: cleanup });
+    const router = integrationState(workbench).documents.get(a)?.router;
+    if (!router) throw new Error("Missing document Router");
+    const destroy = vi.spyOn(router.history, "destroy");
+    const observerError = new Error("Native observer failed after removal");
+    const listener = {
+      onAfterAction: () => {
+        throw observerError;
+      },
+    };
+    const model = integrationState(workbench).model;
+    model.addChangeListener(listener);
+    const result = await workbench.close(a);
+    model.removeChangeListener(listener);
+    expect(result).toMatchObject({ status: "closed", cleanupErrors: [observerError] });
+    expect(native(workbench).getNodeById(a)).toBeUndefined();
+    expect(workbench.getDocument(a)).toBeNull();
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    await workbench.dispose();
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains the document and router resources when a native before-action observer prevents deletion", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const cleanup = vi.fn<() => void>();
+    integrationState(workbench).register(a, { dispose: cleanup });
+    const router = integrationState(workbench).documents.get(a)?.router;
+    if (!router) throw new Error("Missing document Router");
+    const destroy = vi.spyOn(router.history, "destroy");
+    const observerError = new Error("Native observer failed before removal");
+    const listener = {
+      onBeforeAction: () => {
+        throw observerError;
+      },
+    };
+    const model = integrationState(workbench).model;
+    model.addChangeListener(listener);
+    const result = await workbench.close(a);
+    model.removeChangeListener(listener);
+    expect(result).toEqual({ status: "failed", error: observerError });
+    expect(native(workbench).getNodeById(a)).toBeInstanceOf(TabNode);
+    expect(workbench.getDocument(a)).not.toBeNull();
+    expect(integrationState(workbench).documents.get(a)?.router).toBe(router);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(await workbench.close(a)).toMatchObject({ status: "closed" });
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a retained lifecycle registration callback after the native tool closes", async () => {
+    const tool = { id: "search", title: "Search", render: () => null };
+    const { workbench } = setup({
+      tools: [tool],
+      layout: {
+        ...withBorder,
+        borders: [
+          {
+            type: "border",
+            location: "bottom",
+            children: [
+              {
+                type: "tab",
+                id: tool.id,
+                component: "worksplit.tool",
+                name: tool.title,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const register = (lifecycle: WorkbenchContentLifecycle) =>
+      integrationState(workbench).register(tool.id, lifecycle);
+    const cleanup = vi.fn<() => void>();
+    const lateCleanup = vi.fn<() => void>();
+    const unregister = register({ dispose: cleanup });
+    expect(await workbench.dispatch(Actions.deleteTab(tool.id))).toMatchObject({
+      status: "closed",
+    });
+    expect(native(workbench).getNodeById(tool.id)).toBeUndefined();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(() => register({ dispose: lateCleanup })).toThrow("Cannot register closed content");
+    unregister();
+    await workbench.dispose();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(lateCleanup).not.toHaveBeenCalled();
+  });
+
+  it("closes every collapsed group member through native tabset removal and leaves other containers alive", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    const a = await open("A", "main");
+    const b = await open("B", "main");
+    const d = await open("D", "other");
+    const groupId = await group(workbench, a);
+    await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
+    await workbench.dispatch(Actions.updateNodeAttributes(groupId, { opened: false }));
+    workbench.activate(d);
+    const cleanupA = vi.fn<() => void>();
+    const cleanupB = vi.fn<() => void>();
+    const cleanupD = vi.fn<() => void>();
+    integrationState(workbench).register(a, { dispose: cleanupA });
+    integrationState(workbench).register(b, { dispose: cleanupB });
+    integrationState(workbench).register(d, { dispose: cleanupD });
+    expect(await workbench.dispatch(Actions.deleteTabset("main"))).toMatchObject({
+      status: "closed",
+      cleanupErrors: [],
+    });
+    expect(workbench.getDocuments().map((document) => document.id)).toEqual([d]);
+    expect(native(workbench).getNodeById(groupId)).toBeUndefined();
+    expect(native(workbench).getNodeById("main")).toBeUndefined();
+    expect(container(tab(workbench, d)).getId()).toBe("other");
+    expect(workbench.getActiveDocument()?.id).toBe(d);
+    expect(cleanupA).toHaveBeenCalledTimes(1);
+    expect(cleanupB).toHaveBeenCalledTimes(1);
+    expect(cleanupD).not.toHaveBeenCalled();
+  });
+
+  it("preserves a native non-closeable group while closing the tabset's eligible siblings", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    const a = await open("A", "main");
+    const b = await open("B", "main");
+    const c = await open("C", "main");
+    const groupId = await group(workbench, a);
+    await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
+    expect(
+      await workbench.dispatch(Actions.updateNodeAttributes(a, { enableClose: false })),
+    ).toEqual({ status: "applied" });
+    const decision = vi.fn<() => boolean>(() => false);
+    integrationState(workbench).register(a, { isDirty: () => true, beforeLeave: decision });
+    integrationState(workbench).register(b, { isDirty: () => true, beforeLeave: decision });
+    expect(native(workbench).getNodeById(groupId)?.isCloseable()).toBe(false);
+    expect(await workbench.dispatch(Actions.deleteTabset("main"))).toMatchObject({
+      status: "closed",
+    });
+    expect(workbench.getDocument(c)).toBeNull();
+    expect(
+      workbench
+        .getDocuments()
+        .map((document) => document.id)
+        .toSorted(),
+    ).toEqual([a, b].toSorted());
+    expect(native(workbench).getNodeById(groupId)).toBeInstanceOf(TabGroupNode);
+    expect(decision).not.toHaveBeenCalled();
+  });
+
+  it("rejects dirty group and tabset closes without deleting an earlier approved member", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    const a = await open("A", "main");
+    const b = await open("B", "main");
+    const groupId = await group(workbench, a);
+    await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
+    const approve = vi.fn<() => boolean>(() => true);
+    const reject = vi.fn<() => boolean>(() => false);
+    const cleanup = vi.fn<() => void>();
+    integrationState(workbench).register(a, {
+      isDirty: () => true,
+      getCloseRevision: () => 0,
+      beforeLeave: approve,
+      dispose: cleanup,
+    });
+    integrationState(workbench).register(b, {
+      isDirty: () => true,
+      getCloseRevision: () => 0,
+      beforeLeave: reject,
+      dispose: cleanup,
+    });
+    const before = workbench.getLayout();
+    expect(
+      await workbench.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)])),
+    ).toEqual({ status: "rejected", reason: "decision" });
+    expect(workbench.getLayout()).toEqual(before);
+    expect(workbench.getDocuments()).toHaveLength(2);
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(await workbench.dispatch(Actions.deleteTabset("main"))).toEqual({
+      status: "rejected",
+      reason: "decision",
+    });
+    expect(workbench.getLayout()).toEqual(before);
+    expect(approve).toHaveBeenCalledTimes(2);
+    expect(reject).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets the application reject edits that arrive during a bulk close decision", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    const approval = deferred(true);
+    let editingRevision = 0;
+    integrationState(workbench).register(a, {
+      isDirty: () => true,
+      getCloseRevision: () => editingRevision,
+      beforeLeave: () => {
+        const expected = editingRevision;
+        return approval.promise.then((accepted) => accepted && expected === editingRevision);
+      },
+    });
+    const closing = workbench.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)]));
+    ++editingRevision;
+    approval.resolve(true);
+    expect(await closing).toEqual({ status: "rejected", reason: "decision" });
+    expect(workbench.getDocuments()).toHaveLength(2);
+  });
+
+  it("retains an earlier approved document when it changes while another bulk decision is pending", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    let revisionA = 0;
+    const approvalB = deferred(true);
+    const decideA = vi.fn<() => boolean>(() => true);
+    const decideB = vi.fn<() => Promise<boolean>>(() => approvalB.promise);
+    const cleanup = vi.fn<() => void>();
+    integrationState(workbench).register(a, {
+      isDirty: () => true,
+      getCloseRevision: () => revisionA,
+      beforeLeave: decideA,
+      dispose: cleanup,
+    });
+    integrationState(workbench).register(b, {
+      isDirty: () => true,
+      getCloseRevision: () => 0,
+      beforeLeave: decideB,
+      dispose: cleanup,
+    });
+    const closing = workbench.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)]));
+    await vi.waitFor(() => expect(decideB).toHaveBeenCalledTimes(1));
+    expect(decideA).toHaveBeenCalledTimes(1);
+    ++revisionA;
+    approvalB.resolve(true);
+    expect(await closing).toEqual({ status: "rejected", reason: "changed" });
+    expect(workbench.getDocuments()).toHaveLength(2);
+    expect(native(workbench).getNodeById(a)).toBeInstanceOf(TabNode);
+    expect(native(workbench).getNodeById(b)).toBeInstanceOf(TabNode);
+    expect(cleanup).not.toHaveBeenCalled();
+  });
+
+  it("requires an application's existing revision for dirty bulk closing before requesting decisions", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    const decide = vi.fn<() => boolean>(() => true);
+    integrationState(workbench).register(a, { isDirty: () => true, beforeLeave: decide });
+    expect(
+      await workbench.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)])),
+    ).toEqual({
+      status: "rejected",
+      reason: "revision-required",
+    });
+    expect(decide).not.toHaveBeenCalled();
+    expect(workbench.getDocuments()).toHaveLength(2);
+    expect(await workbench.close(a)).toMatchObject({ status: "closed" });
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(workbench.getDocument(b)).not.toBeNull();
+  });
+
+  it("retains a previously clean document that becomes dirty during another member's decision", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    let dirtyA = false;
+    const approvalB = deferred(true);
+    const decideA = vi.fn<() => boolean>(() => true);
+    const decideB = vi.fn<() => Promise<boolean>>(() => approvalB.promise);
+    integrationState(workbench).register(a, { isDirty: () => dirtyA, beforeLeave: decideA });
+    integrationState(workbench).register(b, {
+      isDirty: () => true,
+      getCloseRevision: () => 0,
+      beforeLeave: decideB,
+    });
+    const closing = workbench.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)]));
+    await vi.waitFor(() => expect(decideB).toHaveBeenCalledTimes(1));
+    dirtyA = true;
+    approvalB.resolve(true);
+    expect(await closing).toEqual({ status: "rejected", reason: "changed" });
+    expect(decideA).not.toHaveBeenCalled();
+    expect(workbench.getDocuments()).toHaveLength(2);
+  });
+
+  it("reports a failing application revision getter while retaining the native tabs and resources", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    const error = new Error("Application revision unavailable");
+    const decide = vi.fn<() => boolean>(() => true);
+    const cleanup = vi.fn<() => void>();
+    integrationState(workbench).register(a, {
+      isDirty: () => true,
+      getCloseRevision: () => {
+        throw error;
+      },
+      beforeLeave: decide,
+      dispose: cleanup,
+    });
+    expect(
+      await workbench.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)])),
+    ).toEqual({
+      status: "failed",
+      error,
+    });
+    expect(decide).not.toHaveBeenCalled();
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(workbench.getDocuments()).toHaveLength(2);
+    expect(native(workbench).getNodeById(a)).toBeInstanceOf(TabNode);
+  });
+
+  it("invalidates all pending deletes when native navigation changes a member's accepted route", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    const approval = deferred(true);
+    integrationState(workbench).register(a, {
+      isDirty: () => true,
+      getCloseRevision: () => 0,
+      beforeLeave: (reason) => (reason === "close" ? approval.promise : true),
+    });
+    const closing = workbench.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)]));
+    const router = integrationState(workbench).documents.get(a)?.router;
+    if (!router) throw new Error("Missing document Router");
+    await router.navigate({ href: "/documents/A?view=preview" });
+    approval.resolve(true);
+    expect(await closing).toEqual({ status: "rejected", reason: "changed" });
+    expect(workbench.getDocuments()).toHaveLength(2);
+    expect(workbench.getDocument(a)?.href).toContain("view=preview");
+  });
+
+  it("invalidates tabset deletion when its closeable membership changes during the decision", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    const a = await open("A", "main");
+    await open("B", "main");
+    const approval = deferred(true);
+    integrationState(workbench).register(a, {
+      isDirty: () => true,
+      getCloseRevision: () => 0,
+      beforeLeave: () => approval.promise,
+    });
+    const closing = workbench.dispatch(Actions.deleteTabset("main"));
+    const c = await open("C", "main");
+    approval.resolve(true);
+    expect(await closing).toEqual({ status: "rejected", reason: "changed" });
+    expect(workbench.getDocuments()).toHaveLength(3);
+    expect(workbench.getDocument(c)).not.toBeNull();
+    expect(native(workbench).getNodeById("main")).toBeInstanceOf(TabSetNode);
+  });
+
+  it.each(["pin", "closeability"] as const)(
+    "invalidates a pending close when native %s changes",
+    async (change) => {
+      const { workbench, open } = setup();
+      const a = await open("A");
+      const approval = deferred(true);
+      integrationState(workbench).register(a, {
+        isDirty: () => true,
+        beforeLeave: () => approval.promise,
+      });
+      const closing = workbench.close(a);
+      expect(
+        await workbench.dispatch(
+          change === "pin"
+            ? Actions.setTabPinned(a, true)
+            : Actions.updateNodeAttributes(a, { enableClose: false }),
+        ),
+      ).toEqual({ status: "applied" });
+      approval.resolve(true);
+      expect(await closing).toEqual({ status: "rejected", reason: "changed" });
+      expect(workbench.getDocument(a)).not.toBeNull();
+      expect(native(workbench).getNodeById(a)).toBeInstanceOf(TabNode);
+    },
+  );
+
+  it("rejects native deletion of non-closeable documents without asking to discard them", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    const decide = vi.fn<() => boolean>(() => false);
+    integrationState(workbench).register(a, { isDirty: () => true, beforeLeave: decide });
+    integrationState(workbench).register(b, { isDirty: () => true, beforeLeave: decide });
+    await workbench.dispatch(Actions.setTabPinned(a, true));
+    await workbench.dispatch(Actions.updateNodeAttributes(b, { enableClose: false }));
+    expect(await workbench.close(a)).toEqual({ status: "rejected", reason: "not-closeable" });
+    expect(await workbench.dispatch(Actions.deleteTab(b))).toEqual({
+      status: "rejected",
+      reason: "not-closeable",
+    });
+    expect(decide).not.toHaveBeenCalled();
+    expect(workbench.getDocuments()).toHaveLength(2);
+  });
+
+  it("shares duplicate closes, explicitly rejects partial overlaps, and waits for cleanup once", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    const approvalA = deferred(true);
+    const approvalB = deferred(true);
+    const releaseA = deferred<void>(undefined);
+    const releaseB = deferred<void>(undefined);
+    const decideA = vi.fn<() => Promise<boolean>>(() => approvalA.promise);
+    const decideB = vi.fn<() => Promise<boolean>>(() => approvalB.promise);
+    const cleanupA = vi.fn<() => Promise<void>>(() => releaseA.promise);
+    const cleanupB = vi.fn<() => Promise<void>>(() => releaseB.promise);
+    integrationState(workbench).register(a, {
+      isDirty: () => true,
+      getCloseRevision: () => 0,
+      beforeLeave: decideA,
+      dispose: cleanupA,
+    });
+    integrationState(workbench).register(b, {
+      isDirty: () => true,
+      getCloseRevision: () => 0,
+      beforeLeave: decideB,
+      dispose: cleanupB,
+    });
+    const batch = () => Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)]);
+    const first = workbench.dispatch(batch());
+    const duplicate = workbench.dispatch(batch());
+    const overlap = workbench.close(b);
+    expect(decideB).not.toHaveBeenCalled();
+    expect(await overlap).toEqual({ status: "rejected", reason: "closing" });
+    expect(decideA).toHaveBeenCalledTimes(1);
+    approvalA.resolve(true);
+    await vi.waitFor(() => expect(decideB).toHaveBeenCalledTimes(1));
+    approvalB.resolve(true);
+    await vi.waitFor(() => expect(cleanupA).toHaveBeenCalledTimes(1));
+    expect(cleanupB).toHaveBeenCalledTimes(1);
+    expect(workbench.getDocuments()).toHaveLength(0);
+    let settled = false;
+    void first.then(() => {
+      settled = true;
+      return undefined;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    releaseA.resolve(undefined);
+    releaseB.resolve(undefined);
+    expect(await first).toMatchObject({ status: "closed", cleanupErrors: [] });
+    expect(await duplicate).toEqual(await first);
+    await workbench.dispose();
+    expect(cleanupA).toHaveBeenCalledTimes(1);
+    expect(cleanupB).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a late restored loader from resurrecting a removed grouped document", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    const groupId = await group(workbench, a);
+    await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
+    const snapshot = workbench.snapshot();
+    const gate = deferred("late");
+    let loaderFinished = false;
+    const { makeRouter } = setup({}, async () => {
+      const value = await gate.promise;
+      loaderFinished = true;
+      return value;
+    });
+    const restored = createWorkbench({ createRouter: makeRouter, snapshot });
+    disposals.push(() => restored.dispose());
+    const cleanup = vi.fn<() => void>();
+    integrationState(restored).register(a, { dispose: cleanup });
+    restored.activate(a);
+    await vi.waitFor(() =>
+      expect(integrationState(restored).documents.get(a)?.router?.state.isLoading).toBe(true),
+    );
+    const router = integrationState(restored).documents.get(a)?.router;
+    if (!router) throw new Error("Missing pending document Router");
+    expect(
+      await restored.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)])),
+    ).toMatchObject({ status: "closed" });
+    expect(restored.getDocuments()).toHaveLength(0);
+    gate.resolve("late");
+    await vi.waitFor(() => {
+      expect(loaderFinished).toBe(true);
+      expect(router.state.isLoading).toBe(false);
+    });
+    expect(restored.getDocument(a)).toBeNull();
+    expect(native(restored).getNodeById(a)).toBeUndefined();
+    expect(native(restored).getNodeById(groupId)).toBeUndefined();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+});

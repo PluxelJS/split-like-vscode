@@ -18,7 +18,8 @@
     "catalog:migrate": "pncat migrate --yes",
     "catalog:clean": "pncat clean --yes",
     "test:browser": "playwright test",
-    "measure": "node scripts/measure-workbench.mjs"
+    "measure": "node scripts/measure-workbench.mjs",
+    "measure:native": "node scripts/measure-native-layout.mjs"
   },
   "devDependencies": {
     "@playwright/test": "catalog:test",

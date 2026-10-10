@@ -1,6 +1,7 @@
 import { Actions, TabSetNode } from "flexlayout-react";
 
 import type { integrationState } from "./integration";
+import { tabContainer } from "./native-layout";
 
 /** A transient native maximize; snapshots retain the desktop preference. */
 export function connectResponsiveLayout(
@@ -10,6 +11,7 @@ export function connectResponsiveLayout(
 ) {
   let compact = false;
   let lastActive: string | null = null;
+  let lastContainer: string | undefined;
   const maximize = (id: string | null) => {
     const previous = internal.model.getMaximizedTabset()?.getId();
     if (previous === id) return;
@@ -30,7 +32,7 @@ export function connectResponsiveLayout(
     if (next) {
       const active = internal.store.get().activeDocumentId;
       const group = active
-        ? internal.model.getNodeById(active)?.getParent()
+        ? tabContainer(internal.model.getNodeById(active))
         : internal.model.getActiveTabset();
       if (group instanceof TabSetNode) maximize(group.getId());
     }
@@ -39,8 +41,12 @@ export function connectResponsiveLayout(
   observer.observe(element);
   resize();
   const subscription = internal.store.subscribe((s) => {
-    if (s.activeDocumentId !== lastActive) {
+    const container = s.activeDocumentId
+      ? tabContainer(internal.model.getNodeById(s.activeDocumentId))?.getId()
+      : undefined;
+    if (s.activeDocumentId !== lastActive || container !== lastContainer) {
       lastActive = s.activeDocumentId;
+      lastContainer = container;
       resize();
     }
   });
