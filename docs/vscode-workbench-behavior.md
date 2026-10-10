@@ -1,324 +1,102 @@
-# VS Code Workbench Behavior Contract
-
-This document records the behavior patterns this workspace layout library should follow when it
-models a VS Code-like workbench. The goal is not API compatibility with VS Code or Allotment. The
-goal is to copy the interaction semantics that make a workbench feel predictable under repeated
-use.
-
-## Reference Model
-
-- VS Code separates low-level split layout from workbench concepts. This project follows the same
-  shape: `@worksplit/core` owns framework-free layout and workbench state, while
-  `@worksplit/react` owns DOM interaction and rendering.
-- VS Code `SplitView` supports snap views. A snap-capable view does not disappear the moment it
-  reaches minimum size. This project keeps the pane clamped at `minSize` first, then treats a
-  continued inward drag as hide intent only after a short delay.
-- VS Code stores visibility and size separately. A hidden view keeps a remembered size and can be
-  restored without losing the user's previous intent.
-
-Primary source for the split/sash behavior:
-https://github.com/microsoft/vscode/blob/main/src/vs/base/browser/ui/splitview/splitview.ts
-
-## Parts And Views
-
-Workbench layout is organized around parts:
-
-- `primary`
-- `secondary`
-- `panel`
-- editor area
-
-Views are registered into parts. A part has one active view, and visibility belongs to the part.
-This matches how VS Code activity bar entries switch side bar containers while the side bar itself
-can be shown or hidden. The core and React APIs both use the same part names.
-
-Implemented API:
-
-- `WorkbenchView.part`
-- `Workbench.partSizes`
-- `WorkbenchView.renderContent`
-- `WorkbenchView.defaultActive`
-- `WorkbenchView.defaultVisible`
-- `WorkbenchView.activityGroup`
-- `WorkbenchEditorGroup`
-- `WorkbenchEditorTab`
-- `WorkbenchIcon`
-- `WorkbenchActions`
-- `WorkbenchPartSize`
-- `WorkbenchHandle.activateView`
-- `WorkbenchHandle.activateEditorTab`
-- `WorkbenchHandle.moveEditorGroup`
-- `WorkbenchHandle.equalizeEditorGroups`
-- `WorkbenchHandle.maximizeEditorGroup`
-- `WorkbenchHandle.restoreEditorGroups`
-- `WorkbenchHandle.toggleEditorGroupMaximized`
-- `WorkbenchHandle.toggleView`
-- `WorkbenchHandle.showPart`
-- `WorkbenchHandle.hidePart`
-- `WorkbenchHandle.resetLayout`
-- `WorkbenchHandle.setPanelPosition`
-- `WorkbenchHandle.togglePanelPosition`
-- `WorkbenchHandle.runCommand`
-- `WorkbenchHandle.getLayout`
-- `WorkbenchHandle.restoreLayout`
-- `WorkbenchHandle.getAreaLayout`
-- versioned `WorkbenchValue`
-
-## Sash Resize
-
-Visible sashes resize adjacent visible panes. Resizing respects:
-
-- minimum size
-- maximum size
-- priority-based redistribution in core
-- proportional container resize
-- keyboard arrows
-
-Sash double-click resets preferred sizes only for normal visible sashes. Hidden boundary sashes do
-not treat double-click or click as restore commands.
-
-## Snap Collapse
-
-Snap collapse is opt-in at pane level:
-
-```tsx
-<Pane id="explorer" minSize={180} defaultSize={280} snap />
-```
-
-Workbench part panes enable `snap` by default. Editor panes do not snap by default.
-
-Collapse behavior:
-
-- Dragging toward a snap pane's minimum size clamps at `minSize`.
-- The pane stays visible and stable at `minSize`; it does not keep shrinking visually.
-- If the user keeps dragging inward while the pane is already at `minSize`, a collapse timer starts.
-- The pane collapses only if the inward drag remains active for `snapCollapseDelay`.
-- Default `snapCollapseDelay` is 320 ms.
-- `snapThreshold` is a small pointer-pressure tolerance beyond `minSize` before the timer starts.
-- Default `snapThreshold` is 2 px.
-- The size from the beginning of the snap drag is cached before collapse.
-
-This creates a deliberate "detent": reaching the minimum is resize intent; holding continued
-inward pressure is hide intent.
-
-## Hidden Boundary Restore
-
-Hidden panes render a boundary sash at their previous edge. This boundary is not a button.
-
-Restore behavior:
-
-- Click does not restore a hidden pane.
-- Dragging the hidden boundary outward restores the pane.
-- Restore starts only after a small reveal threshold to avoid accidental pointer jitter.
-- After restore, the dragged distance becomes the pane size.
-- Keyboard restoration uses the directional arrow that points outward from the hidden boundary.
-- Activity bar and command handles can still show/hide views directly.
-
-This keeps the same mental model as VS Code: the activity bar is for commands and view activation;
-the sash is for spatial layout.
-
-## Activity Bar
-
-Activity items are view commands:
-
-- Clicking an inactive item activates its view and shows its part.
-- Clicking the active visible item hides its part.
-- The active item remains distinguishable even if the part is hidden.
-- Footer items are supported with `activityGroup: "footer"` for settings/account-like entries.
-- Consumers can replace item rendering through `renderActivityItem`.
-
-## Editor Area
-
-The editor area supports three inputs:
-
-- `editor` for simple single-node usage
-- `editorGroups` for static application-authored groups with tabs
-- `editorTabs` for a flat content catalog whose placement is owned by an editor arrangement
-
-`editorGroups` and `editorTabs` are mutually exclusive. Passing only `editor` is a convenience path
-for a single editor surface.
-`editorGroups` remains compatible with authored layouts. `editorTabs` is the user-driven model: the
-application owns tab descriptors and lifecycle, while Worksplit owns placement and topology.
-
-With `editorTabs`, optional `editor` supplies empty-state content. An explicitly empty catalog
-keeps its arrangement empty and its editing-context ids null; it never synthesizes the convenience
-`main` group or `editor` tab. If there is no editor layout, the fallback fills the editor area and
-scrolls using the native content container. When tabs create a layout, the fallback is not rendered.
-
-Each editor group owns its active tab. Without an authored `editorLayout`, multiple groups are
-rendered as a horizontal split inside the center area for backward compatibility. An editor layout
-can instead form an arbitrary recursive grid of horizontal and vertical split nodes.
-
-Editor layout nodes are a discriminated union:
-
-- group leaves reference one `WorkbenchEditorGroup.id`
-- split nodes have a stable id, an orientation, and at least two children
-- each split child may retain its last committed size in CSS pixels
-
-Every declared editor group occurs exactly once. Authored invalid layouts fail fast. Persisted
-layouts are treated as untrusted snapshots: malformed nodes are removed, duplicate references are
-deduplicated, single-child splits are collapsed, and newly declared groups are appended. Moving a
-group beside a direct target in a split with the same orientation inserts it into that split instead
-of creating redundant nesting.
-
-The editor grid rearranges existing groups without synthesizing or cloning application content.
-Group and tab descriptors, documents, sessions, and their lifecycle remain consumer-owned.
-
-With `editorTabs`, one editor arrangement is the runtime owner of group ids, tab order, active tabs,
-recursive topology, and maximized group. A tab id occurs exactly once. Pointer dragging supports
-reordering within a tab strip, moving between strips, and splitting at the four edges of an editor
-group. Moving the last tab out removes the empty group and collapses redundant split nodes. Invalid
-or already-satisfied moves are no-ops. `moveEditorTab` is available on actions and the imperative
-handle; `editorArrangement` / `onEditorArrangementChange` expose the controlled form.
-
-`canMoveEditorTab(options, nextArrangement)` gates both pointer feedback and imperative tab moves
-before pending placement, callbacks, or persistence. Its complete core candidate already removes
-an emptied source group. Rejected or already-satisfied moves display no accepted drop indicator.
-The policy does not normalize authored/controlled layouts; those remain consumer-owned.
-
-Pointer feedback uses an imperative DOM layer rather than Workbench React state. One animation
-frame consumes the latest point; cached group, content, strip, and tab rectangles refresh after
-scroll, resize, or a consumer render. Rectangle reads finish before feedback writes. Strips show
-insertion lines, center content shows a full-area overlay, and accepted edges show half-area
-overlays. Edge entry uses the outer tenth of content; an accepted edge remains selected within one
-third. Neither placement nor active content changes before release. Release reads fresh geometry
-and the latest hit point and policy; Escape, pointer cancellation, blur, replacement, and unmount
-cancel. Every completion or cancellation releases listeners, frames, observer ownership, and
-feedback. A hit-test or policy failure also cleans up before being rethrown.
-
-The default renderer supplies linked tab/tabpanel semantics and keyboard navigation. A complete
-replacement can use `renderEditorTab`, which receives the required `tabProps`. Tab wrappers may
-contain independent menu buttons; arrow/Home/End navigation finds sibling tabs through the group
-tab strip and keeps activation and keyboard focus together. Applications may use
-that slot or `onEditorTabContextMenu` to compose a product menu, but close, pin, dirty-document, and
-other lifecycle rules remain application-owned.
-
-Maximizing a group temporarily expands the branch leading to it and hides sibling branches without
-changing the topology or unmounting sibling DOM. Equalization acts independently at every split
-node. `getAreaLayout("editorGroups")` continues to expose the root editor split for compatibility;
-nested split sizes are represented by `WorkbenchLayout.editorLayout`.
-
-## Editing context
-
-Worksplit owns the last operated editor separately from the currently focused DOM area:
-
-```ts
-type WorkbenchEditingContext = {
-  activeGroupId: string | null;
-  activeTabId: string | null;
-  focusedArea: "editor" | "primary" | "secondary" | "panel" | null;
-  windowFocused: boolean;
-};
-```
-
-`WorkbenchHandle.getEditingContext()` reads a valid context synchronously. The active tab is
-derived from the accepted arrangement, including in controlled mode; proposed placement never
-creates a nonexistent editor identity. The initial context selects a valid group. Native tab
-clicks, roving keys, context menus, editor-content focus and pointer presses, and
-`activateEditorTab` share that selection. Activating an already selected tab still makes its group
-the current editor. A successful tab drop or `moveEditorTab` selects its destination; vetoed,
-cancelled, and already-satisfied moves preserve the context. External arrangement changes follow
-the current tab when it moves. Closing the current tab retains its group's next selection; removing
-the group chooses a surviving editor, and removing all tabs yields null group and tab ids.
-
-`onEditingContextChange(context)` runs in a layout effect after the handle is available, and only
-when the final committed context changes. Several synchronous actions are batched by React: an
-application can place a background preview and finally activate the origin without publishing an
-intermediate editor. The getter remains synchronous during those actions. Layout sizing,
-maximization and equalization do not change editor selection by themselves; activate a target tab
-explicitly when a command should also change the current editor.
-
-DOM focus in a sidebar, part header, activity bar, or outside the workbench does not discard the
-last editor. Native DOM listeners include portals mounted into a workbench part from another React
-tree, and are removed on unmount. Window blur preserves group and tab ids, sets `windowFocused`
-false, and reports no focused area until the window gains focus. Editing context is transient and
-is not serialized in layout snapshots.
-
-Each group exposes `data-worksplit-current-editor-group="true"` or `"false"`. The root exposes
-`data-worksplit-focused-area` using the area name or `"none"`, and
-`data-worksplit-window-focused="true"` or `"false"`. These hooks let consumers style the selected
-tab differently in the current group and in other groups without dimming editor content.
-
-## Persistence
-
-Workbench layout is serializable:
-
-- `activeByPart`
-- `activeEditorTabs`
-- `visibleParts`
-- `panelPosition`
-- workbench area pane sizes
-- center split pane sizes
-- editor group split pane sizes
-- recursive editor layout topology and nested split sizes
-- editor arrangement group membership, tab order, active tabs, and topology
-- maximized editor group
-- schema `version`
-
-Runtime `WorkbenchValue` is normalized and complete. `WorkbenchValueSnapshot` is the partial shape
-used for persistence and initial values.
-
-The React `Workbench` can persist this state with `storageKey`. Stored layouts must use the
-current `WorkbenchLayout` shape.
-
-## Panel Position
-
-The panel can be positioned at the bottom or on the right:
-
-- `defaultLayout.panelPosition` sets the uncontrolled initial position.
-- `togglePanelPosition` mirrors the common workbench command shape.
-- Changing position remounts the relevant split view so pane-id size snapshots can be applied
-  cleanly to the new topology.
-
-## Commands And Keybindings
-
-Workbench commands are app-level actions. Built-in commands:
-
-- `workbench.action.toggleSidebarVisibility`: `mod+b`
-- `workbench.action.togglePanel`: `mod+j`
-- `workbench.action.toggleAuxiliaryBar`: `mod+alt+b`
-- `workbench.action.togglePanelPosition`: `mod+shift+j`
-- `workbench.action.resetLayout`: `mod+shift+0`
-
-`mod` maps to Ctrl on Windows/Linux and Meta on macOS. Keybindings are handled on the workbench
-root through React event bubbling. Editable targets are ignored so text editing is not hijacked.
-Consumers can append commands with the `commands` prop and run commands through the imperative
-handle.
-
-## Injection Points
-
-The library should expose behavior hooks without hard-coding product UI:
-
-- `renderSash`
-- `renderCollapsedPane`
-- `renderActivityItem`
-- `renderEditorTab`
-- `renderPartHeader`
-- `renderCollapsedPart`
-- `onEditorTabContextMenu`
-
-Injected content must not change the sash role. The sash remains the interaction target.
-
-## Accessibility
-
-Current contract:
-
-- Sashes use `role="separator"`.
-- Orientation is mapped to ARIA orientation.
-- Visible sashes support keyboard resize with arrow keys.
-- Hidden boundary sashes support directional keyboard restore.
-- Activity items expose `aria-pressed`.
-- Editor tabs use roving focus, arrow/Home/End navigation, and linked `tab`/`tabpanel` semantics.
-
-Future work:
-
-- expose command labels for custom keybinding systems
-- add roving focus for activity bar groups
-
-## Backlog For Further VS Code Alignment
-
-- zen/focus modes
-- primary side bar position left/right
-- secondary side bar independent activity targets
-- hover affordances and delayed sash activation for dense UIs
-- view container badges and contextual menus
+# Workbench behavior and migration
+
+Current Worksplit uses one native FlexLayout Model and one TanStack Router per document. This page
+owns behavior rules; [README](../README.md) owns installation and API use, and
+[acceptance](../refactor/acceptance.md) records the tested versions/scenarios.
+
+## State owners
+
+| Fact                                                                     | Owner                                                  |
+| ------------------------------------------------------------------------ | ------------------------------------------------------ |
+| Layout tree, selection, dimensions, pin and maximize                     | FlexLayout Model                                       |
+| Route matching, hooks, accepted location, loaders and errors             | Each document Router                                   |
+| Tab/Router lifetimes, most recent document, MRU and pending coordination | Worksplit                                              |
+| Dirty revisions, saves, shared services/cache and business subscriptions | Application                                            |
+| DOM/window focus                                                         | Browser, observed by Worksplit                         |
+| Address/history                                                          | Browser; one Worksplit coordinator for its owned scope |
+| Persistence                                                              | Explicit application storage of a validated snapshot   |
+
+Tool position does not change its role. A tool focused or docked centrally preserves the last
+active document and its URL. A document docked in Border remains a routed document. Native moves,
+pin, selection, maximize and Border collapse retain mounted inputs, scroll and subscriptions.
+Hidden content keeps running; close and resource registration teardown end its lifetime.
+
+## Browser history
+
+| Operation                                                      | History effect                                                        |
+| -------------------------------------------------------------- | --------------------------------------------------------------------- |
+| New foreground document, changed document location             | Push after accepted routing                                           |
+| Explicit Router replace                                        | Replace                                                               |
+| Activate an existing document / focus another visible document | Replace                                                               |
+| Same canonical location                                        | No push                                                               |
+| Tool focus, size, pin, Border switching                        | None (new document activation follows activation rules)               |
+| Background navigation                                          | None until activation                                                 |
+| Close active document                                          | Same-group MRU, then other MRU; replace successor/home URL            |
+| Back/forward                                                   | Consume owned indexed entry; never push again                         |
+| Refused traversal                                              | Native history.go back to accepted position; preserve forward entries |
+
+Entries carry a scope token, monotonic index and optional instance hint. Reloading an owned entry
+retains its scope; full document navigation to an entry without the marker establishes a new
+scope. Entries outside it require the containing host to handle `history-outside-scope` and
+leave/unmount the workspace. This release does not integrate an outer application Router or
+invent cross-application history. Hint ids are not recycled after closing restored tabs. An
+unavailable hint opens by URL; closed drafts are not restored.
+
+A new history traversal supersedes earlier pending traversals. New open requests while a
+traversal/rollback is physically pending return history-busy; user activation can cancel the
+traversal and queues its replace until rollback completes. A rejected traversal does not use
+replace to disguise a damaged stack. Program focus restoration never starts a history write.
+
+## Coordination boundary
+
+Open uses real Router loading before final identity admission. Redirect conflicts reuse the
+accepted target, leave the source alive, and respect the target's dirty decision when its view
+state differs. The nearest route with Worksplit metadata determines identity. Native nested
+routes continue to match/render through Router, not a second route table.
+
+Native Link/navigate is scoped to its document Router. It can commit a duplicate identity;
+native-identity-conflict reports this and both instances stay alive. No automatic merge or
+rollback follows. This differs from the original design recommendation for every navigation
+entrance: pre-commit final redirect deduplication is confined to open because native Router loads
+commit matches before the resolved notification. The integration does not copy that pipeline.
+
+The installed memory-history blocker does not reliably complete a native navigate Promise on
+refusal. Worksplit observes public blocker outcomes and settles its receipt, without patching
+Router internals. Native callers keep the upstream Promise behavior. Late work may continue;
+operation/session checks prevent it from claiming the URL or resurrecting a closed tab.
+
+Every individual document removal uses the close coordinator. Whole-Tabset closing is disabled in authored
+and restored JSON and rejected as an Action. Grouping, arbitrary node insertion/configuration,
+floating/popouts and Action batches are also rejected. Pure supported layout Actions keep their
+native meaning. The same native-node allowDrop policy checks each member for preview/moves and
+validates admission/restoration; no secondary layout algorithm repairs forbidden layouts.
+
+Dirty approval belongs to application content. Repeated closes share its pending decision;
+registered lifecycle or committed route changes invalidate older approval. Closed reports
+cleanup errors after removal. Ending a registration disposes its resources once; close/dispose
+wait for relevant in-flight cleanup. A node is never recreated to pretend failed cleanup did not
+happen. Shared application services outlive individual document Routers.
+
+Narrow mode temporarily maximizes the active central native group and adds a document selector.
+Widening restores the desktop maximize choice; snapshots preserve that choice, not narrow mode.
+It does not introduce separate mobile layout preferences. Native Border collapse/dimensions remain.
+
+## Breaking changes for later Pluxel migration
+
+The old Workbench component name remains, but its props are now `{ workbench, navigation?, empty?,
+native? }`, with an instance from createWorkbench. Its prior value/layout/editor/view props and
+imperative ref contract are removed. Editing context now records document/tool/shell focus
+separately from active document/group and window focus.
+
+Removed public contracts include WorkbenchValue, WorkbenchLayout, WorkbenchHandle, WorkbenchView,
+WorkbenchEditorArrangement, recursive editor-grid/arrangement helpers, WORKBENCH_PARTS and the
+custom editor drag engine. Old snapshots are not read or migrated at startup. Provide a one-time
+explicit conversion/reset when migrating actual local data. SplitView, Pane, pane sizing and
+independent Pane Kit uses remain.
+
+Pluxel's future work must replace split/view.tsx conversions, its manual
+WorkbenchDocumentRenderer.tsx pathname matching, and separate Shell/grid close/address controllers
+with this integration. Plugin identity, remote renderers, RPC, dirty/save decisions, shared
+services and dynamic availability remain Pluxel owned. This branch changes no Pluxel source,
+dependency or recorded submodule pointer. A second application has not been inspected or accepted;
+internal demo success is not evidence of cross-application compatibility.

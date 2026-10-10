@@ -2,12 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   createSplitLayout,
-  activateWorkbenchView,
-  createWorkbenchValue,
-  createWorkbenchValueSnapshot,
   resizeAtSash,
   resizeSplitLayout,
-  setWorkbenchPartVisibility,
   setPaneSize,
   createSplitSizeSnapshot,
 } from "./index";
@@ -93,31 +89,5 @@ describe("@worksplit/core", () => {
       ["panel", false, 0],
     ]);
     expect(createSplitSizeSnapshot(layout)).toEqual({ editor: 660, left: 240, panel: 0 });
-  });
-
-  it("creates and mutates a versioned workbench view state", () => {
-    const views = [
-      { id: "explorer", part: "primary" as const, defaultActive: true },
-      { id: "search", part: "primary" as const },
-      { id: "terminal", part: "panel" as const, defaultVisible: false },
-    ];
-
-    const value = createWorkbenchValue(views);
-    expect(value.activeByPart).toEqual({ panel: "terminal", primary: "explorer" });
-    expect(value.visibleParts).toEqual({
-      panel: false,
-      primary: true,
-      secondary: false,
-    });
-
-    const withSearch = activateWorkbenchView(views, value, "search");
-    expect(withSearch.activeByPart.primary).toBe("search");
-    expect(withSearch.visibleParts.primary).toBe(true);
-
-    const hidden = setWorkbenchPartVisibility(withSearch, "primary", false);
-    expect(hidden.visibleParts.primary).toBe(false);
-
-    const restored = createWorkbenchValue(views, createWorkbenchValueSnapshot(hidden));
-    expect(restored).toEqual(hidden);
   });
 });

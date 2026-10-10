@@ -1,45 +1,5 @@
 export type SplitOrientation = "horizontal" | "vertical";
 
-export {
-  createEditorArrangement,
-  moveEditorTab,
-  normalizeEditorArrangement,
-  validateEditorArrangement,
-  type CreateEditorArrangementOptions,
-  type EditorArrangement,
-  type EditorArrangementGroup,
-  type EditorArrangementGroupInput,
-  type EditorTabDropTarget,
-  type MoveEditorTabOptions,
-} from "./editor-arrangement";
-
-export {
-  createEditorGridLayout,
-  moveEditorGridGroup,
-  normalizeEditorGridLayout,
-  validateEditorGridLayout,
-  type EditorGridDirection,
-  type EditorGridGroupNode,
-  type EditorGridLayout,
-  type EditorGridSplitChild,
-  type EditorGridSplitNode,
-  type MoveEditorGridGroupOptions,
-} from "./editor-grid";
-
-export {
-  WORKBENCH_PARTS,
-  activateWorkbenchView,
-  createWorkbenchValue,
-  createWorkbenchValueSnapshot,
-  getActiveWorkbenchView,
-  setWorkbenchPartVisibility,
-  toggleWorkbenchPart,
-  type WorkbenchPart,
-  type WorkbenchValue,
-  type WorkbenchValueSnapshot,
-  type WorkbenchViewDescriptor,
-} from "./workbench";
-
 export type PaneSizeValue = number | `${number}px` | `${number}%` | `${number}fr`;
 
 export type PanePriority = "low" | "normal" | "high" | number;

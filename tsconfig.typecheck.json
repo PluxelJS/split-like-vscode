@@ -8,6 +8,7 @@
     "packages/core/tsdown.config.mts",
     "packages/core/vitest.config.mts",
     "packages/react/tsdown.config.mts",
-    "packages/react/vitest.config.mts"
+    "packages/react/vitest.config.mts",
+    "playwright.config.ts"
   ]
 }

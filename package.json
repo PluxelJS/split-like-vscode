@@ -16,9 +16,12 @@
     "catalog:add": "pncat add",
     "catalog:detect": "pncat detect --yes",
     "catalog:migrate": "pncat migrate --yes",
-    "catalog:clean": "pncat clean --yes"
+    "catalog:clean": "pncat clean --yes",
+    "test:browser": "playwright test",
+    "measure": "node scripts/measure-workbench.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "catalog:test",
     "@tsdown/css": "catalog:tooling",
     "@types/node": "catalog:tooling",
     "@types/react": "catalog:frontend",

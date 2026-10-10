@@ -1,305 +1,247 @@
 # Worksplit
 
-A small split-view workspace library inspired by VS Code and the `johnwalley/allotment` layout model.
+Worksplit integrates **FlexLayout 0.11** with **TanStack Router, Store and Hotkeys**. FlexLayout owns
+layout; each document has a real Router and memory history; Worksplit owns document lifetimes,
+activation, guarded closing and the workspace browser history. There is one route definition and
+one native Model, with no parallel docking tree or pathname renderer dispatcher.
 
-This repo is intentionally split into DOM-free core logic and a React binding:
+- `@worksplit/react`: `createWorkbench`, `Workbench`, content lifecycle hooks and independent `SplitView`.
+- `@worksplit/core`: the DOM-free pane sizing/resize calculations used by `SplitView`.
+- `packages/demo`: the complete internal consumer, using public package exports without source aliases.
 
-- `packages/demo`: Vite 8 + React 19 demo with nested editor/workspace panes.
-- `@worksplit/core`: pane constraints, preferred sizes, proportional resize, sash drag math, recursive
-  editor-grid topology, and value snapshots.
-- `@worksplit/react`: React components, ResizeObserver integration, pointer handling, CSS.
+This is a breaking replacement of the old Workbench descriptors, arrangement/grid helpers, part
+state and snapshots. Pluxel and the second application have **not** been migrated. See
+[behavior and migration](docs/vscode-workbench-behavior.md) and [acceptance evidence](refactor/acceptance.md).
 
-pnpm workspaces manage package linking. Turbo coordinates package task graphs and local caching. The
-root package stays as the workspace orchestration layer; demo dependencies belong in the demo
-package.
-
-External dependencies are managed by pncat in the root `pnpm-workspace.yaml` catalogs.
-Use `pnpm catalog:add <package>` to add dependencies and `pnpm catalog:detect` to report
-uncatalogized declarations. Detection is advisory and does not fail CI. Normal versions use caret ranges; published React peer ranges retain their
-broader compatibility contract. The catalogs also make this checkout independently installable
-when its library packages are included in a parent workspace. The parent must provide the
-same catalog names used by those package manifests.
-
-The VS Code-like behavior contract is tracked in
-[docs/vscode-workbench-behavior.md](./docs/vscode-workbench-behavior.md).
-
-## Run
+## Run and verify
 
 ```sh
-pnpm install
-pnpm dev
-```
-
-`pnpm dev` starts the library demo on port `5174`.
-
-## Scripts
-
-```sh
+pnpm install --frozen-lockfile
+pnpm dev                         # http://localhost:5188
 pnpm lint
-pnpm format
-pnpm test
 pnpm typecheck
+pnpm test
 pnpm build
+pnpm format:check
+pnpm exec playwright install chromium
+pnpm test:browser
+pnpm measure                     # a running demo is required
 ```
 
-`build`, `test`, `typecheck`, and `lint` are Turbo-backed. `format` stays a whole-repo write operation.
+External versions live in the workspace pncat catalogs and are locked by `pnpm-lock.yaml`.
+Library source exports use the `development` condition; production consumers use `dist`. Demo
+Vite consumes the same package entry. There are no private source aliases in Vite or TypeScript.
+The demo document HTTP fixture is a Vite development middleware; production hosting must supply
+that endpoint. `build` verifies bundles and declarations, not a production document service.
 
-## Example
+## A complete routed workspace
 
-### SplitView
+Create one TanStack route tree and a Router factory. The factory must use the supplied memory
+history and the same route definition, and may loan shared services through Router context.
+Do not supply another browser history to document Routers.
 
 ```tsx
-import { Pane, SplitView, type SplitViewHandle } from "@worksplit/react";
-import { useRef } from "react";
+import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
+import { createWorkbench, Workbench } from "@worksplit/react";
+import { createRoot } from "react-dom/client";
 
+import "flexlayout-react/style/dark.css";
 import "@worksplit/react/style.css";
 
-export function Workspace() {
-  const workspace = useRef<SplitViewHandle>(null);
-
-  return (
-    <SplitView ref={workspace} orientation="horizontal">
-      <Pane id="explorer" minSize={180} defaultSize={260}>
-        <button onClick={() => workspace.current?.collapsePane("explorer")}>Explorer</button>
-      </Pane>
-      <Pane id="editor" minSize={320} defaultSize="1fr">
-        Editor
-      </Pane>
-      <Pane id="assistant" minSize={220} defaultSize={320}>
-        Assistant
-      </Pane>
-    </SplitView>
-  );
-}
-```
-
-`onLayout` is the single layout lifecycle event. Its `phase` is `start`, `change`, or `commit`, and
-its `reason` identifies pointer, keyboard, visibility, reset, or imperative work. Persistence
-should only consume `commit` events so pointer movement never performs synchronous storage writes.
-
-### Preserving pane content
-
-A collapsed pane unmounts its content by default. Opt into `keepMounted` for forms,
-tabs, or other stateful content:
-
-```tsx
-<Pane id="inspector" keepMounted visible={inspectorVisible}>
-  <Inspector />
-</Pane>
-```
-
-This mounts content even when initially collapsed. Hidden content uses `display: none`,
-`hidden`, `inert`, and `aria-hidden`; it does not participate in the split layout.
-React state, DOM values, and scroll positions survive collapse and expansion. Effects
-and subscriptions continue running; applications still own background-work policies
-and focus restoration. Removing the pane or remounting the SplitView ends its lifetime.
-This option does not move content between containers or manage responsive overlays.
-
-### Workbench
-
-```tsx
-import {
-  Workbench,
-  type WorkbenchEditorGroup,
-  type WorkbenchLayout,
-  type WorkbenchView,
-} from "@worksplit/react";
-
-import "@worksplit/react/style.css";
-
-const views: WorkbenchView[] = [
-  {
-    id: "explorer",
-    part: "primary",
-    title: "Explorer",
-    renderContent: () => <Explorer />,
-  },
-  {
-    id: "terminal",
-    part: "panel",
-    title: "Terminal",
-    renderContent: () => <Terminal />,
-  },
-];
-
-const editorGroups: WorkbenchEditorGroup[] = [
-  {
-    id: "main",
-    tabs: [
-      { id: "app", title: "App.tsx", renderContent: () => <AppFile /> },
-      { id: "split-view", title: "SplitView.tsx", renderContent: () => <SplitViewFile /> },
-    ],
-  },
-  {
-    id: "preview",
-    size: { default: 360, min: 260 },
-    tabs: [{ id: "preview", title: "Preview", renderContent: () => <Preview /> }],
-  },
-  {
-    id: "terminal",
-    tabs: [{ id: "terminal", title: "Terminal", renderContent: () => <Terminal /> }],
-  },
-];
-
-const defaultLayout: WorkbenchLayout = {
-  version: 1,
-  panelPosition: "bottom",
-  value: { version: 1 },
-  editorLayout: {
-    type: "split",
-    id: "root",
-    orientation: "horizontal",
-    children: [
-      { node: { type: "group", groupId: "main" } },
-      {
-        node: {
-          type: "split",
-          id: "preview-stack",
-          orientation: "vertical",
-          children: [
-            { node: { type: "group", groupId: "preview" } },
-            { node: { type: "group", groupId: "terminal" } },
-          ],
-        },
-      },
-    ],
-  },
-};
-
-export function Workspace() {
-  return (
+const rootRoute = createRootRoute({ component: Outlet });
+const documentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/documents/$id",
+  component: () => <h1>Document {documentRoute.useParams().id}</h1>,
+  staticData: { worksplit: { title: "Document", navigationKey: "documents" } },
+});
+const routeTree = rootRoute.addChildren([documentRoute]);
+const workbench = createWorkbench({
+  createRouter: (history) => createRouter({ routeTree, history }),
+  workspaceId: "my-workspace",
+  onIssue: ({ code, error }) => console.error(code, error),
+});
+const root = createRoot(document.getElementById("root")!);
+root.render(
+  <div style={{ height: "100dvh" }}>
     <Workbench
-      defaultLayout={defaultLayout}
-      editorGroups={editorGroups}
-      partSizes={{
-        panel: { default: 220, min: 140, max: 360 },
-        primary: { default: 260, min: 180, max: 420 },
-      }}
-      renderPartHeader={({ actions, part, view }) => (
-        <Header title={view.title} onClose={() => actions.hidePart(part)} />
-      )}
-      storageKey="workspace-layout"
-      views={views}
+      workbench={workbench}
+      navigation={
+        <button
+          onClick={async () => {
+            const result = await workbench.open({ to: "/documents/$id", params: { id: "A" } });
+            if (result.status !== "committed") console.error(result);
+          }}
+        >
+          Document A
+        </button>
+      }
     />
-  );
-}
+  </div>,
+);
+const disconnect = workbench.connectBrowser();
+const initial = await workbench.start(location.pathname + location.search + location.hash);
+if (initial.status !== "committed") console.error(initial);
+// At host shutdown: dispose first so registered async cleanup is settled, then unmount.
+// disconnect(); await workbench.dispose(); root.unmount();
 ```
 
-Workbench state is controlled with `value` / `onValueChange`; uncontrolled initialization uses one
-versioned `defaultLayout`. Layout changes emit through `onLayout`, with area sizes stored by pane
-id. The center area is an `editor` node, static descriptor-based `editorGroups`, or a flat
-`editorTabs` catalog backed by a mutable editor arrangement. Runtime
-`WorkbenchValue` is complete, while `WorkbenchValueSnapshot` stays partial for persistence and
-initialization. Render slots receive a stable `actions` object, so common UI does not need an
-imperative ref.
+`createMemoryHistory` is re-exported by TanStack Router; applications that create standalone
+Routers may use it directly. Worksplit supplies the history for its own document instances.
+The demo shows typed search, nested Outlet, loaders, context, redirects, native blockers and tools.
+Router `Link` and `useNavigate` inside a document retain their native relative navigation,
+replace and browser-link behavior. Global document entrances use `workbench.open`.
 
-Workbench actions compose against the latest pending state, so multiple actions issued in one
-event are applied atomically. Action objects remain stable when consumers recreate equivalent
-`views` or `editorGroups` descriptors during render. Duplicate ids, conflicting defaults, and
-invalid size constraints fail fast with contextual errors.
+## Document operations and completion
 
-`defaultLayout.editorLayout` describes an optional recursive editor grid. Omitting it preserves the
-legacy behavior: one group renders directly and multiple groups form one horizontal split. Split
-nodes have stable ids and may contain horizontal or vertical child splits. Every declared editor
-group must occur exactly once in an authored layout.
+`open(navigation, { target?, newInstance?, background? })` uses TanStack `NavigateOptions` types.
+`target` is a native Tabset or Border id, not a Worksplit region. Omission uses the active/first
+central Tabset. Invalid targets or policies return a load-stage failure; no document is retained.
+`newInstance: true` explicitly permits another instance. `background: true` runs routing without
+claiming activation. The most recent foreground open supersedes older foreground opens;
+activation separately revokes a pending request's right to take focus or write the URL.
 
-The grid owns spatial state, not application content. `moveEditorGroup` can reposition an existing
-group, while creation and deletion of group descriptors remain the consumer's responsibility:
+The nearest matched route declaring `staticData.worksplit` owns identity. Its parsed params and
+optional `identitySearch` fields determine reuse; other search fields and hash are view state.
+Keep these identity values JSON serializable. Nested routes without their own metadata remain
+in the parent document. Full requested locations are honored, including when an existing
+instance's search/hash must change. `activate(id)` preserves its committed location and restores
+its registered synchronous focus callback. Reuse selects the active matching instance, then MRU,
+then creation order. Layout position and pin do not enter identity.
+
+`open` resolves to `committed`, `rejected` (with a reason), `superseded`, or `failed` (with the
+original error and stage). A commit means Router/session/Model admission, not completion of
+React painting or business saves. Router-accepted loader errors remain committed error pages.
+Invalid programming inputs can throw; route and operation failures are available in the receipt
+and `onIssue`. Native Router error boundaries retain their original errors.
+
+**Deduplication is guaranteed at `open`, not at native document navigation.** A speculative real
+Router resolves redirect targets before admission, leaving the source intact. Exact existing
+URLs avoid loaders. A changed existing URL may run a speculative loader and then the live
+Router loader; these are read operations and must be safe to repeat. Shared data caching belongs
+to the application. Ordinary Link/navigate can commit a duplicate identity after redirect;
+Worksplit reports `native-identity-conflict` and keeps both instances. It does not merge them,
+roll back Router internals, or silently discard content. Prefer `open` for cross-document entrances.
+
+The memory-history blocker adapter observes public blocker decisions, because the installed
+TanStack memory history can leave native `navigate()` promises pending on refusal. Worksplit's
+receipt settles on that refusal. Native navigation promises retain upstream semantics.
+`ignoreBlocker` is a native trusted escape hatch; do not use it to bypass content decisions.
+
+## Content decisions, commands and resources
+
+Register a stable lifecycle with `useWorkbenchContentLifecycle`. `isDirty` is read when a document decision
+is needed. Dirty documents without `beforeLeave` are refused. A clean document closes directly.
+The application validates its own editing revision and save receipt before returning approval:
 
 ```tsx
-renderEditorTabLabel={({ actions, group, tab }) => (
-  <button
-    onDoubleClick={() => actions.toggleEditorGroupMaximized(group.id)}
-    onClick={() => actions.activateEditorTab(group.id, tab.id)}
-  >
-    {tab.title}
-  </button>
-)}
-```
-
-`moveEditorGroup`, `equalizeEditorGroups`, `maximizeEditorGroup`, `restoreEditorGroups`, and
-`toggleEditorGroupMaximized` are available on both render-slot actions and `WorkbenchHandle`.
-Maximizing is non-destructive: the topology and committed sash sizes stay intact, and sibling group
-DOM remains mounted.
-
-For user-driven editor placement, pass a flat tab catalog and initialize
-`defaultLayout.editorArrangement`. Worksplit then owns tab order, active tabs, group topology,
-pointer drop targets, empty-group removal, and persistence. The application continues to own tab
-content and lifecycle:
-
-```tsx
-const editorTabs: WorkbenchEditorTab[] = [
-  { id: "ledger", title: "Ledger", renderContent: () => <Ledger /> },
-  { id: "review", title: "Review", renderContent: () => <Review /> },
-];
-
-<Workbench
-  defaultLayout={{
-    version: 1,
-    panelPosition: "bottom",
-    value: { version: 1 },
-    editorArrangement: {
-      groups: [{ id: "main", tabIds: ["ledger", "review"], activeTabId: "ledger" }],
-      layout: { type: "group", groupId: "main" },
+const lifecycle = useMemo(
+  () => ({
+    isDirty: () => draft.current.text !== draft.current.saved,
+    beforeLeave: async () => {
+      const version = draft.current.version;
+      return (await askToDiscard()) && version === draft.current.version;
     },
-  }}
-  editorTabs={editorTabs}
-  renderEditorTab={({ tab, tabProps }) => <button {...tabProps}>{tab.title}</button>}
-  storageKey="workspace-layout"
-/>;
+    focus: () => input.current?.focus({ preventScroll: true }),
+    save: async () => {
+      /* save and validate the application's current revision */
+    },
+    dispose: async () => {
+      await releaseDocumentResources();
+    },
+  }),
+  [],
+);
+useWorkbenchContentLifecycle(lifecycle);
 ```
 
-Dragging a tab within a strip reorders it; dragging across strips moves it; dropping at an editor
-edge creates a left, right, top, or bottom split. Moving the final tab out removes its empty group
-and collapses redundant split nodes. `moveEditorTab` exposes the same operation through render-slot
-actions and `WorkbenchHandle`. `editorArrangement` / `onEditorArrangementChange` provide controlled
-ownership when an application needs it. `renderEditorTab` receives the complete accessible
-`tabProps`; `onEditorTabContextMenu` is available when the application only needs a menu hook.
-Worksplit intentionally does not define close, pin, dirty-document, or product menu semantics.
+This fragment belongs inside a routed component; `draft`, `input`, confirmation and business
+resources are application owned. The executable demo implements it without a second controller.
+The registration ends on route/content unmount; cleanup runs once, and its failures are reported.
+Keep `lifecycle` stable to avoid ending resources on every render. Tools may register disposal
+resources; dirty/save/focus callbacks apply to document operations. A closeable tool is removed
+directly. Use native `enableClose: false` when it should only hide. At shutdown, dispose the
+instance and then unmount the React root to end component effects and binding subscriptions.
 
-For an empty workspace, keep the catalog API and provide `editor` as fallback content:
+`close(id)` shares a pending decision for that instance and rechecks committed route content and
+registration before removal. New editing invalidates approval through the application callback;
+new route content invalidates it in the library. `closed` includes `cleanupErrors`, so post-removal
+cleanup failure never masquerades as refusal or restores a discarded instance. Closing a
+background document does not take focus; active close selects same-group MRU, then other MRU,
+then the configured home URL with an empty editing context. Late navigation cannot revive closed
+instances. Disposal is idempotent, rejects new operations, releases subscriptions and returns
+cleanup errors. Some pending loader work can continue; ignoring its result is not cancellation.
+
+Commands have an id, `document` or `focused` target, optional TanStack hotkey, and one execute
+callback. Toolbar/menu calls and shortcuts share `executeCommand`; target identity is captured
+before async execution. Inputs are ignored by default. Opt into `ignoreInputs: false` for an
+intentional editor command such as save, and respect content handlers that stop propagation.
+`useWorkbenchContent().executeCommand(id)` retains an originating tool/document context through
+React portals. Applications own background task policies and shared services.
+
+## Native layout, tools, focus and persistence
+
+Use native FlexLayout JSON. Document tabs use component `worksplit.document` with `config.href`;
+tool tabs use component `worksplit.tool`, with an id matching a `tools` renderer registration.
+Tools have no Router and never replace the document URL, including when moved to the center.
+A global tool uses one id; explicit multiple tools use distinct registrations/ids.
+Native Border tab selection collapses or expands content; removing a tool is a separate operation.
+Empty Borders auto-hide when `borderEnableAutoHide` is enabled.
+
+`dispatch(Actions...)` accepts native selection, movement, pin, maximize, weights, Border sizing
+and Border mode. Document removal routes through `close`. Identity changes, adding arbitrary
+nodes, action batches, grouping, floating/popouts and whole-Tabset close are rejected. Set
+`tabSetEnableClose: false` (or per-Tabset `enableClose: false`) in custom JSON. Initial/restored
+layouts enabling group close or popouts fail clearly. `allowDrop(tabs, target, location)` applies
+to all members of a moved group, native preview, program moves, initial admission and restoration.
+It is a trusted pure policy: do not mutate native nodes/Model. Tab groups and sublayouts are
+outside the supported snapshot shape for this release.
+
+`getLayout()` returns a detached native snapshot. Ordinary content gets its identity and lifecycle
+registration, not the mutable Model. The optional `native` presentation slots intentionally expose
+native nodes and `getModel()`: they are trusted extensions and must not mutate the owned Model.
+TypeScript readonly declarations cannot isolate those child references. Route hooks similarly
+expose the native Router; keep workspace ownership rules when using its escape hatches.
+
+`getEditingContext()` distinguishes active document/group, focused document/tool/shell, and
+window focus. Tools and shell focus preserve the active document. `useWorkbenchState(instance,
+selector)` is a typed read-only TanStack Store subscription; combine its revision/active id with
+`getDocument` for navigation projections. The demo Inspector updates its marker without changing
+tool selection or stealing navigation focus. Mounted content stays mounted through native moves,
+pin, maximize, selection and Border collapse. Hidden effects continue until content is removed.
+
+Below 640 px the React binding offers a document selector and temporarily maximizes the active
+native central Tabset. On wider screens it restores the prior desktop maximize preference;
+snapshots omit that temporary adjustment. Border size and collapse choices stay native.
+
+Persistence is optional and explicit: save `snapshot()` through application storage and pass the
+parsed candidate as `snapshot` to `createWorkbench`, with the same `workspaceId`. Restore then
+calls `start(addressBarPath)`. The versioned snapshot contains native JSON and document URLs;
+it contains no Router, credentials, drafts or React state. Invalid structure, unknown components,
+duplicate ids, incompatible versions/workspace and forbidden docking fail without repair or
+dropped records. Provide an explicit reset/conversion. Hidden restored documents do not load
+until first displayed; visible groups may each load their selected document. Browser history
+is workspace-local and indexed; the containing host must handle entries outside this workspace.
+See the [behavior contract](docs/vscode-workbench-behavior.md) for the history rules and limits.
+
+## Independent SplitView
 
 ```tsx
-<Workbench editorTabs={editorTabs} editor={<EmptyWorkspace />} />
+import { Pane, SplitView } from "@worksplit/react";
+
+import "@worksplit/react/style.css";
+
+<SplitView orientation="horizontal">
+  <Pane id="list" minSize={180} defaultSize={260}>
+    List
+  </Pane>
+  <Pane id="editor" defaultSize="1fr">
+    Editor
+  </Pane>
+</SplitView>;
 ```
 
-When `editorTabs` is empty, this renders the fallback in the scrollable editor area without creating
-a tab or group: `getEditingContext()` reports null editor ids. Once tabs exist, only their layout
-is rendered. Passing only `editor` still uses the simple single-editor surface.
-
-`Workbench` also owns the last active editor independently of DOM focus. Read it synchronously
-through `handle.getEditingContext()`, or project the final committed context into application UI:
-
-```tsx
-import { Workbench, type WorkbenchEditingContext } from "@worksplit/react";
-
-<Workbench
-  editorTabs={editorTabs}
-  onEditingContextChange={(context: WorkbenchEditingContext) => {
-    // Use context.activeTabId for routing and contextual commands.
-    // context.focusedArea describes DOM focus without clearing that editor.
-    updateEditorContext(context);
-  }}
-/>;
-```
-
-The callback runs in a layout effect after the final React commit and skips unchanged contexts.
-Synchronous actions may read the getter immediately. Sidebars, portals mounted into a workbench
-part, and window blur retain the active editor. See the [editing-context contract](docs/vscode-workbench-behavior.md#editing-context) for controlled arrangements and styling hooks.
-
-`canMoveEditorTab(options, nextArrangement)` lets the application reject a complete tab-move
-candidate before either pointer feedback or imperative submission. The candidate includes removal
-of an empty source group. Returning `false` displays a blocked drag ghost and suppresses the drop
-indicator, arrangement/value callbacks, and persistence for that move. Core no-ops, including a
-sole tab dropped on its own edge, also produce no accepted indicator or arrangement change. This
-policy gates tab moves; consumers still own authored and controlled arrangements.
-
-Dragging uses a separate DOM feedback layer, with pointer updates coalesced into animation frames
-and cached group/content/tab rectangles invalidated by scroll, resize, and consumer renders.
-Tab-strip targets show an insertion line, content-center targets show the full content area, and
-edge targets show the proposed half. An edge starts within the outer tenth and remains selected
-within one third while its candidate is accepted. Tab placement and active content stay in place
-until release, which refreshes geometry, the hit point, and the policy. Escape, pointer cancellation,
-window blur, a replacement gesture, and unmount cancel the gesture; completion, cancellation, and
-callback failures release listeners, scheduled frames, observers, and feedback. Callback failures
-are rethrown after cleanup.
+`Pane keepMounted` retains DOM/state while hidden; the default unmounts collapsed content.
+`onLayout` reports start/change/commit phases and resize/visibility reasons. Persist committed
+sizes only. Independent pane sizing, pointer/keyboard sashes and their tests remain in the core
+and React packages; they are not Workbench's docking engine.

@@ -12,8 +12,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@tanstack/react-router": "catalog:frontend",
+    "@tanstack/react-store": "catalog:frontend",
     "@worksplit/react": "workspace:*",
-    "lucide-react": "catalog:frontend",
+    "flexlayout-react": "catalog:frontend",
     "react": "catalog:frontend",
     "react-dom": "catalog:frontend"
   },
