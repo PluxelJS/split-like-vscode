@@ -13,6 +13,50 @@ This is a breaking replacement of the old Workbench descriptors, arrangement/gri
 state and snapshots. Pluxel and the second application have **not** been migrated. See
 [behavior and migration](docs/vscode-workbench-behavior.md) and [acceptance evidence](refactor/acceptance.md).
 
+## Try this branch in another project
+
+Use `refactor/flexlayout-tanstack` in a separate checkout and build the two library packages:
+
+```sh
+git clone --branch refactor/flexlayout-tanstack --single-branch \
+  https://github.com/ahdg6/split-like-vscode.git worksplit
+cd worksplit
+pnpm install --frozen-lockfile
+pnpm build
+mkdir -p dist
+pnpm --filter @worksplit/core pack --out "$PWD/dist/worksplit-core.tgz"
+pnpm --filter @worksplit/react pack --out "$PWD/dist/worksplit-react.tgz"
+```
+
+Then, in the separate React project's own directory, install both archives and native peers
+together. The paths below refer to the checkout above; keep the application's React and React
+DOM versions compatible with the package peer dependencies. The pinned native versions are
+the ones used for acceptance:
+
+```sh
+npm install /absolute/path/to/worksplit/dist/worksplit-core.tgz \
+  /absolute/path/to/worksplit/dist/worksplit-react.tgz \
+  flexlayout-react@0.11.1 @tanstack/react-router@1.170.42
+```
+
+This repository's root is a private workspace, with workspace/catalog dependency manifests.
+`pnpm pack` produces installable dependency ranges and distribution exports; both archives are
+needed because the React package depends on core. These are local trial packages; no registry
+release is required. Install fresh archives after changes, since the installed package is a copy.
+
+Use TypeScript `moduleResolution: "Bundler"`. Import Worksplit's public React entry and CSS,
+and import native types, Actions and the selected theme directly from `flexlayout-react`.
+Continue with [the complete initialization example](#a-complete-routed-workspace), then
+[customize the host](#customize-the-host-with-native-apis). The host supplies its route tree,
+services, shell, tools and optional snapshot storage.
+
+For a complete external consumer, see [the isolated fixture](scripts/fixtures/packed-consumer/app.tsx).
+It uses public packages, its own shell and real document Routers. `pnpm test:package --browser`
+independently installs freshly packed archives, checks strict types, builds the fixture, and
+drives its production preview. The command prints the retained temporary directory; `npm run dev`
+in that directory starts the fixture independently. Its services are application-local examples;
+an actual host owns its document loading, saving and resource cleanup.
+
 ## Run and verify
 
 ```sh
