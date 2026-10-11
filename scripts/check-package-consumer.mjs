@@ -34,6 +34,7 @@ try {
         "flexlayout-react",
         "@tanstack/react-router",
         "@tanstack/react-store",
+        "@tanstack/react-hotkeys",
       ].map(async (name) => [name, await installedVersion(name)]),
     ),
   );

@@ -1,8 +1,8 @@
 {
-  "startedAt": "2026-10-11T07:03:07.966Z",
+  "startedAt": "2026-10-11T08:10:18.821Z",
   "status": "passed",
-  "consumerDirectory": "/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-ZvoQUi",
-  "url": "http://127.0.0.1:34643",
+  "consumerDirectory": "/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-axpoMG",
+  "url": "http://127.0.0.1:42785",
   "conditions": {
     "distribution": "Packed public JS, declarations and CSS; Vite production build and preview",
     "browser": "Headless Chromium installed by this repository's Playwright",
@@ -14,6 +14,7 @@
       "width": 390,
       "height": 844
     },
+    "keyboard": "Control modifier in Linux Chromium; application-owned native Store and HotkeysProvider",
     "limitations": [
       "One independent tarball consumer fixture; this does not prove Pluxel compatibility or cross-application generality.",
       "Application counters and DOM/provider identity describe this fixture's resources, not heap leak detection or performance.",
@@ -26,6 +27,9 @@
     "Two concurrent public document Routers, application providers and subscriptions",
     "Direct upstream Layout ref inline rename and redraw preserve the provider and editor",
     "Both live application subscriptions receive real save receipts after host rerender",
+    "Real keyboard save captures A before native selection changes to B; the next shortcut saves B once",
+    "Application Store preference UI rebinds and disables the native hook without retaining the old binding or duplicating saves",
+    "Native Provider preventDefault and input options govern real keyboard events; app Store updates keep document providers and resources",
     "Native movement between application-configured TabSets retains uncontrolled input DOM, providers and resources without loaders",
     "Typed Workbench open refusal and real TanStack Link dirty navigation refusal/approval coordinate the document URL",
     "Registered native tool insertion, close and reopen keep the document URL and sessions",
@@ -61,13 +65,13 @@
   "initial": {
     "documents": [
       {
-        "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-1",
+        "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-1",
         "href": "/documents/A?view=edit",
         "title": "Published document",
         "navigationKey": "documents"
       },
       {
-        "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-2",
+        "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-2",
         "href": "/documents/B?view=edit",
         "title": "Published document",
         "navigationKey": "documents"
@@ -84,13 +88,81 @@
       "disposals": 0,
       "providerMounts": 2,
       "providerUnmounts": 0,
-      "providers": 2
+      "providers": 2,
+      "pendingSaveId": "",
+      "lastSavedId": ""
+    }
+  },
+  "externalKeyboard": {
+    "before": {
+      "loads": 2,
+      "saves": 1,
+      "routersCreated": 3,
+      "liveRouters": 3,
+      "editorMounts": 2,
+      "editorUnmounts": 0,
+      "subscriptions": 2,
+      "disposals": 0,
+      "providerMounts": 2,
+      "providerUnmounts": 0,
+      "providers": 2,
+      "pendingSaveId": "",
+      "lastSavedId": "document-118ddfb6cb8420e6f3ce56064cf9825e-2"
+    },
+    "whileSavePending": {
+      "activeDocumentId": "document-118ddfb6cb8420e6f3ce56064cf9825e-2",
+      "pendingSaveId": "document-118ddfb6cb8420e6f3ce56064cf9825e-1"
+    },
+    "after": {
+      "loads": 2,
+      "saves": 5,
+      "routersCreated": 3,
+      "liveRouters": 3,
+      "editorMounts": 2,
+      "editorUnmounts": 0,
+      "subscriptions": 2,
+      "disposals": 0,
+      "providerMounts": 2,
+      "providerUnmounts": 0,
+      "providers": 2,
+      "pendingSaveId": "",
+      "lastSavedId": "document-118ddfb6cb8420e6f3ce56064cf9825e-2"
+    },
+    "events": {
+      "first": {
+        "code": "KeyS",
+        "defaultPrevented": true
+      },
+      "second": {
+        "code": "KeyS",
+        "defaultPrevented": true
+      },
+      "oldBinding": {
+        "code": "KeyS",
+        "defaultPrevented": false
+      },
+      "rebound": {
+        "code": "KeyS",
+        "defaultPrevented": true
+      },
+      "disabled": {
+        "code": "KeyS",
+        "defaultPrevented": false
+      },
+      "ignoredInput": {
+        "code": "KeyS",
+        "defaultPrevented": false
+      },
+      "outsideInput": {
+        "code": "KeyS",
+        "defaultPrevented": true
+      }
     }
   },
   "rejectedWorkbenchNavigation": {
     "metrics": {
       "loads": 3,
-      "saves": 1,
+      "saves": 5,
       "routersCreated": 4,
       "liveRouters": 3,
       "editorMounts": 2,
@@ -99,7 +171,9 @@
       "disposals": 0,
       "providerMounts": 2,
       "providerUnmounts": 0,
-      "providers": 2
+      "providers": 2,
+      "pendingSaveId": "",
+      "lastSavedId": "document-118ddfb6cb8420e6f3ce56064cf9825e-2"
     }
   },
   "nativeSnapshots": {
@@ -129,7 +203,7 @@
         ],
         "layout": {
           "type": "row",
-          "id": "#7ef39c15-4f1c-4d52-aa64-421105901a53",
+          "id": "#47271d5e-568a-4c2d-9dbc-1732a71e34e9",
           "children": [
             {
               "type": "tabset",
@@ -139,7 +213,7 @@
               "children": [
                 {
                   "type": "tab",
-                  "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-1",
+                  "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-1",
                   "name": "Published document",
                   "component": "worksplit.document",
                   "config": {
@@ -166,7 +240,7 @@
               "children": [
                 {
                   "type": "tab",
-                  "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-2",
+                  "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-2",
                   "name": "Published document",
                   "component": "worksplit.document",
                   "config": {
@@ -209,7 +283,7 @@
         ],
         "layout": {
           "type": "row",
-          "id": "#7ef39c15-4f1c-4d52-aa64-421105901a53",
+          "id": "#47271d5e-568a-4c2d-9dbc-1732a71e34e9",
           "children": [
             {
               "type": "tabset",
@@ -219,7 +293,7 @@
               "children": [
                 {
                   "type": "tab",
-                  "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-1",
+                  "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-1",
                   "name": "Published document",
                   "component": "worksplit.document",
                   "config": {
@@ -247,7 +321,7 @@
               "children": [
                 {
                   "type": "tab",
-                  "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-2",
+                  "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-2",
                   "name": "Published document",
                   "component": "worksplit.document",
                   "config": {
@@ -268,7 +342,7 @@
   "beforeDispose": {
     "documents": [
       {
-        "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-2",
+        "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-2",
         "href": "/documents/B?view=edit",
         "title": "Published document",
         "navigationKey": "documents"
@@ -276,7 +350,7 @@
     ],
     "metrics": {
       "loads": 3,
-      "saves": 1,
+      "saves": 5,
       "routersCreated": 4,
       "liveRouters": 2,
       "editorMounts": 2,
@@ -285,14 +359,16 @@
       "disposals": 1,
       "providerMounts": 2,
       "providerUnmounts": 1,
-      "providers": 1
+      "providers": 1,
+      "pendingSaveId": "",
+      "lastSavedId": "document-118ddfb6cb8420e6f3ce56064cf9825e-2"
     }
   },
   "disposed": {
     "documentCount": 0,
     "metrics": {
       "loads": 3,
-      "saves": 1,
+      "saves": 5,
       "routersCreated": 4,
       "liveRouters": 0,
       "editorMounts": 2,
@@ -301,17 +377,19 @@
       "disposals": 2,
       "providerMounts": 2,
       "providerUnmounts": 2,
-      "providers": 0
+      "providers": 0,
+      "pendingSaveId": "",
+      "lastSavedId": "document-118ddfb6cb8420e6f3ce56064cf9825e-2"
     },
     "cleanup": []
   },
   "screenshots": ["packed-consumer-desktop.png", "packed-consumer-narrow.png"],
-  "completedAt": "2026-10-11T07:03:09.896Z",
+  "completedAt": "2026-10-11T08:10:21.954Z",
   "preview": {
     "exit": {
       "code": 143,
       "signal": null
     },
-    "log": "  ➜  Local:   http://127.0.0.1:34643/\n"
+    "log": "  ➜  Local:   http://127.0.0.1:42785/\n"
   }
 }

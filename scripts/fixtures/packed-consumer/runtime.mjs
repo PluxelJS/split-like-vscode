@@ -3,7 +3,9 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { HotkeysProvider, useHotkey } from "@tanstack/react-hotkeys";
 import { createRootRouteWithContext, createRoute, createRouter } from "@tanstack/react-router";
+import { createStore } from "@tanstack/react-store";
 import { createSplitLayout, resizeAtSash } from "@worksplit/core";
 import {
   createWorkbench,
@@ -15,7 +17,15 @@ import {
 import { Actions, DockLocation, Model, TabGroupNode, TabNode } from "flexlayout-react";
 import { createElement } from "react";
 
-for (const value of [Workbench, SplitView, Pane, useWorkbenchContentLifecycle]) assert.ok(value);
+for (const value of [
+  Workbench,
+  SplitView,
+  Pane,
+  useWorkbenchContentLifecycle,
+  HotkeysProvider,
+  useHotkey,
+])
+  assert.ok(value);
 for (const name of ["core", "react"]) {
   const specifier = "@worksplit/" + name;
   const entry = fileURLToPath(import.meta.resolve(specifier));
@@ -24,6 +34,12 @@ for (const name of ["core", "react"]) {
     readFileSync(new URL(import.meta.resolve(specifier + "/package.json")), "utf8"),
   );
   assert.equal(manifest.exports["."], "./dist/index.js");
+  if (name === "react") {
+    for (const peer of ["@tanstack/react-store", "@tanstack/react-hotkeys"]) {
+      assert.equal(typeof manifest.peerDependencies?.[peer], "string", peer + " must be a peer");
+      assert.equal(manifest.dependencies?.[peer], undefined, peer + " must be supplied by the app");
+    }
+  }
   for (const target of ["index.js", "index.d.ts"]) {
     const file = join(process.cwd(), "node_modules", specifier, "dist", target);
     const source = readFileSync(file, "utf8");
@@ -34,6 +50,9 @@ for (const name of ["core", "react"]) {
     assert.equal(JSON.parse(readFileSync(mapFile, "utf8")).version, 3);
   }
 }
+const preferences = createStore({ enabled: true });
+preferences.setState((state) => ({ ...state, enabled: false }));
+assert.equal(preferences.get().enabled, false);
 const cssPath = fileURLToPath(import.meta.resolve("@worksplit/react/style.css"));
 assert.ok(cssPath.endsWith("/dist/style.css"));
 const css = readFileSync(cssPath, "utf8");
@@ -164,5 +183,5 @@ assert.equal(
   600,
 );
 process.stdout.write(
-  "Packed JS, native tool admission, routes, close cleanup, CSS and maps passed\n",
+  "Packed JS, Store/Hotkeys peers, native tool admission, routes, close cleanup, CSS and maps passed\n",
 );

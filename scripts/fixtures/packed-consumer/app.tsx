@@ -1,3 +1,4 @@
+import { HotkeysProvider, useHotkey } from "@tanstack/react-hotkeys";
 import {
   createRootRouteWithContext,
   createRoute,
@@ -55,8 +56,15 @@ const services = {
     providerMounts: 0,
     providerUnmounts: 0,
     providers: 0,
+    pendingSaveId: "",
+    lastSavedId: "",
   }),
 };
+const keyboardPreferences = createStore({
+  saveKey: "Mod+S" as "Mod+S" | "Mod+Shift+S",
+  enabled: true,
+  ignoreInputs: false,
+});
 const ServiceContext = createContext<{
   services: typeof services;
   documentId: string;
@@ -158,8 +166,15 @@ export const workbench = createWorkbench({
     {
       id: "save",
       target: "document",
-      hotkey: "Mod+S",
-      execute: ({ id }): Promise<void> => workbench.save(id),
+      execute: async ({ id }): Promise<void> => {
+        services.metrics.setState((state) => ({ ...state, pendingSaveId: id }));
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        try {
+          await workbench.save(id);
+        } finally {
+          services.metrics.setState((state) => ({ ...state, pendingSaveId: "" }));
+        }
+      },
     },
   ],
   onIssue: ({ code, error }) => issues.setState((state) => [...state, code + ": " + String(error)]),
@@ -173,6 +188,7 @@ declare global {
       DockLocation: typeof DockLocation;
       getLayoutApi: () => ILayoutApi | null;
       getMetrics: () => ReturnType<typeof services.metrics.get>;
+      getPreferences: () => ReturnType<typeof keyboardPreferences.get>;
     };
   }
 }
@@ -243,11 +259,15 @@ function Editor() {
       focus: () => input.current?.focus(),
       save: () => {
         dirty.current = false;
-        services.metrics.setState((state) => ({ ...state, saves: state.saves + 1 }));
+        services.metrics.setState((state) => ({
+          ...state,
+          saves: state.saves + 1,
+          lastSavedId: content.id,
+        }));
       },
       dispose: () => release.current?.(),
     }),
-    [],
+    [content.id],
   );
   useWorkbenchContentLifecycle(lifecycle);
   return (
@@ -336,6 +356,16 @@ function App() {
   const active = useWorkbenchState(workbench, (state) => state.activeDocumentId);
   const metrics = useStore(services.metrics, (state) => state);
   const reported = useStore(issues, (state) => state);
+  const shortcuts = useStore(keyboardPreferences, (state) => state);
+  useHotkey(
+    shortcuts.saveKey,
+    () => {
+      void workbench
+        .executeCommand("save")
+        .catch((error: unknown) => issues.setState((state) => [...state, String(error)]));
+    },
+    { enabled: shortcuts.enabled, ignoreInputs: shortcuts.ignoreInputs },
+  );
   const layoutApi = useRef<ILayoutApi>(null);
   const nativeModel = useRef<Model | null>(null);
   const [ready, setReady] = useState(false);
@@ -348,6 +378,7 @@ function App() {
       DockLocation,
       getLayoutApi: () => layoutApi.current,
       getMetrics: () => services.metrics.get(),
+      getPreferences: () => keyboardPreferences.get(),
     };
     setReady(!!layoutApi.current?.getRootDiv());
     return () => {
@@ -397,6 +428,59 @@ function App() {
         native={native}
         navigation={
           <>
+            <fieldset className="keyboard-preferences">
+              <legend>Application keyboard preferences</legend>
+              <label>
+                Save shortcut
+                <select
+                  aria-label="Save shortcut"
+                  value={shortcuts.saveKey}
+                  onChange={(event) => {
+                    const saveKey = event.target.value;
+                    if (saveKey === "Mod+S" || saveKey === "Mod+Shift+S")
+                      keyboardPreferences.setState((state) => ({ ...state, saveKey }));
+                  }}
+                >
+                  <option value="Mod+S">Mod+S</option>
+                  <option value="Mod+Shift+S">Mod+Shift+S</option>
+                </select>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label="Enable save shortcut"
+                  checked={shortcuts.enabled}
+                  onChange={(event) => {
+                    const enabled = event.target.checked;
+                    keyboardPreferences.setState((state) => ({ ...state, enabled }));
+                  }}
+                />
+                Enable save shortcut
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  aria-label="Ignore shortcuts in inputs"
+                  checked={shortcuts.ignoreInputs}
+                  onChange={(event) => {
+                    const ignoreInputs = event.target.checked;
+                    keyboardPreferences.setState((state) => ({ ...state, ignoreInputs }));
+                  }}
+                />
+                Ignore shortcuts in inputs
+              </label>
+              <output aria-label="Shortcut preference">
+                {shortcuts.saveKey} · {shortcuts.enabled ? "enabled" : "disabled"} ·{" "}
+                {shortcuts.ignoreInputs ? "inputs ignored" : "inputs allowed"}
+              </output>
+              <output aria-label="Save command receipt">
+                {metrics.pendingSaveId
+                  ? "Saving " + metrics.pendingSaveId
+                  : metrics.lastSavedId
+                    ? "Saved " + metrics.lastSavedId
+                    : "No saves yet"}
+              </output>
+            </fieldset>
             <button
               type="button"
               onClick={() =>
@@ -482,7 +566,11 @@ function App() {
 }
 
 const root = createRoot(document.getElementById("root")!);
-root.render(<App />);
+root.render(
+  <HotkeysProvider defaultOptions={{ hotkey: { preventDefault: true } }}>
+    <App />
+  </HotkeysProvider>,
+);
 const disconnect = workbench.connectBrowser();
 void (async () => {
   const href = window.location.pathname.startsWith("/documents/")

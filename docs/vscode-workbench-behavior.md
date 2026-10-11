@@ -183,6 +183,10 @@ The old Workbench component name remains, with an instance from createWorkbench,
 navigation/empty content, native Layout props, native `layoutRef` and standard root DOM props.
 Its prior value/layout/editor/view props and Worksplit imperative ref contract are removed.
 Tool registrations contain only `id` and `render`; native JSON `name` supplies their titles.
+The host supplies compatible React Router, Store and Hotkeys adapters, React/React DOM and
+FlexLayout as peers. For application-owned stores, runtime keybinding preferences and native
+Hotkeys providers/hooks, use the [host shortcuts and stores](../README.md#host-shortcuts-and-frontend-stores)
+entry. Command execution keeps Worksplit's target/lifetime coordination.
 Use native providers, presentation slots and the upstream `ILayoutApi` as documented in
 [host customization](../README.md#customize-the-host-with-native-apis), including its intercepted
 insertion-return limitation. Editing context now records document/tool/shell focus

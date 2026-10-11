@@ -36,13 +36,17 @@ the ones used for acceptance:
 ```sh
 npm install /absolute/path/to/worksplit/dist/worksplit-core.tgz \
   /absolute/path/to/worksplit/dist/worksplit-react.tgz \
-  flexlayout-react@0.11.1 @tanstack/react-router@1.170.42
+  flexlayout-react@0.11.1 @tanstack/react-router@1.170.42 \
+  @tanstack/react-store@0.11.2 @tanstack/react-hotkeys@0.13.0
 ```
 
 This repository's root is a private workspace, with workspace/catalog dependency manifests.
 `pnpm pack` produces installable dependency ranges and distribution exports; both archives are
 needed because the React package depends on core. These are local trial packages; no registry
 release is required. Install fresh archives after changes, since the installed package is a copy.
+React, React DOM, FlexLayout and the TanStack React Router, Store and Hotkeys adapters are required
+peers: the host owns their compatible versions and shared React contexts. Their transitive SDK
+dependencies remain owned by the upstream packages; `@worksplit/core` is a regular dependency.
 
 Use TypeScript `moduleResolution: "Bundler"`. Import Worksplit's public React entry and CSS,
 and import native types, Actions and the selected theme directly from `flexlayout-react`.
@@ -262,6 +266,65 @@ before async execution. Inputs are ignored by default. Opt into `ignoreInputs: f
 intentional editor command such as save, and respect content handlers that stop propagation.
 `useWorkbenchContent().executeCommand(id)` retains an originating tool/document context through
 React portals. Applications own background task policies and shared services.
+
+### Host shortcuts and frontend stores
+
+`commands[].hotkey` is a convenience binding configured when creating the instance. For runtime
+remapping, recording, enabled state, sequences or full native options, import TanStack Hotkeys
+hooks directly and call `workbench.executeCommand(id)`. Omit that command's built-in `hotkey` so
+there is one binding. The application owns keyboard preferences and their optional storage;
+Worksplit still captures the command target before asynchronous execution.
+
+For a workbench with a document `save` command whose execute callback calls `workbench.save(id)`,
+the host can bind it from its own native Store:
+
+```tsx
+import { HotkeysProvider, useHotkey, type UseHotkeyDefinition } from "@tanstack/react-hotkeys";
+import { createStore, useStore } from "@tanstack/react-store";
+
+const shortcutPreferences = createStore({
+  saveKey: "Mod+S" as UseHotkeyDefinition["hotkey"],
+  enabled: true,
+  ignoreInputs: false,
+});
+
+function ApplicationShortcuts() {
+  const settings = useStore(shortcutPreferences, (state) => state);
+  useHotkey(
+    settings.saveKey,
+    () => {
+      void workbench.executeCommand("save").catch(console.error);
+    },
+    { enabled: settings.enabled, ignoreInputs: settings.ignoreInputs },
+  );
+  return null;
+}
+
+root.render(
+  <HotkeysProvider defaultOptions={{ hotkey: { preventDefault: true } }}>
+    <div style={{ height: "100dvh" }}>
+      <ApplicationShortcuts />
+      <Workbench workbench={workbench} />
+    </div>
+  </HotkeysProvider>,
+);
+// Apply a user's preference without recreating Workbench or its document Routers:
+shortcutPreferences.setState((state) => ({ ...state, saveKey: "Mod+Shift+S" }));
+```
+
+This native hook is host-wide; use its native `target` option to scope it to a host element.
+Provider defaults follow upstream precedence: hook and per-definition options override them.
+Workbench's convenience bindings supply their own input policy and `stopPropagation: false`;
+full input/event/target control belongs in the host hook. FlexLayout's tab-strip keyboard controls
+use `native.keyMap`, independently of document command bindings.
+See the upstream [Hotkeys guide](https://tanstack.com/hotkeys/latest/docs/framework/react/guides/hotkeys)
+for recorder, conflict, sequence and option behavior.
+
+The frontend can use `createStore` / `useStore` for its own preferences, theme, services and data.
+That Store is application-owned; `useWorkbenchState(workbench, selector)` reads coordination state.
+Keep document/layout writes in Worksplit operations and native Actions. There is no Worksplit
+Store facade, generic data store or duplicate shortcut registry. The
+[independent consumer](scripts/fixtures/packed-consumer/app.tsx) exercises both native APIs.
 
 ## Native layout, tools, focus and persistence
 

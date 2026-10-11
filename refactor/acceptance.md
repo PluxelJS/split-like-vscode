@@ -1,6 +1,6 @@
 # Worksplit 内部重构验收
 
-验收日期：2026-10-11（补齐原生能力、空区整理、删除强制窄屏控制器、demo 右侧 Border，以及公开包的独立安装消费复核）。范围是 Worksplit 库、自有 demo 和一个隔离消费者 fixture；Pluxel、第二应用及跨应用兼容性没有接入或验收。
+验收日期：2026-10-11（补齐原生能力、空区整理、删除强制窄屏控制器、demo 右侧 Border，以及公开包独立安装、宿主 Store 和动态快捷键复核）。范围是 Worksplit 库、自有 demo 和一个隔离消费者 fixture；Pluxel、第二应用及跨应用兼容性没有接入或验收。
 
 ## 隔离与交付位置
 
@@ -39,8 +39,11 @@ React binding 的 `native` 选项直接沿用上游 `ILayoutProps`，仅排除�
 | Playwright / Chromium                          | 1.64.0 / 156.0.8078.4         |
 | Node（pnpm 脚本）/ pnpm                        | 24.21.0 / 11.8.0              |
 
-版本核对来自安装后的 package 信息及 `pnpm-lock.yaml`；公开 dist JS smoke 另用 shell Node 24.16.0。Router 和 FlexLayout 为 peer，demo 显式消费相同实例。
-Store、Hotkeys 在库中使用；Hotkeys、Store 和 Model 没有另造事件总线、路由表或布局树。
+版本核对来自安装后的 package 信息及 `pnpm-lock.yaml`；公开 dist JS smoke 另用 shell Node 24.16.0。
+React、React DOM、FlexLayout 和 TanStack React Router、Store、Hotkeys 适配器均为必需 peer；
+demo 与独立消费者显式安装相同版本，库的 dist 保留对三个 TanStack 适配器的裸导入。
+宿主拥有应用 Store 和原生 Hotkeys provider/hooks；库内部协调 Store 通过 selector 读取。
+没有另造事件总线、路由表、布局树、Store facade 或改键 registry。
 `packages/demo` 只导入公开包入口；Vite 与 TypeScript 的私有源码 alias 已删除。
 生产 build 使用默认 dist exports，开发服务使用公开的 development condition。
 
@@ -52,21 +55,22 @@ Store、Hotkeys 在库中使用；Hotkeys、Store 和 Model 没有另造事件�
 删除强制窄屏呈现及桌面偏好覆盖层见 [发行说明](../.tegami/remove-forced-compact-layout.md)。
 原生 ref、宿主定制、工具重开、文档入场清理和声明 map 修正见
 [发行说明](../.tegami/native-external-consumption.md)。
+Store/Hotkeys 改为 peer 与宿主动态快捷键用法见 [发行说明](../.tegami/share-tanstack-host-peers.md)。
 
 ## 检查结果
 
-| 检查                                    | 结果                                                                                                                   |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `pnpm lint`                             | 通过，0 warning / 0 error                                                                                              |
-| `pnpm typecheck`                        | core、react、demo、工具配置及新增浏览器 TypeScript 通过；类型化导航的错误调用断言通过                                  |
-| `pnpm test`                             | 126 项通过：core 5、SplitView 18、文档协调 9、多 Router 1、原生能力与生命周期 83、原生 React 交互 4、公开 React 定制 6 |
-| `pnpm build`                            | 三个包通过；生产 demo 从公开 dist 入口打包                                                                             |
-| `pnpm source-declarations:check`        | 通过，构建未在源码中遗留声明文件                                                                                       |
-| `pnpm format:check`、`git diff --check` | 通过                                                                                                                   |
-| `pnpm test:browser`                     | 42 项 Chromium 测试通过，0 skipped / unexpected / flaky                                                                |
-| `pnpm test:package --browser`           | tarball 独立安装后两种条件的 JS、严格 Bundler 类型检查、Vite 生产构建及 10 项浏览器交互检查通过；页面/控制台错误均为 0 |
-| 公开 dist JS smoke                      | 从 demo 包解析 `@worksplit/react`，双文档、原生分组、实际最大化快照/恢复、受控整分区关闭、dispose 通过                 |
-| 删除符号与本地 Markdown 链接检查        | 通过；旧符号仅在迁移说明或设计语义中出现                                                                               |
+| 检查                                    | 结果                                                                                                                                            |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm lint`                             | 通过，0 warning / 0 error                                                                                                                       |
+| `pnpm typecheck`                        | core、react、demo、工具配置及新增浏览器 TypeScript 通过；类型化导航的错误调用断言通过                                                           |
+| `pnpm test`                             | 128 项通过：core 5、SplitView 18、文档协调 9、多 Router 1、原生能力与生命周期 83、原生 React 交互 4、公开 React 定制 8                          |
+| `pnpm build`                            | 三个包通过；生产 demo 从公开 dist 入口打包                                                                                                      |
+| `pnpm source-declarations:check`        | 通过，构建未在源码中遗留声明文件                                                                                                                |
+| `pnpm format:check`、`git diff --check` | 通过                                                                                                                                            |
+| `pnpm test:browser`                     | 42 项 Chromium 测试通过，0 skipped / unexpected / flaky                                                                                         |
+| `pnpm test:package --browser`           | tarball 独立安装后两种条件的 JS、严格 Bundler 类型检查、Store/Hotkeys peer 契约、Vite 生产构建及 13 项浏览器交互检查通过；页面/控制台错误均为 0 |
+| 公开 dist JS smoke                      | 从 demo 包解析 `@worksplit/react`，双文档、原生分组、实际最大化快照/恢复、受控整分区关闭、dispose 通过                                          |
+| 删除符号与本地 Markdown 链接检查        | 通过；旧符号仅在迁移说明或设计语义中出现                                                                                                        |
 
 可见但未隐藏的提示：tsdown 提示 TypeScript 7 API 尚属 experimental；生产 demo 单个 JS chunk 为
 579.25 kB（gzip 170.67 kB），超过 Vite 默认 500 kB 提示阈值；多 Router 的 jsdom 检查提示未实现
@@ -90,10 +94,10 @@ DOM-free core 单独的 NodeNext 检查通过。声明 map 文件有效，不保
 
 同一个 fixture 的 Vite 生产构建由
 [浏览器脚本](../scripts/check-package-browser.mjs) 在临时空闲端口启动并验收；完成后停止该 preview。
-最终独立安装目录为 `/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-ZvoQUi`。
+最终独立安装目录为 `/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-axpoMG`。
 原始结果：[packed-consumer-results.json](acceptance/packed-consumer-results.json)；
 截图：[1440×900](acceptance/packed-consumer-desktop.png)、[390×844](acceptance/packed-consumer-narrow.png)，
-已目视复核。其 JS chunk 为 561.59 kB（gzip 165.86 kB），同样保留默认 chunk 大小提示。
+已目视复核。其 JS chunk 为 564.52 kB（gzip 166.55 kB），同样保留默认 chunk 大小提示。
 
 | 可定制能力                 | 公开入口与实际断言                                                                                                                           |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -101,16 +105,27 @@ DOM-free core 单独的 NodeNext 检查通过。声明 map 文件有效，不保
 | 标签、分区呈现与交互       | 直接导入 FlexLayout 类型、Actions；原生 leading/icon/header/placeholder、Creation hook、原生 change listener 及卸载清理由公开 React 测试覆盖 |
 | 原生 ref                   | 直接 `Ref<ILayoutApi>`，真实 inline rename/redraw 后保持编辑 DOM 和 provider；没有另造 Worksplit handle                                      |
 | 每文档服务和内容 chrome    | Router `Wrap` 中读取公开内容 context，两份 provider/token 和业务订阅同时存在；root route/Outlet 与普通工具 renderer 可自行呈现               |
+| 宿主 Store 和快捷键偏好    | 直接导入原生 Store/Hotkeys，偏好 UI 控制改键、禁用与输入策略；实际键盘事件验证 Provider preventDefault、无重复保存及异步命令目标捕获         |
 | pending/error 与语言       | 使用应用的 Router pending/error 组件及原生 per-tab 错误/Retry；兄弟文档的 Router、provider 和 DOM 不重建，公开 React 测试覆盖                |
 | 动态工具入树               | 注册只含 id/renderer；原生 JSON 拥有标题、config 与停靠选项，公开 `Actions.addTab` / close / reopen 不抢文档 URL；旧注册不能覆盖新实例       |
 | 路由与移除决策             | 实际 typed open 和 TanStack Link 拒绝/批准，dirty 原生 close 拒绝/批准；A 关闭资源只释放一次，B 保持原 DOM/provider                          |
 | 原生移动、缩小及最大化     | 同一编辑 DOM、输入、provider 与业务订阅保留；390px resize 不改 JSON/snapshot，用户手动最大化跨拓宽保持，Restore 恢复同一兄弟 DOM             |
 
-公开 React 定制有 6 项单元测试；独立生产浏览器记录 10 个完成的检查阶段，不将它们混入 demo 的 42 项计数。
+公开 React 定制有 8 项单元测试；独立生产浏览器记录 13 个完成的检查阶段，不将它们混入 demo 的 42 项计数。
 消费者一开始两份文档共有 3 个 Router（含 URL resolver）、2 次 loader、2 份 provider/订阅；拒绝的
 Workbench view-state open 会运行 1 次 speculative loader，候选 Router 随后释放，两个原内容保留。
 最终 dispose 后存活 Router、provider 和业务订阅均为 0，cleanupErrors 为空。
 这些是 fixture 的资源计数，不是全部内部订阅或内存泄漏证明。
+
+新增公开 React 回归验证：宿主 HotkeysProvider 的 enabled/preventDefault 控制内置便利绑定，
+每绑定的 input policy 与原生 root target 保持既有契约；宿主 native hook/Store 可动态更新并在卸载时清理。
+生产 fixture 的命令省略内置 hotkey，应用用原生 createStore/useStore/useHotkey 提供偏好 UI。
+Linux Chromium 中真实 Control+S、Control+Shift+S 验证旧键解绑、禁用、输入策略与默认事件阻止；
+四次匹配按键增加四次实际 lifecycle.save（计数从 1 到 5），不匹配、禁用及忽略输入的按键均不保存。
+应用保存回调显式等待 200 ms，切到 B 时 A 的 save 仍 pending；完成的是 A，下一次按键保存 B。
+改键期间 loader 仍为 2，存活 Router 为 3，provider/业务订阅为 2，两份编辑 DOM/token 保持。
+此等待属于 fixture 的异步行为，不是库的延迟策略；没有验证 macOS 按键、IME 或应用持久化偏好 UI。
+FlexLayout 的 tab-strip keyMap 保持由原生 Layout 管理，未加入另一个 Worksplit 快捷键协议。
 
 首次浏览器检查发现 fixture 误将后台打开到空 TabSet 视为可见文档：原生保持 `selected: -1`，
 已入场 Router/session 正常，render-on-demand 未挂载内容。修正 fixture 为显式打开 B 后公开 activate A，
@@ -268,7 +283,8 @@ Router，属于实例寿命；实例 dispose 的浏览器测试验证它也被�
 不是纯 CPU 时间；渲染计数是业务组件提交 effect，不覆盖 speculative render 或全部 shell 渲染。
 订阅计数覆盖 demo 业务服务与公开 history.subscribers，不穷举 Router/React Store 内部订阅。
 单文档一个 Router 的资源与关闭成本随数量增长；50 个文档的逐个关闭回执约 859.4 ms。
-本轮公开消费修正后重新采样；与上一轮相比耗时更高，未经控制变量重复实验，不将差异归因为某段代码
+这组数据在公开消费修正后的 `6ca369c` 采样；后续 peer 元数据和宿主快捷键示例改动没有修改库的协调实现，
+未重新采样，也未将其当作动态快捷键性能基准。与上一轮相比耗时更高，未经控制变量重复实验，不将差异归因为某段代码
 的收益或回归，也不选取更快的旧样本作为最终结果。
 
 追加原生工作负载：`pnpm measure:native`，脚本
@@ -306,6 +322,7 @@ Workbench 名称保留，但 props 改为 workbench/navigation/empty/native，�
 后续须迁移 `split/view.tsx` 转换、`WorkbenchDocumentRenderer.tsx` 的手动 pathname 分发、Shell 的独立
 close/address/grid 控制器。插件身份、远程 renderer、RPC、dirty/save 决策和共享业务服务仍属 Pluxel。
 工具注册中的旧 `title` 需移到原生 tab JSON 的 `name`；工具仍由固定 id/renderer 注册，动态入树使用原生 Actions。
+React Store 和 React Hotkeys 现在也需要宿主显式提供兼容 peer；动态改键使用宿主原生 hooks 调用公开命令。
 
 不保留为未迁移 Pluxel 服务的双引擎、旧格式读取器或启动迁移链。实际本地数据需要时做一次性显式转换/重置。
 当前分支是内部消费完成；不能据此认定 Pluxel 已兼容或第二应用的通用需求已验证。

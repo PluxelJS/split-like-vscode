@@ -25,6 +25,8 @@ export async function checkPackageBrowser(consumerDirectory) {
       browser: "Headless Chromium installed by this repository's Playwright",
       desktop: { width: 1440, height: 900 },
       narrow: { width: 390, height: 844 },
+      keyboard:
+        "Control modifier in Linux Chromium; application-owned native Store and HotkeysProvider",
       limitations: [
         "One independent tarball consumer fixture; this does not prove Pluxel compatibility or cross-application generality.",
         "Application counters and DOM/provider identity describe this fixture's resources, not heap leak detection or performance.",
@@ -152,6 +154,18 @@ async function checkConsumer(page, url, report) {
   report.checks.push(
     "Both live application subscriptions receive real save receipts after host rerender",
   );
+
+  await checkKeyboardPreferences(page, a, b, report);
+  assert.ok(
+    await sameEditor(editorA, "A"),
+    "Keyboard preference rerenders must keep A's editor DOM",
+  );
+  assert.ok(
+    await sameEditor(editorB, "B"),
+    "Keyboard preference rerenders must keep B's editor DOM",
+  );
+  await expect(providerA).toHaveAttribute("data-provider-token", tokenA);
+  await expect(providerB).toHaveAttribute("data-provider-token", tokenB);
 
   await page.getByLabel("Draft A", { exact: true }).fill("Draft retained through native movement");
   const beforeMove = await sample(page);
@@ -310,6 +324,130 @@ async function checkConsumer(page, url, report) {
     "Public instance disposal releases the fixture's remaining Routers and subscriptions",
   );
   report.screenshots = ["packed-consumer-desktop.png", "packed-consumer-narrow.png"];
+}
+
+async function checkKeyboardPreferences(page, a, b, report) {
+  const binding = page.getByLabel("Save shortcut", { exact: true });
+  const enabled = page.getByLabel("Enable save shortcut", { exact: true });
+  const ignoreInputs = page.getByLabel("Ignore shortcuts in inputs", { exact: true });
+  const preferences = page.getByLabel("Shortcut preference", { exact: true });
+  const receipt = page.getByLabel("Save command receipt", { exact: true });
+  const before = await sample(page);
+  const saves = before.metrics.saves;
+  await expect(preferences).toHaveText("Mod+S · enabled · inputs allowed");
+  await expect(binding).toHaveValue("Mod+S");
+  await expect(enabled).toBeChecked();
+  await expect(ignoreInputs).not.toBeChecked();
+
+  await page.locator(`#flexlayout-tabbutton-${a}`).click();
+  await page.getByLabel("Draft A", { exact: true }).focus();
+  const first = await pressSaveShortcut(page, "Control+s");
+  assert.equal(first.defaultPrevented, true, "The host Provider must prevent the native default");
+  await expect(receipt).toHaveText("Saving " + a);
+  await page.locator(`#flexlayout-tabbutton-${b}`).click();
+  const during = await sample(page);
+  assert.equal(during.editing.activeTabId, b);
+  assert.equal(during.metrics.pendingSaveId, a, "Native selection must change during A's save");
+  await expect(receipt).toHaveText("Saved " + a);
+  await settle(page);
+  assert.equal((await sample(page)).metrics.saves, saves + 1, "One keypress must save once");
+  assert.equal((await sample(page)).editing.activeTabId, b);
+
+  await page.getByLabel("Draft B", { exact: true }).focus();
+  const second = await pressSaveShortcut(page, "Control+s");
+  assert.equal(second.defaultPrevented, true);
+  await expect(receipt).toHaveText("Saved " + b);
+  await expect.poll(async () => (await sample(page)).metrics.saves).toBe(saves + 2);
+  await settle(page);
+  assert.equal((await sample(page)).metrics.saves, saves + 2);
+  report.checks.push(
+    "Real keyboard save captures A before native selection changes to B; the next shortcut saves B once",
+  );
+
+  await binding.selectOption("Mod+Shift+S");
+  await expect(preferences).toHaveText("Mod+Shift+S · enabled · inputs allowed");
+  await page.getByLabel("Draft B", { exact: true }).focus();
+  const oldBinding = await pressSaveShortcut(page, "Control+s");
+  assert.equal(oldBinding.defaultPrevented, false, "The old native binding must be unregistered");
+  const afterOldBinding = await sample(page);
+  assert.equal(afterOldBinding.metrics.pendingSaveId, "");
+  assert.equal(afterOldBinding.metrics.saves, saves + 2);
+  const rebound = await pressSaveShortcut(page, "Control+Shift+s");
+  assert.equal(rebound.defaultPrevented, true);
+  await expect(receipt).toHaveText("Saved " + b);
+  await expect.poll(async () => (await sample(page)).metrics.saves).toBe(saves + 3);
+  await settle(page);
+  assert.equal((await sample(page)).metrics.saves, saves + 3);
+
+  await enabled.uncheck();
+  await expect(preferences).toHaveText("Mod+Shift+S · disabled · inputs allowed");
+  await page.getByLabel("Draft B", { exact: true }).focus();
+  const disabled = await pressSaveShortcut(page, "Control+Shift+s");
+  assert.equal(disabled.defaultPrevented, false);
+  const afterDisabled = await sample(page);
+  assert.equal(afterDisabled.metrics.pendingSaveId, "");
+  assert.equal(afterDisabled.metrics.saves, saves + 3);
+  report.checks.push(
+    "Application Store preference UI rebinds and disables the native hook without retaining the old binding or duplicating saves",
+  );
+
+  await enabled.check();
+  await ignoreInputs.check();
+  await expect(preferences).toHaveText("Mod+Shift+S · enabled · inputs ignored");
+  await page.getByLabel("Draft B", { exact: true }).focus();
+  const ignoredInput = await pressSaveShortcut(page, "Control+Shift+s");
+  assert.equal(ignoredInput.defaultPrevented, false);
+  const afterInput = await sample(page);
+  assert.equal(afterInput.metrics.pendingSaveId, "");
+  assert.equal(afterInput.metrics.saves, saves + 3);
+  await page.getByRole("button", { name: "Redraw native Layout", exact: true }).focus();
+  const outsideInput = await pressSaveShortcut(page, "Control+Shift+s");
+  assert.equal(outsideInput.defaultPrevented, true);
+  await expect(receipt).toHaveText("Saved " + b);
+  await expect.poll(async () => (await sample(page)).metrics.saves).toBe(saves + 4);
+  await settle(page);
+  assert.equal((await sample(page)).metrics.saves, saves + 4);
+  await ignoreInputs.uncheck();
+  await binding.selectOption("Mod+S");
+  await expect(preferences).toHaveText("Mod+S · enabled · inputs allowed");
+  const after = await sample(page);
+  assert.deepEqual(after.documents, before.documents);
+  assert.deepEqual(lifetimes(after.metrics), lifetimes(before.metrics));
+  assert.equal(after.metrics.loads, before.metrics.loads);
+  report.checks.push(
+    "Native Provider preventDefault and input options govern real keyboard events; app Store updates keep document providers and resources",
+  );
+  report.externalKeyboard = {
+    before: before.metrics,
+    whileSavePending: {
+      activeDocumentId: during.editing.activeTabId,
+      pendingSaveId: during.metrics.pendingSaveId,
+    },
+    after: after.metrics,
+    events: { first, second, oldBinding, rebound, disabled, ignoredInput, outsideInput },
+  };
+}
+
+function pressSaveShortcut(page, binding) {
+  const observed = page.evaluate(
+    () =>
+      new Promise((done, failed) => {
+        const observe = (event) => {
+          if (event.code !== "KeyS") return;
+          document.removeEventListener("keydown", observe);
+          clearTimeout(deadline);
+          queueMicrotask(() =>
+            done({ code: event.code, defaultPrevented: event.defaultPrevented }),
+          );
+        };
+        const deadline = setTimeout(() => {
+          document.removeEventListener("keydown", observe);
+          failed(new Error("The real save keypress did not reach the document"));
+        }, 10000);
+        document.addEventListener("keydown", observe);
+      }),
+  );
+  return Promise.all([observed, page.keyboard.press(binding)]).then(([event]) => event);
 }
 
 function sample(page) {

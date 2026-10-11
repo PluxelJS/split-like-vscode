@@ -45,6 +45,7 @@ Worksplit 不再继续自研通用 tab/docking 引擎，也不在 FlexLayout 上
 
 应用继续使用原生布局 JSON、类型、主题和适用的渲染槽。Worksplit 不再要求翻译成自己的 WorkspaceLayout、PaneDescriptor 或 PlacementAction。
 外部宿主可省略内置导航并拥有完整外壳；binding 透传根 DOM 属性与原生 `ILayoutApi` ref，不增加 handle、主题或内容工厂协议。每文档 provider 使用 Router 的 Wrap/InnerWrap，工具复用普通 React 组件。工具注册只拥有 id/renderer，标题、大小和停靠选项由原生 JSON 拥有。已登记工具可用单次原生 ADD_TAB 重新入树；入树回执、ref 拦截限制和 allowDrop 限制维护在 [公开用法](../README.md#customize-the-host-with-native-apis)。
+React/TanStack/FlexLayout 适配器由宿主以 peer 提供；快捷键偏好与业务 Store 使用原生 SDK，运行时改键通过原生 hook 调用公开命令，无第二套键盘或数据状态协议。具体用法维护在 [宿主快捷键与 Store](../README.md#host-shortcuts-and-frontend-stores)。
 
 `editor / primary / secondary / panel` 可以是默认配置里的命名约定，不升级为覆盖原生模型的通用区域系统。默认中央 Tabset、可选左右下 Border；特殊布局仍使用上游表达能力。Border 不等于可任意递归拆分的 Tabset，不承诺抹平两者差别。
 空中央分区遵循 FlexLayout 默认清理；最后一个空 root 由原生 tidy 保留。不能为了空编辑目录而全局关闭 `tabSetEnableDeleteWhenEmpty`，否则每次搬空来源都会留下空分区。分区 ID 随原生整理变化，不把 `left/right/main` 当成永久区域；确需固定空空间时由应用对指定 TabSet 显式配置。

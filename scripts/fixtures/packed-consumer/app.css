@@ -39,6 +39,23 @@ header p {
 .packed-workspace .worksplit-native-layout {
   border: 1px solid #63829a;
 }
+.keyboard-preferences {
+  margin: 0 0 16px;
+  padding: 10px;
+  border: 1px solid #63829a;
+  font-size: 12px;
+}
+.keyboard-preferences label {
+  display: block;
+  margin-top: 8px;
+}
+.keyboard-preferences select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  color: inherit;
+  background: #28475f;
+}
 .packed-workspace .consumer-icon {
   color: #72d3c9;
   padding-right: 4px;

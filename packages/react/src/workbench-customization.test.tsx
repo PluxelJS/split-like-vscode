@@ -1,3 +1,4 @@
+import { HotkeysProvider, useHotkey } from "@tanstack/react-hotkeys";
 import {
   createRootRouteWithContext,
   createRoute,
@@ -8,11 +9,13 @@ import {
   type ErrorComponentProps,
   type RouterHistory,
 } from "@tanstack/react-router";
+import { createStore, useStore } from "@tanstack/react-store";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   createWorkbench,
   Workbench,
   useWorkbenchContent,
+  type WorkbenchCommand,
   type WorkbenchContentLifecycle,
   type WorkbenchProps,
 } from "@worksplit/react";
@@ -119,7 +122,7 @@ function RouteError({ error }: ErrorComponentProps) {
   );
 }
 
-function fixture(withTool = false) {
+function fixture(withTool = false, commands: readonly WorkbenchCommand[] = []) {
   const routers: AnyRouter[] = [];
   const resources = new Set<string>();
   const contents = new Map<
@@ -131,6 +134,7 @@ function fixture(withTool = false) {
     }
   >();
   const disposed = vi.fn<(id: string) => void>();
+  const saved = vi.fn<(id: string) => void>();
   let allowLeave = false;
   let toolUnavailable = false;
   let nextToken = 0;
@@ -157,6 +161,7 @@ function fixture(withTool = false) {
         getCloseRevision: () => revision.current,
         beforeLeave: (reason) => decide(content.id, reason),
         focus: () => input.current?.focus({ preventScroll: true }),
+        save: () => saved(content.id),
         dispose: () => disposed(content.id),
       }),
       [content],
@@ -240,6 +245,7 @@ function fixture(withTool = false) {
   };
   const workbench = createWorkbench({
     createRouter: createDocumentRouter,
+    commands,
     layout: {
       global: { tabEnableRename: true, tabSetEnableCloseButton: true },
       borders: withTool
@@ -289,6 +295,7 @@ function fixture(withTool = false) {
     resources,
     contents,
     disposed,
+    saved,
     decide,
     finishSlow,
     failTool: () => {
@@ -306,8 +313,8 @@ function fixture(withTool = false) {
   };
 }
 
-async function openPair() {
-  const consumer = fixture(true);
+async function openPair(commands: readonly WorkbenchCommand[] = []) {
+  const consumer = fixture(true, commands);
   const a = await consumer.open("A");
   const b = await consumer.open("B");
   const source = consumer.workbench.getEditingContext().activeGroupId;
@@ -316,7 +323,180 @@ async function openPair() {
   return { ...consumer, a, b };
 }
 
+function pressSave(target: HTMLElement, shiftKey = false) {
+  const options = {
+    key: shiftKey ? "S" : "s",
+    code: "KeyS",
+    ctrlKey: true,
+    shiftKey,
+    bubbles: true,
+    cancelable: true,
+  };
+  const event = new KeyboardEvent("keydown", options);
+  fireEvent(target, event);
+  fireEvent.keyUp(target, options);
+  return event;
+}
+
 describe("public React customization", () => {
+  it("inherits native host HotkeysProvider defaults for built-in command bindings and unregisters them", async () => {
+    const execute = vi.fn<WorkbenchCommand["execute"]>();
+    const consumer = fixture(false, [{ id: "save", hotkey: "Mod+S", target: "document", execute }]);
+    const props: WorkbenchProps = {
+      workbench: consumer.workbench,
+      "aria-label": "Keyboard workspace",
+      empty: null,
+    };
+    const shell = (enabled: boolean, preventDefault: boolean) => (
+      <HotkeysProvider defaultOptions={{ hotkey: { enabled, preventDefault, platform: "linux" } }}>
+        {consumerShell("day", props)}
+      </HotkeysProvider>
+    );
+    const view = render(shell(false, true));
+    await act(async () => {
+      await consumer.open("A");
+    });
+    const editor = await screen.findByLabelText("Editor A");
+    const workspace = screen.getByLabelText("Keyboard workspace");
+    expect(pressSave(workspace).defaultPrevented).toBe(false);
+    expect(execute).not.toHaveBeenCalled();
+
+    view.rerender(shell(true, false));
+    expect(pressSave(workspace).defaultPrevented).toBe(false);
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(execute.mock.calls[0]?.[0].id).toBe(consumer.workbench.getActiveDocument()?.id);
+
+    view.rerender(shell(true, true));
+    expect(pressSave(workspace).defaultPrevented).toBe(true);
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    // Worksplit's command input policy and native root target remain explicit per binding.
+    expect(pressSave(editor).defaultPrevented).toBe(false);
+    expect(pressSave(screen.getByText("Application commands")).defaultPrevented).toBe(false);
+    expect(execute).toHaveBeenCalledTimes(2);
+
+    view.unmount();
+    expect(pressSave(workspace).defaultPrevented).toBe(false);
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the host's native Store and hotkey hook for dynamic bindings, captured command targets and cleanup", async () => {
+    const preferences = createStore({
+      binding: "Mod+S" as "Mod+S" | "Mod+Shift+S",
+      enabled: true,
+      ignoreInputs: false,
+    });
+    let finishFirst!: () => void;
+    const firstCommand = new Promise<void>((resolve) => {
+      finishFirst = resolve;
+    });
+    let pendingFirst = true;
+    const started = vi.fn<(id: string) => void>();
+    const failed = vi.fn<(error: unknown) => void>();
+    const commands: readonly WorkbenchCommand[] = [
+      {
+        id: "save",
+        target: "document",
+        execute: async ({ id }): Promise<void> => {
+          started(id);
+          if (pendingFirst) {
+            pendingFirst = false;
+            await firstCommand;
+          }
+          await consumer.workbench.save(id);
+        },
+      },
+    ];
+    const catalogue = commands.map((command) => ({ ...command }));
+    const consumer = await openPair(commands);
+
+    function Application() {
+      const preferencesNow = useStore(preferences, (state) => state);
+      const target = useRef<HTMLDivElement>(null);
+      useHotkey(
+        preferencesNow.binding,
+        () => {
+          void consumer.workbench.executeCommand("save").catch(failed);
+        },
+        {
+          target,
+          enabled: preferencesNow.enabled,
+          ignoreInputs: preferencesNow.ignoreInputs,
+        },
+      );
+      return (
+        <div ref={target}>
+          <output aria-label="Application shortcut">
+            {preferencesNow.binding} · {preferencesNow.enabled ? "enabled" : "disabled"} ·{" "}
+            {preferencesNow.ignoreInputs ? "inputs ignored" : "inputs allowed"}
+          </output>
+          <button type="button">Application shortcut target</button>
+          {consumerShell("day", { workbench: consumer.workbench, empty: null })}
+        </div>
+      );
+    }
+
+    const view = render(
+      <HotkeysProvider defaultOptions={{ hotkey: { preventDefault: true, platform: "linux" } }}>
+        <Application />
+      </HotkeysProvider>,
+    );
+    const editorA = await screen.findByLabelText("Editor A");
+    const editorB = await screen.findByLabelText("Editor B");
+    const target = screen.getByRole("button", { name: "Application shortcut target" });
+    const tokenA = screen.getByTestId(`frame-${consumer.a}`).getAttribute("data-provider-token");
+    const routers = [...consumer.routers];
+
+    act(() => consumer.workbench.activate(consumer.a));
+    expect(pressSave(editorA).defaultPrevented).toBe(true);
+    expect(started.mock.calls).toEqual([[consumer.a]]);
+    expect(consumer.saved).not.toHaveBeenCalled();
+    act(() => consumer.workbench.activate(consumer.b));
+    await act(async () => finishFirst());
+    await waitFor(() => expect(consumer.saved.mock.calls).toEqual([[consumer.a]]));
+    expect(consumer.workbench.getActiveDocument()?.id).toBe(consumer.b);
+    expect(pressSave(editorB).defaultPrevented).toBe(true);
+    await waitFor(() => expect(consumer.saved.mock.calls).toEqual([[consumer.a], [consumer.b]]));
+    expect(started).toHaveBeenCalledTimes(2);
+
+    act(() => preferences.setState((state) => ({ ...state, binding: "Mod+Shift+S" })));
+    expect(screen.getByLabelText("Application shortcut").textContent).toBe(
+      "Mod+Shift+S · enabled · inputs allowed",
+    );
+    expect(pressSave(editorB).defaultPrevented).toBe(false);
+    expect(started).toHaveBeenCalledTimes(2);
+    expect(pressSave(editorB, true).defaultPrevented).toBe(true);
+    await waitFor(() => expect(consumer.saved).toHaveBeenCalledTimes(3));
+
+    act(() => preferences.setState((state) => ({ ...state, enabled: false })));
+    expect(screen.getByLabelText("Application shortcut").textContent).toContain("disabled");
+    expect(pressSave(editorB, true).defaultPrevented).toBe(false);
+    expect(started).toHaveBeenCalledTimes(3);
+    act(() => preferences.setState((state) => ({ ...state, enabled: true, ignoreInputs: true })));
+    expect(screen.getByLabelText("Application shortcut").textContent).toBe(
+      "Mod+Shift+S · enabled · inputs ignored",
+    );
+    expect(pressSave(editorB, true).defaultPrevented).toBe(false);
+    expect(started).toHaveBeenCalledTimes(3);
+    act(() => target.focus());
+    expect(pressSave(target, true).defaultPrevented).toBe(true);
+    await waitFor(() => expect(consumer.saved).toHaveBeenCalledTimes(4));
+    expect(started.mock.calls).toEqual([[consumer.a], [consumer.b], [consumer.b], [consumer.b]]);
+    expect(commands).toEqual(catalogue);
+    expect(commands[0]?.hotkey).toBeUndefined();
+    expect(screen.getByLabelText("Editor A")).toBe(editorA);
+    expect(screen.getByLabelText("Editor B")).toBe(editorB);
+    expect(screen.getByTestId(`frame-${consumer.a}`).getAttribute("data-provider-token")).toBe(
+      tokenA,
+    );
+    expect(consumer.resources).toEqual(new Set([consumer.a, consumer.b, "helper"]));
+    expect(consumer.routers).toEqual(routers);
+    expect(failed).not.toHaveBeenCalled();
+
+    view.unmount();
+    expect(pressSave(target, true).defaultPrevented).toBe(false);
+    expect(started).toHaveBeenCalledTimes(4);
+  });
+
   it("owns shell DOM and native placeholders, render slots, icons, and the direct Layout ref", async () => {
     const { workbench, open, routers } = fixture();
     const layoutRef = createRef<ILayoutApi>();

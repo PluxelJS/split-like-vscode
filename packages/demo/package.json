@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@tanstack/react-hotkeys": "catalog:frontend",
     "@tanstack/react-router": "catalog:frontend",
     "@tanstack/react-store": "catalog:frontend",
     "@worksplit/react": "workspace:*",
