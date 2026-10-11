@@ -3,7 +3,6 @@ import { RouterProvider, type AnyRouter } from "@tanstack/react-router";
 import { useStore } from "@tanstack/react-store";
 import { Layout, type ILayoutProps, type TabNode } from "flexlayout-react";
 import {
-  Component,
   createContext,
   memo,
   useContext,
@@ -79,20 +78,6 @@ export function useWorkbenchContentLifecycle(lifecycle: WorkbenchContentLifecycl
   useEffect(() => content.register(lifecycle), [content, lifecycle]);
 }
 
-class ContentBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
-  state = { error: null as Error | null };
-  static getDerivedStateFromError(error: Error) {
-    return { error };
-  }
-  render() {
-    return this.state.error ? (
-      <div role="alert">Content failed: {this.state.error.message}</div>
-    ) : (
-      this.props.children
-    );
-  }
-}
-
 const Content = memo(function Content({ id, instance }: { id: string; instance: RenderInstance }) {
   const internal = integrationState(instance);
   const router = useStore(internal.store, () => internal.documents.get(id)?.router);
@@ -103,24 +88,44 @@ const Content = memo(function Content({ id, instance }: { id: string; instance: 
   }, [id, internal, tool]);
   return (
     <ContentContext.Provider value={context}>
-      <ContentBoundary>
-        <div
-          className="worksplit-content"
-          data-worksplit-content={id}
-          data-worksplit-role={tool ? "tool" : "document"}
-        >
-          {tool ? (
-            tool.render({ id })
-          ) : router ? (
-            <RouterProvider router={router} />
-          ) : (
-            <p role="status">Loading document…</p>
-          )}
-        </div>
-      </ContentBoundary>
+      <div
+        className="worksplit-content"
+        data-worksplit-content={id}
+        data-worksplit-role={tool ? "tool" : "document"}
+      >
+        {tool ? (
+          tool.render({ id })
+        ) : router ? (
+          <RouterProvider router={router} />
+        ) : (
+          <p role="status">Loading document…</p>
+        )}
+      </div>
     </ContentContext.Provider>
   );
 });
+
+function DocumentSwitcher({ workbench }: { workbench: RenderInstance }) {
+  const internal = integrationState(workbench);
+  useStore(internal.store, (state) => `${state.revision}:${state.activeDocumentId}`);
+  return (
+    <select
+      className="worksplit-document-switcher"
+      aria-label="Open document"
+      value={internal.store.get().activeDocumentId ?? ""}
+      onChange={(event) => workbench.activate(event.target.value)}
+    >
+      <option value="" disabled>
+        Open document
+      </option>
+      {[...internal.documents.keys()].map((id) => (
+        <option key={id} value={id}>
+          {workbench.getDocument(id)?.href}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 export function Workbench({ workbench, navigation, empty = defaultEmpty, native }: WorkbenchProps) {
   const internal = integrationState(workbench);
@@ -142,7 +147,6 @@ export function Workbench({ workbench, navigation, empty = defaultEmpty, native 
     },
     [internal, modelObserver],
   );
-  useStore(internal.store, (s) => s.revision);
   useEffect(() => {
     const element = root.current;
     if (!element) return;
@@ -213,23 +217,7 @@ export function Workbench({ workbench, navigation, empty = defaultEmpty, native 
         </nav>
       )}
       <div className="worksplit-layout">
-        {narrow && (
-          <select
-            className="worksplit-document-switcher"
-            aria-label="Open document"
-            value={internal.store.get().activeDocumentId ?? ""}
-            onChange={(event) => workbench.activate(event.target.value)}
-          >
-            <option value="" disabled>
-              Open document
-            </option>
-            {[...internal.documents.keys()].map((id) => (
-              <option key={id} value={id}>
-                {workbench.getDocument(id)?.href}
-              </option>
-            ))}
-          </select>
-        )}
+        {narrow && <DocumentSwitcher workbench={workbench} />}
         <div className="worksplit-native-layout">
           <Layout
             {...native}

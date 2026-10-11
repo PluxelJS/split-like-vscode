@@ -195,6 +195,202 @@ test("native menus create, rename, color, join, remove, collapse and ungroup tab
   });
 });
 
+test("native Border tool selection preserves the active Border document URL and tab strip focus", async ({
+  page,
+}) => {
+  await start(page);
+  const a = await documentId(page, "A");
+  await openBeside(page, "B");
+  expect(
+    await page.evaluate((contentId) => {
+      const { workbench, Actions, DockLocation } = window.worksplitDemo;
+      return workbench.dispatch(
+        Actions.moveNode(contentId, "border_bottom", DockLocation.CENTER, -1),
+      );
+    }, a),
+  ).toEqual({ status: "applied" });
+  await activate(page, "A");
+  const accepted = page.url();
+  const before = await page.evaluate(() => ({ ...window.worksplitDemo.metrics }));
+  const inspectorTab = page.locator("#flexlayout-tabbutton-inspector");
+  await inspectorTab.click();
+  await expect(page.getByLabel("Inspector note")).toBeVisible();
+  await expect(page.getByLabel("Draft A")).toBeHidden();
+  await expect(page).toHaveURL(accepted);
+  await expect(inspectorTab).toBeFocused();
+  expect(
+    await page.evaluate(() => window.worksplitDemo.workbench.getEditingContext()),
+  ).toMatchObject({ activeTabId: a, focusedArea: "shell", focusedTabId: null });
+  await page.getByLabel("Inspector note").click();
+  await expect(page).toHaveURL(accepted);
+  expect(
+    await page.evaluate(() => window.worksplitDemo.workbench.getEditingContext()),
+  ).toMatchObject({ activeTabId: a, focusedArea: "tool", focusedTabId: "inspector" });
+  await inspectorTab.click();
+  await expect(page.getByLabel("Inspector note")).toBeHidden();
+  await expect(page).toHaveURL(accepted);
+  await expect(inspectorTab).toBeFocused();
+  expect(await page.evaluate(() => window.worksplitDemo.metrics)).toMatchObject({
+    requests: before.requests,
+    mounts: before.mounts,
+    subscriptions: before.subscriptions,
+    unmounts: before.unmounts,
+  });
+});
+
+test("native Enter selection leaves focus in the tab strip while explicit navigation focuses content", async ({
+  page,
+}) => {
+  await start(page);
+  const a = await documentId(page, "A");
+  const b = await open(page, "B");
+  const aTab = page.locator(`#flexlayout-tabbutton-${a}`);
+  const bTab = page.locator(`#flexlayout-tabbutton-${b}`);
+  await aTab.focus();
+  await aTab.press("Enter");
+  await expect(page.getByLabel("Draft A")).toBeVisible();
+  await expect(page).toHaveURL(/\/documents\/A\?/);
+  await expect(aTab).toBeFocused();
+  await aTab.press("ArrowRight");
+  await expect(bTab).toBeFocused();
+  await expect(page).toHaveURL(/\/documents\/A\?/);
+  await bTab.press("Enter");
+  await expect(page.getByLabel("Draft B")).toBeVisible();
+  await expect(page).toHaveURL(/\/documents\/B\?/);
+  await expect(bTab).toBeFocused();
+  await bTab.press("Enter");
+  await expect(
+    page.getByTestId("document-B").getByRole("link", { name: "Change view", exact: true }),
+  ).toBeFocused();
+  await expect(page).toHaveURL(/\/documents\/B\?/);
+  await page.getByRole("button", { name: "A Document A", exact: true }).click();
+  await expect(page.getByLabel("Draft A")).toBeFocused();
+  expect(
+    await page.evaluate(() =>
+      window.worksplitDemo.workbench.open({
+        to: "/documents/$id",
+        params: { id: "A" },
+        search: { view: "fast", delay: 0 },
+      }),
+    ),
+  ).toMatchObject({ status: "committed" });
+  await expect(page.getByTestId("document-A")).toContainText("View: fast");
+  await expect(page.getByLabel("Draft A")).toBeFocused();
+});
+
+for (const content of ["document", "group"] as const) {
+  const name =
+    content === "group"
+      ? "native group moves keep the Border selection until a member is selected"
+      : "native movement of an active document into an open Border preserves the document URL";
+  test(name, async ({ page }) => {
+    await start(page);
+    const a = await documentId(page, "A");
+    await open(page, "B");
+    await activate(page, "A");
+    const source = content === "group" ? await group(page, "A", "Border group") : a;
+    await page.getByLabel("Draft A").fill("Border move keeps A");
+    await page.evaluate(() => {
+      window.retainedDraft = document.querySelector('[aria-label="Draft A"]');
+    });
+    const accepted = page.url();
+    const before = await page.evaluate(() => ({ ...window.worksplitDemo.metrics }));
+    expect(
+      await page.evaluate((sourceId) => {
+        const { workbench, Actions, DockLocation } = window.worksplitDemo;
+        return workbench.dispatch(
+          Actions.moveNode(sourceId, "border_bottom", DockLocation.CENTER, -1),
+        );
+      }, source),
+    ).toEqual({ status: "applied" });
+    if (content === "group") {
+      // FlexLayout keeps the previously selected Border tab when moving a whole group.
+      await expect(page.getByLabel("Inspector note")).toBeVisible();
+      await expect(page.getByLabel("Draft A")).toBeHidden();
+      await expect(page).toHaveURL(/\/documents\/B\?/);
+      expect(
+        (await layout(page)).borders?.find((border) => border.location === "bottom"),
+      ).toMatchObject({ selected: 0 });
+      await page.locator(`#flexlayout-tabbutton-${a}`).getByTestId(`tab-${a}`).click();
+    }
+    await expect(page.getByLabel("Draft A")).toBeVisible();
+    await expect(page.getByLabel("Draft A")).toHaveValue("Border move keeps A");
+    await expect(page.getByLabel("Draft B")).toBeVisible();
+    await expect(page).toHaveURL(accepted);
+    expect(
+      await page.evaluate(() => window.worksplitDemo.workbench.getEditingContext()),
+    ).toMatchObject({ activeTabId: a, activeGroupId: "border_bottom" });
+    expect(
+      await page.evaluate(
+        () => window.retainedDraft === document.querySelector('[aria-label="Draft A"]'),
+      ),
+    ).toBe(true);
+    expect(await page.evaluate(() => window.worksplitDemo.metrics)).toMatchObject({
+      requests: before.requests,
+      mounts: before.mounts,
+      subscriptions: before.subscriptions,
+      unmounts: before.unmounts,
+    });
+  });
+}
+
+test("plain routed content uses the native scroll container and native scrollbar settings", async ({
+  page,
+}) => {
+  await page.goto("/documents/long?view=edit&delay=0");
+  const content = page.getByTestId("native-long-content");
+  await expect(content).toBeVisible();
+  const id = await documentId(page, "long");
+  const nativeContainer = page.locator(".flexlayout__tab_moveable").filter({ has: content });
+  expect(
+    await nativeContainer.evaluate((element) => ({
+      overflow: getComputedStyle(element).overflow,
+      canScroll: element.scrollHeight > element.clientHeight,
+    })),
+  ).toEqual({ overflow: "auto", canScroll: true });
+  await content.getByRole("heading", { name: "Long document", exact: true }).hover();
+  await page.mouse.wheel(0, 480);
+  await expect
+    .poll(() => nativeContainer.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  await nativeContainer.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  expect(
+    await page.evaluate((contentId) => {
+      const { workbench, Actions } = window.worksplitDemo;
+      return workbench.dispatch(
+        Actions.updateNodeAttributes(contentId, { enableScrollbars: false }),
+      );
+    }, id),
+  ).toEqual({ status: "applied" });
+  await expect
+    .poll(() => nativeContainer.evaluate((element) => getComputedStyle(element).overflow))
+    .toBe("hidden");
+  await content.getByRole("heading", { name: "Long document", exact: true }).hover();
+  await page.mouse.wheel(0, 480);
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  expect(await nativeContainer.evaluate((element) => element.scrollTop)).toBe(0);
+  expect(
+    await page.evaluate((contentId) => {
+      const { workbench, Actions } = window.worksplitDemo;
+      return workbench.dispatch(
+        Actions.updateNodeAttributes(contentId, { enableScrollbars: true }),
+      );
+    }, id),
+  ).toEqual({ status: "applied" });
+  await expect
+    .poll(() => nativeContainer.evaluate((element) => getComputedStyle(element).overflow))
+    .toBe("auto");
+  await content.getByRole("heading", { name: "Long document", exact: true }).hover();
+  await page.mouse.wheel(0, 480);
+  await expect
+    .poll(() => nativeContainer.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+});
+
 test("real edge drags prune empty TabSets, preserve content, merge and reopen the last placeholder", async ({
   page,
 }) => {
@@ -736,4 +932,71 @@ test("narrow moving the same active group into a native split reveals its new Ta
     unmounts: before.unmounts,
   });
   await page.screenshot({ path: "refactor/acceptance/split-empty-after-narrow.png" });
+});
+
+test("narrow native batches maximize the final selected source after moving its active document", async ({
+  page,
+}) => {
+  await start(page);
+  const a = await documentId(page, "A");
+  const c = await open(page, "C");
+  const b = await openBeside(page, "B");
+  await activate(page, "A");
+  await page.getByLabel("Draft A").fill("A retained after native batch");
+  await page.evaluate(() => {
+    window.retainedDraft = document.querySelector('[aria-label="Draft A"]');
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const switcher = page.getByRole("combobox", { name: "Open document" });
+  await expect(switcher).toBeVisible();
+  await expect(page.getByLabel("Draft A")).toBeVisible();
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  const native = await layout(page);
+  const source = tabset(native, a).id!;
+  const destination = tabset(native, b).id!;
+  expect(tabset(native, c).id).toBe(source);
+  expect(destination).not.toBe(source);
+  expect(tabset(native, a)).toMatchObject({ maximized: true });
+  const before = await page.evaluate(() => ({ ...window.worksplitDemo.metrics }));
+  expect(
+    await page.evaluate(
+      ({ contentId, sourceId, destinationId }) => {
+        const { workbench, Actions, DockLocation } = window.worksplitDemo;
+        return workbench.dispatch(
+          Actions.group([
+            Actions.moveNode(contentId, destinationId, DockLocation.CENTER, -1),
+            Actions.setActiveTabset(sourceId),
+          ]),
+        );
+      },
+      { contentId: a, sourceId: source, destinationId: destination },
+    ),
+  ).toEqual({ status: "applied" });
+  await expect(page.getByLabel("Draft C")).toBeVisible();
+  await expect(page.getByLabel("Draft A")).toBeHidden();
+  await expect(page.getByLabel("Draft B")).toBeHidden();
+  await expect(page).toHaveURL(/\/documents\/C\?/);
+  await expect(switcher).toHaveValue(c);
+  expect(
+    await page.evaluate(() => window.worksplitDemo.workbench.getEditingContext()),
+  ).toMatchObject({ activeTabId: c, activeGroupId: source });
+  const final = await layout(page);
+  expect(tabset(final, c)).toMatchObject({ id: source, active: true, maximized: true });
+  expect(tabset(final, a).id).toBe(destination);
+  expect(tabset(final, b).maximized).not.toBe(true);
+  await expect(page.getByLabel("Draft A")).toHaveValue("A retained after native batch");
+  expect(
+    await page.evaluate(
+      () => window.retainedDraft === document.querySelector('[aria-label="Draft A"]'),
+    ),
+  ).toBe(true);
+  expect(await page.evaluate(() => window.worksplitDemo.metrics)).toMatchObject({
+    requests: before.requests,
+    mounts: before.mounts,
+    subscriptions: before.subscriptions,
+    unmounts: before.unmounts,
+    disposed: before.disposed,
+  });
 });

@@ -147,11 +147,16 @@ test("native movement, pin, maximize and Border hiding retain input, scroll and 
     element.scrollTop = 480;
   });
   const before = await page.evaluate(() => ({ ...window.worksplitDemo.metrics }));
-  await page.getByRole("button", { name: "Focus group", exact: true }).click();
+  await page.getByRole("button", { name: "Maximize tabset", exact: true }).first().click();
   await expect(page.getByLabel("Draft B")).toBeHidden();
-  await page.getByRole("button", { name: "Focus group", exact: true }).click();
+  await page.getByRole("button", { name: "Restore tabset", exact: true }).click();
   await expect(page.getByLabel("Draft B")).toBeVisible();
-  await page.getByRole("button", { name: "Pin", exact: true }).click();
+  const a = (await ids(page)).find((document) => document.href.includes("/documents/A"));
+  await page.locator(`#flexlayout-tabbutton-${a.id}`).click({ button: "right" });
+  await page
+    .getByRole("menu", { name: "Layout actions", exact: true })
+    .getByRole("menuitem", { name: "Pin", exact: true })
+    .click();
   await page.getByRole("button", { name: "Split right", exact: true }).click();
   await expect(page.getByLabel("Draft A")).toHaveValue("retained");
   await page.getByRole("button", { name: "Move to Border" }).click();
@@ -298,7 +303,7 @@ test("narrow document switching retains content and desktop layout preferences",
   await start(page);
   await openB(page);
   await page.getByLabel("Draft A").fill("desktop draft");
-  await page.getByRole("button", { name: "Focus group", exact: true }).click();
+  await page.getByRole("button", { name: "Maximize tabset", exact: true }).first().click();
   await expect(page.getByLabel("Draft B")).toBeHidden();
   const before = await page.evaluate(() => ({
     snapshot: window.worksplitDemo.workbench.snapshot(),
@@ -334,7 +339,7 @@ test("narrow document switching retains content and desktop layout preferences",
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(page.getByRole("combobox", { name: "Open document" })).toHaveCount(0);
   await expect(page.getByLabel("Draft B")).toBeHidden();
-  await page.getByRole("button", { name: "Focus group", exact: true }).click();
+  await page.getByRole("button", { name: "Restore tabset", exact: true }).click();
   await expect(page.getByLabel("Draft B")).toBeVisible();
   const after = await page.evaluate(() => window.worksplitDemo.metrics);
   expect(after.mounts).toBe(before.metrics.mounts);

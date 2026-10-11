@@ -48,6 +48,9 @@ Worksplit 不再继续自研通用 tab/docking 引擎，也不在 FlexLayout 上
 `editor / primary / secondary / panel` 可以是默认配置里的命名约定，不升级为覆盖原生模型的通用区域系统。默认中央 Tabset、可选左右下 Border；特殊布局仍使用上游表达能力。Border 不等于可任意递归拆分的 Tabset，不承诺抹平两者差别。
 空中央分区遵循 FlexLayout 默认清理；最后一个空 root 由原生 tidy 保留。不能为了空编辑目录而全局关闭 `tabSetEnableDeleteWhenEmpty`，否则每次搬空来源都会留下空分区。分区 ID 随原生整理变化，不把 `left/right/main` 当成永久区域；确需固定空空间时由应用对指定 TabSet 显式配置。
 
+原生 JSON 的缺省 children、上下文根节点/Border 类型、tab 类型及文档自动 ID 保持可用；明确非法字段仍拒绝。内容外层不截断原生滚动，属性重置沿用原生运行时行为，不另造 Action 类型。内容错误直接使用 FlexLayout 的单标签错误边界与 Retry；Router 错误由 TanStack 处理。桌面 Layout 由原生更新驱动，文档目录订阅只放在窄屏切换器，保留 adjusting resize 的上游路径。
+窄屏最大化依据文档投影结算后的当前 owner，合并排队的呈现更新不得在 native batch 结算前用旧 owner 改写最终选择；卸载取消排队呈现并恢复桌面偏好。
+
 Model 由集成实例接纳并管理生命周期，应用可提供初始配置、内容和策略。运行时布局变化从 Model 读取；快照是保存结果，不是另一个编辑源。
 
 ## 3. 最佳接入范式
@@ -248,7 +251,8 @@ popstate 发生时地址栏可能已经变化。若导航被拒绝，必须恢�
 
 应用直接从 `flexlayout-react` 导入 Actions、JSON 类型和菜单 helpers。集成只接管 Model、factory、Action 提交及文档生命周期所需入口；适用的原生呈现与交互属性继续使用 `ILayoutProps`。不为分组、颜色、折叠、尺寸或菜单另建公共协议。原生 `onModelChange` 是可信只读观察入口，不能借它替换或改写 Model。上游 `useUndo` 会替换整个 Model、可能恢复已释放的文档，不属于普通布局操作。
 
-原生 `Actions.group` 改变或显式请求选择时，文档激活和 URL 依据最终中央 active TabSet 的选中文档协调，不逐步推断跨空间焦点意图或复制 Model 流水线。单条 `Actions.selectTab` 可显式激活 Border 文档；工具选择仍保留文档 URL。React binding 捕获 `native.onModelChange` 异常并通过 `onIssue` 报告；其他原生 Model/Node observer 属于可信上游代码，不提供 sandbox 或回滚。
+原生 `Actions.group` 改变中央选择或显式选择中央文档/active TabSet 时，文档激活和 URL 依据最终中央选中文档协调，不逐步推断跨空间焦点意图或复制 Model 流水线。仅选择 Border/工具且中央选择未变的批次保留最后文档。单条 `Actions.selectTab` 可显式激活 Border 文档；工具选择与 Border 收起仍保留文档 URL。移动活动文档且原生仍选中它时保留 URL；整组移入 Border 遵循上游原有选择，不强制显示移动成员。原生选择及键盘操作拥有 DOM 焦点，集成不调用内容 focus；显式 open/activate 的排队焦点恢复受最新选择与焦点的 epoch 约束。React binding 捕获 `native.onModelChange` 异常并通过 `onIssue` 报告；其他原生 Model/Node observer 属于可信上游代码，不提供 sandbox 或回滚。
+上述最终中央投影只用于多操作批次；只有一个叶 Action（含嵌套）的原生 GROUP 沿用该单操作的文档选择/移动语义，Model 仍执行原批次、observer 仍接收原 GROUP。无需复制多步流水线来制造单操作差异。
 
 需要严格限制停靠时，应用提供针对原生节点/目标及文档元数据的纯策略。拖动预览、实际提交、程序操作和恢复使用同一规则；整组移动检查全部成员。默认配置可限制文档在中央、工具在指定 Border，不强迫所有应用使用相同规则。
 
@@ -364,7 +368,7 @@ popstate 发生时地址栏可能已经变化。若导航被拒绝，必须恢�
 
 独立分支允许移除旧工作台 API，不为尚未接入的 Pluxel 长期保留双引擎或兼容 wrapper；仍有独立用途的 SplitView 保留。修改限于 Worksplit 自身，并列出后续 Pluxel 的破坏性接入点。建议从当前 Worksplit 工作树创建隔离 worktree 与新分支，先将本设计稿及必要的未提交修改原样带入并核对；不要仅从 HEAD 创建后遗漏最新设计。此操作不切换当前子模块工作树，也不改变 Pluxel 所记录的子模块版本。
 
-Worksplit 库、公开入口 demo、测试、文档及内部浏览器验收已实施；本轮继续补齐原生分组、适用呈现属性及整组关闭。多 Router、提交与历史、原生内容保留和受控 Action 的历史通过范围及新增证据见 [验收记录](acceptance.md)，原先性能测量不自动证明新增能力的成本。Pluxel 与第二应用接入仍未执行，不宣称已有兼容性。
+Worksplit 库、公开入口 demo、测试、文档及内部浏览器验收已实施；本轮继续复核并减少对原生选择、焦点、滚动、错误边界与尺寸更新的干预。多 Router、提交与历史、原生内容保留和受控 Action 的历史通过范围及新增证据见 [验收记录](acceptance.md)，原先性能测量不自动证明新增能力的成本。Pluxel 与第二应用接入仍未执行，不宣称已有兼容性。
 
 ## 参考
 

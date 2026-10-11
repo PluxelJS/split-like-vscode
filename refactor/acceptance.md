@@ -1,6 +1,6 @@
 # Worksplit 内部重构验收
 
-验收日期：2026-10-11（补齐原生能力并修复拖动分屏残留空区后的完整复验）。范围是 Worksplit 库与自有 demo；Pluxel、第二应用及跨应用兼容性没有接入或验收。
+验收日期：2026-10-11（补齐原生能力、空区整理，并减少对原生交互干预后的完整复验）。范围是 Worksplit 库与自有 demo；Pluxel、第二应用及跨应用兼容性没有接入或验收。
 
 ## 隔离与交付位置
 
@@ -36,9 +36,9 @@ React binding 的 `native` 选项直接沿用上游 `ILayoutProps`，仅排除�
 | React / React DOM                              | 19.3.0 / 19.3.0               |
 | TypeScript / Vite / Vitest                     | 7.0.2 / 8.3.3 / 5.0.3         |
 | Playwright / Chromium                          | 1.64.0 / 156.0.8078.4         |
-| Node / pnpm                                    | 24.21.0 / 11.8.0              |
+| Node（pnpm 脚本）/ pnpm                        | 24.21.0 / 11.8.0              |
 
-版本核对来自安装后的 package 信息及 `pnpm-lock.yaml`。Router 和 FlexLayout 为 peer，demo 显式消费相同实例。
+版本核对来自安装后的 package 信息及 `pnpm-lock.yaml`；公开 dist JS smoke 另用 shell Node 24.16.0。Router 和 FlexLayout 为 peer，demo 显式消费相同实例。
 Store、Hotkeys 在库中使用；Hotkeys、Store 和 Model 没有另造事件总线、路由表或布局树。
 `packages/demo` 只导入公开包入口；Vite 与 TypeScript 的私有源码 alias 已删除。
 生产 build 使用默认 dist exports，开发服务使用公开的 development condition。
@@ -47,28 +47,30 @@ Store、Hotkeys 在库中使用；Hotkeys、Store 和 Model 没有另造事件�
 独立 SplitView、Pane、core pane sizing 及其原有测试保留。
 [发行说明](../.tegami/flexlayout-tanstack.md) 标明 core/react 的 major bump；未手改版本或 publish-lock。
 空分区修复的 React patch 另见 [发行说明](../.tegami/fix-empty-tabsets.md)。
+本轮原生交互与默认值修正见 [发行说明](../.tegami/preserve-native-interactions.md)。
 
 ## 检查结果
 
-| 检查                                    | 结果                                                                                  |
-| --------------------------------------- | ------------------------------------------------------------------------------------- |
-| `pnpm lint`                             | 通过，0 warning / 0 error                                                             |
-| `pnpm typecheck`                        | core、react、demo、工具配置及新增浏览器 TypeScript 通过；类型化导航的错误调用断言通过 |
-| `pnpm test`                             | 73 项通过：core 5、SplitView 18、文档协调 9、多 Router 1、原生能力与生命周期 40       |
-| `pnpm build`                            | 三个包通过；生产 demo 从公开 dist 入口打包                                            |
-| `pnpm source-declarations:check`        | 通过，构建未在源码中遗留声明文件                                                      |
-| `pnpm format:check`、`git diff --check` | 通过                                                                                  |
-| `pnpm test:browser`                     | 34 项 Chromium 测试通过，0 skipped / unexpected / flaky                               |
-| 公开 dist JS smoke                      | 从 demo 包解析 `@worksplit/react`，双文档、原生分组、受控整分区关闭、dispose 通过     |
-| 删除符号与本地 Markdown 链接检查        | 通过；旧符号仅在迁移说明或设计语义中出现                                              |
+| 检查                                    | 结果                                                                                                |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `pnpm lint`                             | 通过，0 warning / 0 error                                                                           |
+| `pnpm typecheck`                        | core、react、demo、工具配置及新增浏览器 TypeScript 通过；类型化导航的错误调用断言通过               |
+| `pnpm test`                             | 107 项通过：core 5、SplitView 18、文档协调 9、多 Router 1、原生能力与生命周期 71、原生 React 交互 3 |
+| `pnpm build`                            | 三个包通过；生产 demo 从公开 dist 入口打包                                                          |
+| `pnpm source-declarations:check`        | 通过，构建未在源码中遗留声明文件                                                                    |
+| `pnpm format:check`、`git diff --check` | 通过                                                                                                |
+| `pnpm test:browser`                     | 40 项 Chromium 测试通过，0 skipped / unexpected / flaky                                             |
+| 公开 dist JS smoke                      | 从 demo 包解析 `@worksplit/react`，双文档、原生分组、受控整分区关闭、dispose 通过                   |
+| 删除符号与本地 Markdown 链接检查        | 通过；旧符号仅在迁移说明或设计语义中出现                                                            |
 
 可见但未隐藏的提示：tsdown 提示 TypeScript 7 API 尚属 experimental；生产 demo 单个 JS chunk 为
-577.57 kB（gzip 170.25 kB），超过 Vite 默认 500 kB 提示阈值；多 Router 的 jsdom 检查提示未实现
+578.04 kB（gzip 170.40 kB），超过 Vite 默认 500 kB 提示阈值；多 Router 的 jsdom 检查提示未实现
 scrollTo。真实浏览器另外验证了滚动保留。未通过调高阈值或吞掉错误来消除提示。
 
 原型先完成共享真实 route tree、两个并排文档、一个工具、类型推导和 dirty/redirect/history/race 门槛，
-再删除旧引擎并扩大验收。本轮复核原生能力后又补齐整组与批量关闭、跨空间批次选择和真实菜单。
-保留最后完整 34 项浏览器结果文件，全部测试在同一次完整执行中通过。
+再删除旧引擎并扩大验收。原生能力复核补齐整组与批量关闭、跨空间批次选择和真实菜单；本轮又补齐
+真实键盘选择、Border 工具/文档 URL、单文档/整组移动选择与原生滚动开关。
+保留最后完整 40 项浏览器结果文件，全部测试在同一次完整执行中通过。
 
 ## 浏览器交互证据
 
@@ -82,31 +84,35 @@ scrollTo。真实浏览器另外验证了滚动保留。未通过调高阈值或
 [修复后桌面](acceptance/split-empty-after-desktop.png)、
 [修复后窄屏](acceptance/split-empty-after-narrow.png)。
 
-| 场景                       | 观察与断言                                                                                                                       |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| 两个真实文档、嵌套路由     | 独立 params/search/loader/context、原生 hooks 与 Outlet；A 编辑不改变 B                                                          |
-| 类型化入口和导航投影       | open 使用实际 route tree；metadata 归属与已提交文档更新，工具不触发反向导航                                                      |
-| dirty 拒绝与 open redirect | 拒绝保留原地址和输入；redirect 到已打开 B 复用 B，dirty A 原样保留                                                               |
-| 原生 Router blocker        | Worksplit receipt 明确 router-blocked，已提交 location 保留                                                                      |
-| 连续后退与前进             | 两个待决确认拒绝后回到接受项，history.length 和 forward 栈保留；待决期间 open 明确 history-busy                                  |
-| 慢结果与焦点竞争           | 聚焦 B 或工具撤销抢焦点资格；原生快导航与后来的 open 取代慢结果                                                                  |
-| 关闭期间编辑/导航          | 重复关闭只出现一份决策；新编辑由应用修订检查拒绝；新 route 内容使旧关闭批准失效                                                  |
-| 关闭后的晚到结果           | 不复活节点或写回 URL；最后一个文档关闭后保留空目录、工具和空焦点记录                                                             |
-| 原生移动与隐藏             | 跨组、Border、pin、最大化、隐藏后输入、scrollTop=480、挂载和业务订阅数保留                                                       |
-| 原生 TabGroup 与菜单       | 右键菜单创建、命名、颜色、加入、移出、折叠、解组；原生组拖放到另一分区与 Border 后保持相同 DOM、输入、scrollTop=420 与资源       |
-| 原生批量及整分区关闭       | close others/right 走同一决策；折叠组成员也参与整分区关闭；一个拒绝不移除任何成员；非 closeable 直接子组整体保留                 |
-| 先批准成员后继续编辑       | A 批准、B 待决期间真实编辑可见 A，已有编辑修订变化使整批返回 changed；两个文档、输入及订阅仍在                                   |
-| 关闭中布局及内容变化       | 待决时添加成员或提交新 route 内容，使旧整分区批准失效；允许继续操作，不锁死内容                                                  |
-| 真实鼠标拖放               | 使用原生 drag 事件流将 A 移到 B 组；保留输入与活动组                                                                             |
-| 连续边缘拆分与合并         | 标签及整组 RIGHT/LEFT/RIGHT 真实拖动后始终只有两个非空 TabSet、A/B 可见；合并删除空来源，关闭最后内容只留一个空 root，再打开正常 |
-| 全局工具                   | 工具隐藏与中央停靠保留输入，不接管文档 URL；Portal 命令保留 inspector 上下文                                                     |
-| 命令                       | Ctrl+S 只保存活动文档；工具输入焦点下仍正确指向文档，未广播保存                                                                  |
-| 原生 redirect 身份冲突     | 明确报告 native-identity-conflict，两个实例继续存活，没有静默合并/关闭                                                           |
-| 错误隔离                   | loader 和 renderer 失败只影响各自实例，另一可见文档继续工作                                                                      |
-| 可选快照                   | 刷新以地址栏激活，拒绝不兼容数据并提供明确 reset；恢复关闭后不复用旧 history hint                                                |
-| 窄屏                       | 切换 A/B、保留 draft 与挂载；恢复原桌面 maximize 偏好，底部动作可滚动到达                                                        |
-| 窄屏同文档拆分             | 活动 ID 不变时，原生组移到 RIGHT 新 TabSet 后最大化跟随新容器，保持相同 DOM、输入、scrollTop=360 与资源                          |
-| 销毁                       | 业务订阅与 document history subscriptions 归零；整个实例 dispose 后存活 Router 归零                                              |
+| 场景                       | 观察与断言                                                                                                                                                |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 两个真实文档、嵌套路由     | 独立 params/search/loader/context、原生 hooks 与 Outlet；A 编辑不改变 B                                                                                   |
+| 类型化入口和导航投影       | open 使用实际 route tree；metadata 归属与已提交文档更新，工具不触发反向导航                                                                               |
+| dirty 拒绝与 open redirect | 拒绝保留原地址和输入；redirect 到已打开 B 复用 B，dirty A 原样保留                                                                                        |
+| 原生 Router blocker        | Worksplit receipt 明确 router-blocked，已提交 location 保留                                                                                               |
+| 连续后退与前进             | 两个待决确认拒绝后回到接受项，history.length 和 forward 栈保留；待决期间 open 明确 history-busy                                                           |
+| 慢结果与焦点竞争           | 聚焦 B 或工具撤销抢焦点资格；原生快导航与后来的 open 取代慢结果                                                                                           |
+| 关闭期间编辑/导航          | 重复关闭只出现一份决策；新编辑由应用修订检查拒绝；新 route 内容使旧关闭批准失效                                                                           |
+| 关闭后的晚到结果           | 不复活节点或写回 URL；最后一个文档关闭后保留空目录、工具和空焦点记录                                                                                      |
+| 原生移动与隐藏             | 跨组、Border、pin、最大化、隐藏后输入、scrollTop=480、挂载和业务订阅数保留                                                                                |
+| 原生 TabGroup 与菜单       | 右键菜单创建、命名、颜色、加入、移出、折叠、解组；原生组拖放到另一分区与 Border 后保持相同 DOM、输入、scrollTop=420 与资源                                |
+| 原生批量及整分区关闭       | close others/right 走同一决策；折叠组成员也参与整分区关闭；一个拒绝不移除任何成员；非 closeable 直接子组整体保留                                          |
+| 先批准成员后继续编辑       | A 批准、B 待决期间真实编辑可见 A，已有编辑修订变化使整批返回 changed；两个文档、输入及订阅仍在                                                            |
+| 关闭中布局及内容变化       | 待决时添加成员或提交新 route 内容，使旧整分区批准失效；允许继续操作，不锁死内容                                                                           |
+| 真实鼠标拖放               | 使用原生 drag 事件流将 A 移到 B 组；保留输入与活动组                                                                                                      |
+| 连续边缘拆分与合并         | 标签及整组 RIGHT/LEFT/RIGHT 真实拖动后始终只有两个非空 TabSet、A/B 可见；合并删除空来源，关闭最后内容只留一个空 root，再打开正常                          |
+| 全局工具                   | 工具隐藏与中央停靠保留输入，不接管文档 URL；Portal 命令保留 inspector 上下文                                                                              |
+| Border 选择与移动          | A 在 Border、中央仍选 B 时，工具切换/收起保留 A 的 URL；单 A 移入展开 Border 仍选中时保持 A；整组移入遵循原生保留 Inspector 选择，再真实点击 A 显示原内容 |
+| 原生键盘焦点               | 未选 tab 的 Enter 选择后仍聚焦标签按钮，Arrow 可继续移动；已选 tab 再 Enter 由原生聚焦内容首 link；显式 open/activate 恢复输入焦点                        |
+| 原生滚动容器               | 普通长路由页面无业务 overflow 容器，真实 wheel 滚动 native tab；enableScrollbars false/true 直接切换 hidden/auto 与可滚动行为                             |
+| 命令                       | Ctrl+S 只保存活动文档；工具输入焦点下仍正确指向文档，未广播保存                                                                                           |
+| 原生 redirect 身份冲突     | 明确报告 native-identity-conflict，两个实例继续存活，没有静默合并/关闭                                                                                    |
+| 错误隔离                   | loader 和 renderer 失败只影响各自实例，另一可见文档继续工作                                                                                               |
+| 可选快照                   | 刷新以地址栏激活，拒绝不兼容数据并提供明确 reset；恢复关闭后不复用旧 history hint                                                                         |
+| 窄屏                       | 切换 A/B、保留 draft 与挂载；恢复原桌面 maximize 偏好，底部动作可滚动到达                                                                                 |
+| 窄屏同文档拆分             | 活动 ID 不变时，原生组移到 RIGHT 新 TabSet 后最大化跟随新容器，保持相同 DOM、输入、scrollTop=360 与资源                                                   |
+| 窄屏多操作最终选择         | A/C 同组 active A、B 另组；GROUP 将 A 移到 B 组再选择原组，最终 C 拥有 URL/selector 与原组最大化；A 的输入、DOM、Router 及资源保留                        |
+| 销毁                       | 业务订阅与 document history subscriptions 归零；整个实例 dispose 后存活 Router 归零                                                                       |
 
 纯策略的 admission、程序单 tab/整组移动、完整组聚合恢复策略、快照拒绝、跨空间批次最终选择，以及
 原生观察者抛错后的资源收尾和关闭工具的迟到登记拒绝在单元测试中验证；原生 preview 连接同一策略的
@@ -134,8 +140,11 @@ scrollTo。真实浏览器另外验证了滚动保留。未通过调高阈值或
 8. **不模拟策略批次。** native GROUP 不对每一步调用公开 action veto，且程序移动不调用 preview hook。
    带 `allowDrop` 时，多步移动/分组批次明确拒绝；逐条操作、初始树和恢复则校验实际原生节点及成员。
    不使用第二个 Model 来预测或复制上游算法。无此策略时纯原生布局批次自然支持。
-9. **跨空间批次按最终中央选择协调 URL。** 原生 GROUP 完成后读取最终中央 active TabSet 与 selected document；
+9. **跨空间批次按最终中央选择协调 URL。** 原生 GROUP 改变中央选择或显式选择中央文档/active TabSet 后，
+   读取最终中央 selected document；仅选择 Border/工具、中央未变化的批次保持最后文档。
    单条 `SELECT_TAB` 可明确激活 Border 文档，工具不接管 URL。不猜测多个空间的中间操作意图。
+   该最终投影规则用于多操作批次；只有一个叶 Action（含嵌套）的 GROUP 与该单操作选择/移动语义一致，
+   原生执行和 observer 仍接收原批次。singleton 不需要复制流水线或额外存储就能保持原生含义。
 10. **批次关闭复核应用既有编辑修订。** dirty 的多内容关闭需要 `getCloseRevision`；缺失时在决策前返回
     `revision-required`。全部决策完成后复核 token，覆盖早期批准成员后来再次编辑。Worksplit 不生成或管理版本。
 11. **空区整理和分区身份遵循原生行为。** 库及 demo 原先全局设置 `tabSetEnableDeleteWhenEmpty: false`，
@@ -144,6 +153,22 @@ scrollTo。真实浏览器另外验证了滚动保留。未通过调高阈值或
     不保留固定 `left/right/main`。FlexLayout 0.11.1 的 `fromJson` 会在首次 Action 前将已整理掉的空节点留在
     idMap；文档 admission 因而核对原生 live tree，失效目标返回 failed 并释放候选 Router，而不是报告成功。
     没有复制 tidy、patch 上游或维护另一套分区。
+12. **让原生选择拥有焦点及移动语义。** Native SELECT/active TabSet 只同步文档和 URL，不调用内容 focus；
+    显式 open/activate 才恢复业务登记的焦点，排队回调复核现有 focusEpoch，工具选择、收起和真实 focus 可撤销它。
+    单个活动文档移动且仍 natively selected 时保持文档所有者。FlexLayout 0.11.1 Border.drop 对整组移动调用
+    restoreSelectionAfterInsert，保留原有 Inspector 选择；本集成没有强制展开被移动成员来伪装保留选择。
+13. **原生默认值、滚动与错误恢复不另包一层。** 缺省 children、上下文类型、tab type、文档自动 ID 和
+    undefined 属性重置已验证；明确 null 类型、数组节点、非法 children/ID 仍拒绝。Tab 是叶节点，显式
+    Tab.children 也拒绝，避免上游忽略其中内容而静默丢记录。上游 Action 的可选 TS
+    字段在 exactOptionalPropertyTypes 下不接纳显式 undefined，测试仅为运行时重置做类型断言，库不复制这些类型。
+    删除内容 overflow:hidden 和重复错误边界后，滚动由原生管理，tool renderer 可直接用原生 Retry 恢复；
+    React 回归验证 sibling 文档保持同一 DOM、draft 和 Router。路由错误仍由 TanStack 隔离。
+14. **保留原生尺寸更新路径。** Workbench 桌面组件不再订阅整个 catalogue revision；窄屏切换器局部订阅。
+    同一双 TabSet 快照、同一 adjusting=true 权重 Action 的 React 回归中，Worksplit 与裸 Layout 的
+    onRenderTabSet 额外调用数都为 0，布局 JSON 相同；这只验证该上游命令路径，不是整应用 FPS/CPU 基准。
+    切换窄屏最大化目标使用一次原生 toggle，没有先取消最大化的中间状态。
+    窄屏 Store 呈现更新合并到 microtask，在原生操作的文档投影后读取最新 owner；断开会取消排队呈现。
+    裸 Model 对照回归覆盖 A 移到 B 的分区后批次又选择原分区 C，不允许旧 A 的容器最大化改写该最终选择。
 
 这些取舍已同步到用法、行为契约、设计状态、测试及 demo。pending loader 可能继续；会话/操作检查
 只保证晚到结果不获准提交给已关闭实例，不宣称实现了真正取消。
@@ -165,13 +190,13 @@ scrollTo。真实浏览器另外验证了滚动保留。未通过调高阈值或
 20 次切换，每次 open/switch 等待两个 RAF；随后 resize 到 1280×800，最后逐个 await close。
 追加打开时间排除第一个启动文档，包含之后 N−1 个文档及绘制等待；计数包含第一个文档。
 第一个追加文档通过原生 RIGHT split 建立第二个 TabSet，后续根据种子文档读取当前原生容器。
-公开 `getLayout()` 克隆与定位的累计时间包含在追加打开耗时内，2/10/50 文档分别为 0/2.0/17.3 ms。
+公开 `getLayout()` 克隆与定位的累计时间包含在追加打开耗时内，2/10/50 文档分别为 0.0/3.8/16.6 ms。
 
 | 文档数 | HTTP/loader | 提交渲染 | 切换额外渲染 | 业务 / history 订阅 | 追加打开 ms | 20 次切换 ms | close 回执 / 含绘制 ms |
 | ------ | ----------- | -------- | ------------ | ------------------- | ----------- | ------------ | ---------------------- |
-| 2      | 2           | 2        | 0            | 2 / 2               | 80.3        | 666.4        | 17.7 / 19.4            |
-| 10     | 10          | 10       | 0            | 10 / 10             | 404.3       | 666.7        | 76.4 / 81.8            |
-| 50     | 50          | 50       | 0            | 50 / 50             | 2275.3      | 746.6        | 448.1 / 491.5          |
+| 2      | 2           | 2        | 0            | 2 / 2               | 108.3       | 666.6        | 23.7 / 26.8            |
+| 10     | 10          | 10       | 0            | 10 / 10             | 476.3       | 666.1        | 98.1 / 105.9           |
+| 50     | 50          | 50       | 0            | 50 / 50             | 3018.9      | 849.8        | 636.2 / 693.5          |
 
 三个数量下，切换和 resize 均未新增文档 loader、提交渲染或挂载；关闭后业务/history 订阅归零，
 卸载数等于文档数，close cleanupErrors 全部为零。关闭文档后仍有一个无 loader/订阅的 URL builder
@@ -180,7 +205,7 @@ Router，属于实例寿命；实例 dispose 的浏览器测试验证它也被�
 这些是一次最终采样，不是生产环境吞吐、峰值内存、P95 或性能优秀的证明。切换时间包含 RAF 等待，
 不是纯 CPU 时间；渲染计数是业务组件提交 effect，不覆盖 speculative render 或全部 shell 渲染。
 订阅计数覆盖 demo 业务服务与公开 history.subscribers，不穷举 Router/React Store 内部订阅。
-单文档一个 Router 的资源与关闭成本随数量增长；50 个文档的逐个关闭回执约 448 ms。
+单文档一个 Router 的资源与关闭成本随数量增长；50 个文档的逐个关闭回执约 636.2 ms。
 
 追加原生工作负载：`pnpm measure:native`，脚本
 [measure-native-layout.mjs](../scripts/measure-native-layout.mjs)，原始结果
@@ -189,16 +214,16 @@ Router，属于实例寿命；实例 dispose 的浏览器测试验证它也被�
 其余标签；20 次双组折叠/展开共 40 批、80 个属性操作；两个组各 CENTER 移到另一分区，再 LEFT/RIGHT
 拆出新分区，共 4 次移动，空来源由原生清理；
 20 次轮流激活；最后一个纯关闭 GROUP 删除两个 TabSet，再独立 dispose。每阶段等待两个 RAF。
-分组时间包含公开 `getLayout()` 克隆与定位自动组 ID 的查询成本（2/10/50 文档分别 0.5/0.2/0.5 ms）。
-移动时查询当前容器的累计时间为 0.9/0.6/1.1 ms；关闭前定位两个实际 TabSet 为 0.1/0.2/0.4 ms。
+分组时间包含公开 `getLayout()` 克隆与定位自动组 ID 的查询成本（2/10/50 文档分别 0.7/0.4/0.7 ms）。
+移动时查询当前容器的累计时间为 0.6/0.6/1.8 ms；关闭前定位两个实际 TabSet 为 0.4/0.2/0.3 ms。
 查询计入对应含绘制阶段总时间，关闭回执单独从 dispatch 开始计时。这次工作负载随空区清理调整，
 不与保留固定空分区的旧样本作直接速度对比。
 
 | 文档数 | 分组含绘制 ms | 40 批折叠/展开回执 / 含绘制 ms | 4 次组移动含绘制 ms | 20 次激活含绘制 ms | 整批关闭回执 / 含绘制 ms |
 | ------ | ------------- | ------------------------------ | ------------------- | ------------------ | ------------------------ |
-| 2      | 33.3          | 423.8 / 1333.2                 | 133.4               | 666.8              | 13.2 / 27.7              |
-| 10     | 66.5          | 525.4 / 1333.3                 | 133.2               | 666.7              | 10.4 / 29.1              |
-| 50     | 66.3          | 899.2 / 1516.7                 | 254.4               | 678.6              | 19.1 / 29.4              |
+| 2      | 33.0          | 505.2 / 1333.3                 | 133.3               | 666.7              | 16.7 / 24.3              |
+| 10     | 83.1          | 869.8 / 1483.3                 | 150.8               | 715.8              | 21.1 / 28.8              |
+| 50     | 91.2          | 1378.6 / 1991.5                | 234.2               | 902.0              | 38.6 / 40.9              |
 
 这些原生阶段三个数量下都没有新增 loader、业务提交渲染、挂载或业务/history 订阅。批量关闭后订阅归零、
 卸载数等于文档数，cleanupErrors 为零；dispose 后存活 Router 归零。所有内容都是 clean，没有确认等待，

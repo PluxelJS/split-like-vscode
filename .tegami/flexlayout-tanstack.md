@@ -17,8 +17,10 @@ instances retained.
 Use FlexLayout's own Actions, JSON types, TabGroups, presentation options and menu builders.
 Native grouping/collapse/metadata, ordinary attributes and pure layout batches are supported;
 whole-Tabset and pure deletion batches use guarded closing, preserving pin and non-closeable tabs.
-Batch selection follows the final central active TabSet's selected document; a single native
-`selectTab` can explicitly activate a Border document. Tool selection keeps the document URL.
+Multi-action batches that change or request central selection follow the final central active
+TabSet's selected document; Border/tool-only selection preserves the last document when that
+central selection is unchanged. A single native `selectTab` or its singleton batch can explicitly
+activate a Border document. Tool selection keeps the document URL.
 Dirty members of a multi-content close provide `getCloseRevision` from application editing state;
 otherwise the request rejects with `revision-required` before decisions. Tokens are rechecked after
 all approvals, and dirty tools follow the same rule. Worksplit does not manage editing versions.

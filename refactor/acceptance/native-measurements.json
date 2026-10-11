@@ -1,6 +1,6 @@
 {
   "environment": {
-    "measuredAt": "2026-10-11T03:45:14.940Z",
+    "measuredAt": "2026-10-11T04:30:14.169Z",
     "browser": "156.0.8078.4",
     "node": "v24.21.0",
     "platform": "linux x64",
@@ -34,7 +34,7 @@
         "disposed": 0,
         "historySubscriptions": 1
       },
-      "openMs": 87.30000000447035,
+      "openMs": 99.70000000298023,
       "openTargetLookupMs": 0,
       "opened": {
         "requests": 2,
@@ -52,10 +52,10 @@
         "createActionCount": 2,
         "joinActionCount": 0,
         "batchCount": 1,
-        "createReceiptMs": 8.399999998509884,
-        "joinReceiptMs": 0,
-        "groupLookupMs": 0.5,
-        "totalWithFramesMs": 33.29999999701977,
+        "createReceiptMs": 13.199999995529652,
+        "joinReceiptMs": 0.10000000149011612,
+        "groupLookupMs": 0.7000000029802322,
+        "totalWithFramesMs": 33,
         "createReceipt": {
           "status": "applied"
         },
@@ -76,8 +76,8 @@
         "cycles": 20,
         "batchCount": 40,
         "nodeAttributeActionCount": 80,
-        "receiptMs": 423.7999999895692,
-        "totalWithFramesMs": 1333.2000000029802,
+        "receiptMs": 505.20000000298023,
+        "totalWithFramesMs": 1333.3000000044703,
         "receipts": [
           {
             "status": "applied"
@@ -216,37 +216,37 @@
         "groupCount": 2,
         "batchCount": 4,
         "nodeMoveActionCount": 4,
-        "receiptMs": 37.1000000089407,
-        "targetLookupMs": 0.8999999910593033,
-        "totalWithFramesMs": 133.39999999850988,
+        "receiptMs": 49.600000001490116,
+        "targetLookupMs": 0.5999999940395355,
+        "totalWithFramesMs": 133.29999999701977,
         "receipts": [
           {
-            "groupId": "#12b4d570-e791-4794-969d-902375eb9cab",
-            "target": "#4aeb15cf-62a4-4a1d-9904-73e155cda9f4",
+            "groupId": "#69cc3723-3835-4ac9-81ec-737f68abd86f",
+            "target": "#6142b01a-22ac-4597-93ea-56b9783cb629",
             "location": "CENTER",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#12b4d570-e791-4794-969d-902375eb9cab",
-            "target": "#4aeb15cf-62a4-4a1d-9904-73e155cda9f4",
+            "groupId": "#69cc3723-3835-4ac9-81ec-737f68abd86f",
+            "target": "#6142b01a-22ac-4597-93ea-56b9783cb629",
             "location": "LEFT",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#e723fe92-05c5-451e-9d0f-379ecc413f6f",
-            "target": "#ab907521-915a-459a-911b-58a249468cee",
+            "groupId": "#d7d545c7-de38-4a16-9829-af44cd67ca96",
+            "target": "#b6ce1c31-1a81-416f-8041-8092a7f23416",
             "location": "CENTER",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#e723fe92-05c5-451e-9d0f-379ecc413f6f",
-            "target": "#ab907521-915a-459a-911b-58a249468cee",
+            "groupId": "#d7d545c7-de38-4a16-9829-af44cd67ca96",
+            "target": "#b6ce1c31-1a81-416f-8041-8092a7f23416",
             "location": "RIGHT",
             "receipt": {
               "status": "applied"
@@ -267,7 +267,7 @@
       },
       "switching": {
         "count": 20,
-        "totalWithFramesMs": 666.7999999970198,
+        "totalWithFramesMs": 666.7000000029802,
         "after": {
           "requests": 2,
           "renders": 2,
@@ -283,9 +283,9 @@
       "closing": {
         "batchCount": 1,
         "tabsetDeleteActionCount": 2,
-        "targetLookupMs": 0.09999999403953552,
-        "closeReceiptMs": 13.200000002980232,
-        "closeWithFramesMs": 27.69999999552965,
+        "targetLookupMs": 0.4000000059604645,
+        "closeReceiptMs": 16.69999999552965,
+        "closeWithFramesMs": 24.30000000447035,
         "closed": {
           "requests": 2,
           "renders": 2,
@@ -300,13 +300,13 @@
         "remaining": 0,
         "receipt": {
           "status": "closed",
-          "id": "document-914c752c467e172a5b191f0f6b2d003d-1",
+          "id": "document-e5d4d4eb7af003b086917b58e1d42680-1",
           "cleanupErrors": []
         }
       },
       "disposal": {
-        "disposeReceiptMs": 3.0999999940395355,
-        "disposeWithFramesMs": 31.19999999552965,
+        "disposeReceiptMs": 1.2000000029802322,
+        "disposeWithFramesMs": 29.899999998509884,
         "cleanupErrors": [],
         "disposed": {
           "requests": 2,
@@ -321,10 +321,10 @@
         }
       },
       "httpRequests": 2,
-      "heapBeforeBytes": 11643084,
-      "heapAfterLayoutBytes": 13768412,
-      "heapAfterCloseBytes": 14687216,
-      "heapAfterDisposeBytes": 15024648
+      "heapBeforeBytes": 11564296,
+      "heapAfterLayoutBytes": 18556056,
+      "heapAfterCloseBytes": 12940096,
+      "heapAfterDisposeBytes": 13042460
     },
     {
       "count": 10,
@@ -339,8 +339,8 @@
         "disposed": 0,
         "historySubscriptions": 1
       },
-      "openMs": 348.8999999985099,
-      "openTargetLookupMs": 1.6000000014901161,
+      "openMs": 467.8999999985099,
+      "openTargetLookupMs": 3.2999999970197678,
       "opened": {
         "requests": 10,
         "renders": 10,
@@ -357,10 +357,10 @@
         "createActionCount": 2,
         "joinActionCount": 8,
         "batchCount": 2,
-        "createReceiptMs": 24.599999994039536,
-        "joinReceiptMs": 22.600000001490116,
-        "groupLookupMs": 0.20000000298023224,
-        "totalWithFramesMs": 66.5,
+        "createReceiptMs": 38.100000001490116,
+        "joinReceiptMs": 33.399999998509884,
+        "groupLookupMs": 0.3999999985098839,
+        "totalWithFramesMs": 83.10000000149012,
         "createReceipt": {
           "status": "applied"
         },
@@ -383,8 +383,8 @@
         "cycles": 20,
         "batchCount": 40,
         "nodeAttributeActionCount": 80,
-        "receiptMs": 525.3999999910593,
-        "totalWithFramesMs": 1333.2999999970198,
+        "receiptMs": 869.8000000119209,
+        "totalWithFramesMs": 1483.3000000044703,
         "receipts": [
           {
             "status": "applied"
@@ -523,37 +523,37 @@
         "groupCount": 2,
         "batchCount": 4,
         "nodeMoveActionCount": 4,
-        "receiptMs": 58.79999999701977,
+        "receiptMs": 78.29999999701977,
         "targetLookupMs": 0.6000000014901161,
-        "totalWithFramesMs": 133.19999999552965,
+        "totalWithFramesMs": 150.80000000447035,
         "receipts": [
           {
-            "groupId": "#5d2678c5-9eb4-4f50-be94-c85a09dbb803",
-            "target": "#693177e8-d1ea-4763-923d-e61d073957e2",
+            "groupId": "#5c7e43a8-ab1f-45af-b349-450a39eb4dbc",
+            "target": "#eec6d4aa-a859-4763-8584-66e729522011",
             "location": "CENTER",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#5d2678c5-9eb4-4f50-be94-c85a09dbb803",
-            "target": "#693177e8-d1ea-4763-923d-e61d073957e2",
+            "groupId": "#5c7e43a8-ab1f-45af-b349-450a39eb4dbc",
+            "target": "#eec6d4aa-a859-4763-8584-66e729522011",
             "location": "LEFT",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#3206de9f-60af-40cd-b25a-0812b991ebd3",
-            "target": "#14888eb2-6d79-4f41-964d-7c6b1b67f129",
+            "groupId": "#0db46222-86c7-4707-adde-b4e44fe4d42c",
+            "target": "#7b240cdb-0984-45d4-9517-bfc68a04abee",
             "location": "CENTER",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#3206de9f-60af-40cd-b25a-0812b991ebd3",
-            "target": "#14888eb2-6d79-4f41-964d-7c6b1b67f129",
+            "groupId": "#0db46222-86c7-4707-adde-b4e44fe4d42c",
+            "target": "#7b240cdb-0984-45d4-9517-bfc68a04abee",
             "location": "RIGHT",
             "receipt": {
               "status": "applied"
@@ -574,7 +574,7 @@
       },
       "switching": {
         "count": 20,
-        "totalWithFramesMs": 666.7000000029802,
+        "totalWithFramesMs": 715.7999999970198,
         "after": {
           "requests": 10,
           "renders": 10,
@@ -590,9 +590,9 @@
       "closing": {
         "batchCount": 1,
         "tabsetDeleteActionCount": 2,
-        "targetLookupMs": 0.19999999552965164,
-        "closeReceiptMs": 10.400000005960464,
-        "closeWithFramesMs": 29.100000001490116,
+        "targetLookupMs": 0.20000000298023224,
+        "closeReceiptMs": 21.100000001490116,
+        "closeWithFramesMs": 28.80000000447035,
         "closed": {
           "requests": 10,
           "renders": 10,
@@ -607,13 +607,13 @@
         "remaining": 0,
         "receipt": {
           "status": "closed",
-          "id": "document-896a3124f8083abcbf450c039c6ce17a-1",
+          "id": "document-5130e19649b95ab768f52270c9185877-1",
           "cleanupErrors": []
         }
       },
       "disposal": {
-        "disposeReceiptMs": 1.6999999955296516,
-        "disposeWithFramesMs": 31.399999998509884,
+        "disposeReceiptMs": 1.1999999955296516,
+        "disposeWithFramesMs": 30,
         "cleanupErrors": [],
         "disposed": {
           "requests": 10,
@@ -628,10 +628,10 @@
         }
       },
       "httpRequests": 10,
-      "heapBeforeBytes": 11625904,
-      "heapAfterLayoutBytes": 31667376,
-      "heapAfterCloseBytes": 19394340,
-      "heapAfterDisposeBytes": 19540692
+      "heapBeforeBytes": 11546300,
+      "heapAfterLayoutBytes": 22189216,
+      "heapAfterCloseBytes": 23366240,
+      "heapAfterDisposeBytes": 23467540
     },
     {
       "count": 50,
@@ -646,8 +646,8 @@
         "disposed": 0,
         "historySubscriptions": 1
       },
-      "openMs": 2179.7000000029802,
-      "openTargetLookupMs": 15.499999970197678,
+      "openMs": 3183.10000000149,
+      "openTargetLookupMs": 21.600000023841858,
       "opened": {
         "requests": 50,
         "renders": 50,
@@ -664,10 +664,10 @@
         "createActionCount": 2,
         "joinActionCount": 48,
         "batchCount": 2,
-        "createReceiptMs": 23.399999998509884,
-        "joinReceiptMs": 22,
-        "groupLookupMs": 0.5,
-        "totalWithFramesMs": 66.29999999701977,
+        "createReceiptMs": 33.599999994039536,
+        "joinReceiptMs": 37.79999999701977,
+        "groupLookupMs": 0.7000000029802322,
+        "totalWithFramesMs": 91.19999999552965,
         "createReceipt": {
           "status": "applied"
         },
@@ -690,8 +690,8 @@
         "cycles": 20,
         "batchCount": 40,
         "nodeAttributeActionCount": 80,
-        "receiptMs": 899.2000000178814,
-        "totalWithFramesMs": 1516.6999999955297,
+        "receiptMs": 1378.5999999716878,
+        "totalWithFramesMs": 1991.5,
         "receipts": [
           {
             "status": "applied"
@@ -830,37 +830,37 @@
         "groupCount": 2,
         "batchCount": 4,
         "nodeMoveActionCount": 4,
-        "receiptMs": 181.30000000447035,
-        "targetLookupMs": 1.1000000014901161,
-        "totalWithFramesMs": 254.39999999850988,
+        "receiptMs": 160.40000000596046,
+        "targetLookupMs": 1.7999999895691872,
+        "totalWithFramesMs": 234.20000000298023,
         "receipts": [
           {
-            "groupId": "#794e9c10-6aea-4c9e-aa30-efb70f3c1514",
-            "target": "#f01f940b-a204-4184-ac00-b87aea52fa24",
+            "groupId": "#8499e91f-27fc-4b3a-a070-d236e63734c0",
+            "target": "#f7abfa2e-df08-4b7f-ae62-015dff03489e",
             "location": "CENTER",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#794e9c10-6aea-4c9e-aa30-efb70f3c1514",
-            "target": "#f01f940b-a204-4184-ac00-b87aea52fa24",
+            "groupId": "#8499e91f-27fc-4b3a-a070-d236e63734c0",
+            "target": "#f7abfa2e-df08-4b7f-ae62-015dff03489e",
             "location": "LEFT",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#ba4d0d92-e26b-4ec8-9e62-82233f751ec5",
-            "target": "#40eaf1eb-c5c2-41e3-94ce-fd4ddbf12249",
+            "groupId": "#bcf17d9d-3f57-4492-8a76-767ccf8839bf",
+            "target": "#d8aa95d3-a95e-498a-b3c0-37e5cc661b03",
             "location": "CENTER",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#ba4d0d92-e26b-4ec8-9e62-82233f751ec5",
-            "target": "#40eaf1eb-c5c2-41e3-94ce-fd4ddbf12249",
+            "groupId": "#bcf17d9d-3f57-4492-8a76-767ccf8839bf",
+            "target": "#d8aa95d3-a95e-498a-b3c0-37e5cc661b03",
             "location": "RIGHT",
             "receipt": {
               "status": "applied"
@@ -881,7 +881,7 @@
       },
       "switching": {
         "count": 20,
-        "totalWithFramesMs": 678.6000000014901,
+        "totalWithFramesMs": 902,
         "after": {
           "requests": 50,
           "renders": 50,
@@ -897,9 +897,9 @@
       "closing": {
         "batchCount": 1,
         "tabsetDeleteActionCount": 2,
-        "targetLookupMs": 0.3999999985098839,
-        "closeReceiptMs": 19.100000001490116,
-        "closeWithFramesMs": 29.399999998509884,
+        "targetLookupMs": 0.30000000447034836,
+        "closeReceiptMs": 38.600000001490116,
+        "closeWithFramesMs": 40.900000005960464,
         "closed": {
           "requests": 50,
           "renders": 50,
@@ -914,13 +914,13 @@
         "remaining": 0,
         "receipt": {
           "status": "closed",
-          "id": "document-af5968c97c5db2eb117e2e3b3119abae-1",
+          "id": "document-a65842f939d0aec80b3e8e00475fb829-1",
           "cleanupErrors": []
         }
       },
       "disposal": {
-        "disposeReceiptMs": 1.7000000029802322,
-        "disposeWithFramesMs": 31.100000001490116,
+        "disposeReceiptMs": 1,
+        "disposeWithFramesMs": 15.300000004470348,
         "cleanupErrors": [],
         "disposed": {
           "requests": 50,
@@ -935,10 +935,10 @@
         }
       },
       "httpRequests": 50,
-      "heapBeforeBytes": 11706932,
-      "heapAfterLayoutBytes": 58176940,
-      "heapAfterCloseBytes": 59935404,
-      "heapAfterDisposeBytes": 60081696
+      "heapBeforeBytes": 11632812,
+      "heapAfterLayoutBytes": 66029952,
+      "heapAfterCloseBytes": 67776544,
+      "heapAfterDisposeBytes": 67838952
     }
   ]
 }

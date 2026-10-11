@@ -298,7 +298,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         documents.has(id) &&
         (model.getNodeById(id) as TabNode).isSelected()
       )
-        this.activate(id);
+        this.activate(id, { focus: false });
       if (!this.selecting && action.type === Actions.SET_ACTIVE_TABSET)
         this.activateSelected(model.getActiveTabset());
     };
@@ -368,7 +368,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     } finally {
       this.selecting = false;
     }
-    ++this.focusEpoch;
+    const focus = ++this.focusEpoch;
     if (this.state.store.get().activeDocumentId !== id) {
       this.state.store.setState((s) => ({ ...s, activeDocumentId: id }));
     }
@@ -376,7 +376,11 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     if (session.router && options.history !== false) this.browser?.publish(session.href, id, true);
     if (options.focus !== false)
       queueMicrotask(() => {
-        if (this.state.store.get().activeDocumentId === id && this.state.documents.has(id)) {
+        if (
+          focus === this.focusEpoch &&
+          this.state.store.get().activeDocumentId === id &&
+          this.state.documents.has(id)
+        ) {
           this.restoringFocus = true;
           try {
             session.lifecycle?.focus?.();
@@ -417,7 +421,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     )
       return { status: "rejected" };
     if (!actions.every((a) => this.allowLayoutAction(a))) return { status: "rejected" };
-    this.applyLayoutAction(action);
+    this.applyLayoutAction(action, actions);
     return { status: "applied" };
   }
 
@@ -455,7 +459,9 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           return false;
         if (node instanceof TabNode && this.state.documents.has(node.getId()) && "config" in json)
           return false;
-        return !["enableFloat", "enablePopout"].some((key) => key in json && json[key] !== false);
+        return !["enableFloat", "enablePopout"].some(
+          (key) => key in json && json[key] !== false && json[key] !== undefined,
+        );
       }
       case Actions.UPDATE_MODEL_ATTRIBUTES: {
         const json = data.json as Record<string, unknown>;
@@ -463,7 +469,9 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           !!json &&
           typeof json === "object" &&
           !Array.isArray(json) &&
-          !["tabEnableFloat", "tabEnablePopout"].some((key) => key in json && json[key] !== false)
+          !["tabEnableFloat", "tabEnablePopout"].some(
+            (key) => key in json && json[key] !== false && json[key] !== undefined,
+          )
         );
       }
       case Actions.RENAME_TAB:
@@ -482,16 +490,31 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
 
   private activateSelected(container: TabSetNode | BorderNode | undefined) {
     const selected = container?.getSelectedNode();
-    if (selected && this.state.documents.has(selected.getId())) this.activate(selected.getId());
+    if (selected && this.state.documents.has(selected.getId()))
+      this.activate(selected.getId(), { focus: false });
   }
 
-  private applyLayoutAction(action: Action) {
+  private applyLayoutAction(action: Action, actions: readonly Action[]) {
     const model = this.state.model;
+    // A batch with one leaf has the same selection/move meaning as that native Action.
+    // Execute the original batch so native notifications and observers retain its identity.
+    const operation = actions.length === 1 ? actions[0]! : action;
     const activeSet = model.getActiveTabset();
     const previousSet = activeSet?.getId();
     const previousSelected = activeSet?.getSelectedNode()?.getId();
     const activeId = this.state.store.get().activeDocumentId;
     const current = activeId ? model.getNodeById(activeId) : undefined;
+    let movesActive = false;
+    if (operation.type === Actions.MOVE_NODE) {
+      let ancestor = current;
+      while (ancestor) {
+        if (ancestor.getId() === operation.data.fromNode) {
+          movesActive = true;
+          break;
+        }
+        ancestor = ancestor.getParent();
+      }
+    }
     const container = tabContainer(current);
     const selectedHere = container?.getSelectedNode()?.getId();
     const selecting = this.selecting;
@@ -502,28 +525,43 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       this.selecting = selecting;
     }
     if (selecting) return;
-    // Native batches notify only once. Derive the final selection instead of replaying their
-    // pipeline or keeping a second selection table. Tools retain the last document URL.
-    const actions = actionsIn(action);
+    // Native selection cancels pending foreground work, including queued content focus.
+    if (
+      actions.some(
+        (a) =>
+          a.type === Actions.SET_ACTIVE_TABSET ||
+          (a.type === Actions.SELECT_TAB &&
+            model.getNodeById(a.data.tabNode as string) instanceof TabNode),
+      )
+    )
+      ++this.focusEpoch;
+    // A single native selection owns only that tab. Selecting a tool or collapsing a Border
+    // must not reactivate an unrelated central document or steal the native strip's focus.
+    if (operation.type === Actions.SELECT_TAB) {
+      const selected = model.getNodeById(operation.data.tabNode as string);
+      if (selected instanceof TabNode && selected.isSelected()) {
+        if (this.state.documents.has(selected.getId()))
+          this.activate(selected.getId(), { focus: false });
+      }
+      return;
+    }
+    // Moving an active document that stays selected changes its placement, not its identity
+    // or URL. Native source selection repair is not another foreground navigation request.
+    if (movesActive && current instanceof TabNode && current.isSelected()) return;
+    // Native batches notify only once. Derive their final central selection without replaying
+    // the pipeline. A Border/tool-only selection must not activate an unrelated central tab.
     const explicit = actions.some(
-      (a) => a.type === Actions.SELECT_TAB || a.type === Actions.SET_ACTIVE_TABSET,
+      (a) =>
+        a.type === Actions.SET_ACTIVE_TABSET ||
+        (a.type === Actions.SELECT_TAB &&
+          this.state.documents.has(a.data.tabNode as string) &&
+          tabContainer(model.getNodeById(a.data.tabNode as string)) instanceof TabSetNode),
     );
-    const selected =
-      actions.length === 1 && action.type === Actions.SELECT_TAB
-        ? model.getNodeById(action.data.tabNode as string)
-        : undefined;
     const finalSet = model.getActiveTabset();
     const centralChanged =
       previousSet !== finalSet?.getId() ||
       previousSelected !== finalSet?.getSelectedNode()?.getId();
-    if (
-      selected instanceof TabNode &&
-      selected.isSelected() &&
-      this.state.documents.has(selected.getId()) &&
-      tabContainer(selected) instanceof BorderNode
-    ) {
-      this.activate(selected.getId());
-    } else if (centralChanged || explicit) {
+    if (centralChanged || explicit) {
       this.activateSelected(finalSet);
     } else if (
       selectedHere === activeId &&
@@ -1342,8 +1380,6 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     return structuredClone(snapshot.layout) as IJsonModel;
   }
   private validateLayout(layout: IJsonModel) {
-    if (layout.layout?.type !== "row" || !Array.isArray(layout.layout.children))
-      throw new Error("Snapshot requires a native FlexLayout root row");
     const popouts = (layout as IJsonModel & { popouts?: Record<string, unknown> }).popouts;
     if (
       (layout.subLayouts && Object.keys(layout.subLayouts).length > 0) ||
@@ -1354,32 +1390,39 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       throw new Error("Worksplit does not support floating or popout content");
     const ids = new Set<string>();
     const validate = (value: unknown, allowed: string[], path: string) => {
-      if (!value || typeof value !== "object") throw new Error(`Invalid snapshot node at ${path}`);
+      if (!value || typeof value !== "object" || Array.isArray(value))
+        throw new Error(`Invalid snapshot node at ${path}`);
       const node = value as Record<string, unknown>;
-      if (typeof node.type !== "string" || !allowed.includes(node.type))
+      // Root/Border context and omitted tab types have native defaults. Nested row children
+      // still require an explicit row/tabset type, as in FlexLayout's own fromJson.
+      let type = node.type;
+      if (type === undefined) {
+        if (allowed.includes("tab")) type = "tab";
+        else if (allowed.length === 1) type = allowed[0];
+      }
+      if (typeof type !== "string" || !allowed.includes(type))
         throw new Error(`Unsupported snapshot node at ${path}`);
       if (node.id !== undefined) {
         if (typeof node.id !== "string" || !node.id || ids.has(node.id))
           throw new Error(`Invalid or duplicate snapshot id at ${path}`);
         ids.add(node.id);
       }
-      if (node.type === "tab") {
-        if (typeof node.id !== "string" || typeof node.component !== "string")
-          throw new Error(`Snapshot tab requires id and component at ${path}`);
+      if (type === "tab") {
+        if (typeof node.component !== "string")
+          throw new Error(`Snapshot tab requires component at ${path}`);
+        if (node.children !== undefined)
+          throw new Error(`Snapshot tab cannot contain children at ${path}`);
         if (node.subLayoutId !== undefined)
           throw new Error(`Snapshot sublayout content is unsupported at ${path}`);
         return;
       }
+      if (node.children === undefined) return;
       if (!Array.isArray(node.children))
         throw new Error(`Snapshot children must be an array at ${path}`);
       node.children.forEach((child, index) =>
         validate(
           child,
-          node.type === "row"
-            ? ["row", "tabset"]
-            : node.type === "tabgroup"
-              ? ["tab"]
-              : ["tab", "tabgroup"],
+          type === "row" ? ["row", "tabset"] : type === "tabgroup" ? ["tab"] : ["tab", "tabgroup"],
           `${path}.children[${index}]`,
         ),
       );

@@ -11,10 +11,10 @@
   "results": [
     {
       "count": 2,
-      "openMs": 80.30000000447035,
+      "openMs": 108.29999999701977,
       "openTargetLookupMs": 0,
       "switchCount": 20,
-      "switchMs": 666.4000000059605,
+      "switchMs": 666.6000000014901,
       "opened": {
         "requests": 2,
         "renders": 2,
@@ -48,8 +48,8 @@
         "disposed": 0,
         "historySubscriptions": 2
       },
-      "closeReceiptMs": 17.700000002980232,
-      "closeWithFramesMs": 19.399999998509884,
+      "closeReceiptMs": 23.69999999552965,
+      "closeWithFramesMs": 26.799999997019768,
       "closed": {
         "requests": 2,
         "renders": 2,
@@ -73,15 +73,15 @@
         }
       ],
       "httpRequests": 2,
-      "heapBeforeBytes": 11631952,
-      "heapAfterCloseBytes": 15995880
+      "heapBeforeBytes": 11550900,
+      "heapAfterCloseBytes": 15871452
     },
     {
       "count": 10,
-      "openMs": 404.29999999701977,
-      "openTargetLookupMs": 2.000000014901161,
+      "openMs": 476.30000000447035,
+      "openTargetLookupMs": 3.8000000044703484,
       "switchCount": 20,
-      "switchMs": 666.6999999955297,
+      "switchMs": 666.1000000014901,
       "opened": {
         "requests": 10,
         "renders": 10,
@@ -115,8 +115,8 @@
         "disposed": 0,
         "historySubscriptions": 10
       },
-      "closeReceiptMs": 76.39999999850988,
-      "closeWithFramesMs": 81.79999999701977,
+      "closeReceiptMs": 98.10000000149012,
+      "closeWithFramesMs": 105.89999999850988,
       "closed": {
         "requests": 10,
         "renders": 10,
@@ -172,15 +172,15 @@
         }
       ],
       "httpRequests": 10,
-      "heapBeforeBytes": 11600128,
-      "heapAfterCloseBytes": 22451500
+      "heapBeforeBytes": 11541144,
+      "heapAfterCloseBytes": 17992644
     },
     {
       "count": 50,
-      "openMs": 2275.2999999970198,
-      "openTargetLookupMs": 17.299999989569187,
+      "openMs": 3018.9000000059605,
+      "openTargetLookupMs": 16.599999994039536,
       "switchCount": 20,
-      "switchMs": 746.6000000014901,
+      "switchMs": 849.8000000044703,
       "opened": {
         "requests": 50,
         "renders": 50,
@@ -214,8 +214,8 @@
         "disposed": 0,
         "historySubscriptions": 50
       },
-      "closeReceiptMs": 448.09999999403954,
-      "closeWithFramesMs": 491.5,
+      "closeReceiptMs": 636.1999999955297,
+      "closeWithFramesMs": 693.5,
       "closed": {
         "requests": 50,
         "renders": 50,
@@ -431,8 +431,8 @@
         }
       ],
       "httpRequests": 50,
-      "heapBeforeBytes": 11638604,
-      "heapAfterCloseBytes": 51120936
+      "heapBeforeBytes": 11635848,
+      "heapAfterCloseBytes": 34040756
     }
   ]
 }

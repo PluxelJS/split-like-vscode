@@ -77,11 +77,21 @@ containing TabSet/Border remains the editing group; the TabGroup is its strip or
 explicit document activation expands its collapsed native group before selecting it. Tab renames
 are presentation changes; Router acceptance can subsequently apply a route metadata title.
 
-After a native `Actions.group` changes or explicitly requests selection, document activation and
-URL coordination use the selected document of its final central active TabSet. Intermediate
-Actions do not establish a separate cross-space focus history. A single `Actions.selectTab` can
-explicitly activate a Border document; a GROUP selecting a Border document keeps the final central
-selection as its activation source. Selecting tools preserves the active document and its URL.
+A native batch with one leaf Action has the same document selection/move behavior as that Action,
+even when nested; Model execution and observer notifications retain the original batch.
+After a multi-action `Actions.group` changes the central selection or explicitly selects a central
+document/active TabSet, document activation and URL coordination use its final central selected
+document. A Border/tool-only selection batch keeps the last document when the central selection
+is unchanged. Intermediate Actions do not establish a separate cross-space focus history. A
+single `Actions.selectTab`, including its singleton batch, can explicitly activate a Border document.
+Selecting tools or collapsing a Border preserves the active document and URL. Moving the active document preserves that owner
+when it remains natively selected; whole-group moves use native destination selection. For example,
+moving a group into an expanded Border can leave its previously selected tool visible instead.
+
+Native selection coordinates the session and URL without calling content focus. Tab strip Enter,
+arrow navigation and native focus-next-TabSet keep their native focus behavior. Explicit Worksplit
+open/activate restore registered content focus, with an epoch check that cancels queued restoration
+after newer native selection or observed focus.
 
 Ordinary node/model attributes and pure layout `Actions.group` batches are supported. Node ids,
 document components/config and lifetime admission remain protected. Opening routed documents uses
@@ -89,6 +99,11 @@ document components/config and lifetime admission remain protected. Opening rout
 Native presentation and interaction slots expose native objects as trusted application extensions;
 they must dispatch Actions through Worksplit and observe rather than mutate its Model. There is
 no second menu, layout tree or equivalent Action API.
+
+Native JSON defaults remain available for omitted container children, contextual root/Border types,
+tab types and generated document ids. Explicit malformed fields still fail. Attribute reset with
+undefined follows native runtime semantics; upstream Action types with exactOptionalPropertyTypes
+are narrower, and Worksplit does not replace them.
 
 The React binding catches exceptions from the trusted `native.onModelChange` observer and reports
 them through `onIssue`, without undoing the native Action. Other native Model/Node observers remain
@@ -138,6 +153,15 @@ happen. Shared application services outlive individual document Routers.
 Narrow mode temporarily maximizes the active central native group and adds a document selector.
 Widening restores the desktop maximize choice; snapshots preserve that choice, not narrow mode.
 It does not introduce separate mobile layout preferences. Native Border collapse/dimensions remain.
+Switching the maximized group is one native toggle, without an intermediate unmaximized state.
+Store-triggered narrow presentation is coalesced after synchronous document selection coordination;
+it reads the latest owner instead of changing a native batch's final selection using the old owner.
+Disconnect cancels queued presentation before restoring the desktop preference.
+
+The content wrapper leaves scrolling to FlexLayout and its native enableScrollbars attributes.
+FlexLayout isolates non-Router render failures per tab and provides Retry; TanStack handles route
+failures. Desktop Workbench does not subscribe to the catalogue revision for rendering, preserving
+native adjusting-resize behavior. The narrow document selector owns its catalogue subscription.
 
 ## Breaking changes for later Pluxel migration
 

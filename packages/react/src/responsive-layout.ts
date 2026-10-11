@@ -10,14 +10,16 @@ export function connectResponsiveLayout(
   onNarrow: (narrow: boolean) => void,
 ) {
   let compact = false;
+  let connected = true;
+  let pending = false;
   let lastActive: string | null = null;
   let lastContainer: string | undefined;
   const maximize = (id: string | null) => {
     const previous = internal.model.getMaximizedTabset()?.getId();
     if (previous === id) return;
-    if (previous) internal.model.doAction(Actions.maximizeToggle(previous));
     if (id && internal.model.getNodeById(id) instanceof TabSetNode)
       internal.model.doAction(Actions.maximizeToggle(id));
+    else if (previous) internal.model.doAction(Actions.maximizeToggle(previous));
   };
   const resize = () => {
     const next = element.clientWidth < 640;
@@ -47,10 +49,19 @@ export function connectResponsiveLayout(
     if (s.activeDocumentId !== lastActive || container !== lastContainer) {
       lastActive = s.activeDocumentId;
       lastContainer = container;
-      resize();
+      if (compact && !pending) {
+        pending = true;
+        // Native after-action notifications precede dispatch's final document projection.
+        // Read the latest owner after that synchronous work, not the previous owner's container.
+        queueMicrotask(() => {
+          pending = false;
+          if (connected) resize();
+        });
+      }
     }
   });
   return () => {
+    connected = false;
     observer.disconnect();
     subscription.unsubscribe();
     if (compact) {

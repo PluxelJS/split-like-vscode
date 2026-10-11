@@ -239,6 +239,18 @@ function DocumentPage() {
     [id],
   );
   useWorkbenchContentLifecycle(lifecycle);
+  if (id === "long")
+    return (
+      <article data-testid="native-long-content">
+        <h1>Long document</h1>
+        {Array.from({ length: 80 }, (_, index) => (
+          <p key={index}>
+            Paragraph {index + 1}: {data.text} This routed document uses FlexLayout's native tab
+            scrolling without an application scroll container.
+          </p>
+        ))}
+      </article>
+    );
   return (
     <section className="document-page" data-testid={`document-${id}`}>
       <header>
@@ -636,11 +648,6 @@ function App() {
       </header>
       <div className="toolbar">
         <span>Right-click a tab or group for native layout actions.</span>
-        <button
-          onClick={() => active && void workbench.dispatch(Actions.setTabPinned(active, true))}
-        >
-          Pin
-        </button>
         <button onClick={() => moveActive(DockLocation.RIGHT)}>Split right</button>
         <button
           onClick={() =>
@@ -655,16 +662,6 @@ function App() {
         <button onClick={() => moveActive(DockLocation.CENTER)}>Move to center</button>
         <button onClick={() => void workbench.dispatch(Actions.selectTab("inspector"))}>
           Toggle Inspector
-        </button>
-        <button
-          onClick={() =>
-            active &&
-            void workbench.dispatch(
-              Actions.maximizeToggle(workbench.getEditingContext().activeGroupId!),
-            )
-          }
-        >
-          Focus group
         </button>
         <button
           onClick={() => {

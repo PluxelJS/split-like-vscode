@@ -13,6 +13,8 @@ import {
   TabGroupNode,
   TabNode,
   TabSetNode,
+  type Action,
+  type IJsonModel,
   type Node,
 } from "flexlayout-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -136,6 +138,458 @@ const withBorder: NonNullable<WorkbenchOptions<AnyRouter>["layout"]> = {
 };
 
 describe("native FlexLayout ownership", () => {
+  it.each([
+    { layout: {} },
+    { layout: { type: "row" } },
+    {
+      borders: [{ type: "border", location: "bottom" }],
+      layout: { children: [{ type: "tabset", enableDeleteWhenEmpty: false }] },
+    },
+  ] satisfies IJsonModel[])(
+    "accepts omitted native root and empty children defaults: %j",
+    (layout) => {
+      const { workbench, makeRouter } = setup({ layout });
+      expect(workbench.getLayout().layout.type).toBe("row");
+      expect(tabsets(workbench)).toHaveLength(1);
+      expect(tabsets(workbench)[0]?.getChildren()).toHaveLength(0);
+      const snapshot = workbench.snapshot();
+      const restored = createWorkbench({ createRouter: makeRouter, snapshot });
+      disposals.push(() => restored.dispose());
+      expect(restored.getLayout().layout.id).toBe(snapshot.layout.layout.id);
+      expect(tabsets(restored)).toHaveLength(1);
+      expect(tabsets(restored)[0]?.getChildren()).toHaveLength(0);
+    },
+  );
+
+  it("retains generated native document identities across snapshots and actual Router admission", async () => {
+    const { workbench, makeRouter } = setup({
+      layout: {
+        layout: {
+          children: [
+            {
+              type: "tabset",
+              children: [
+                { component: "worksplit.document", config: { href: "/documents/A?view=edit" } },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    const original = workbench.getDocuments()[0];
+    expect(original?.id).toBeTruthy();
+    expect(workbench.getDocuments()).toHaveLength(1);
+    const snapshot = workbench.snapshot();
+    const restored = createWorkbench({ createRouter: makeRouter, snapshot });
+    disposals.push(() => restored.dispose());
+    expect(restored.snapshot()).toEqual(snapshot);
+    const result = await restored.start("/documents/A?view=edit");
+    expect(result).toMatchObject({
+      status: "committed",
+      reused: true,
+      document: { id: original?.id },
+    });
+    expect(restored.getDocuments()).toHaveLength(1);
+    expect(restored.getDocument(original!.id)?.href).toContain("/documents/A");
+  });
+
+  it.each([
+    { layout: { type: "tabset", children: [] } },
+    { layout: { type: null, children: [] } },
+    { layout: [] },
+    { layout: { type: "row", children: {} } },
+    { layout: { type: "row", children: [{ type: "tabset", children: "tabs" }] } },
+    { layout: { children: [{ type: "tabset", children: [[]] }] } },
+    { layout: { type: "row", children: [{ type: "unknown" }] } },
+    {
+      layout: {
+        children: [
+          { type: "tabset", id: "duplicate", children: [] },
+          { type: "tabset", id: "duplicate", children: [] },
+        ],
+      },
+    },
+    { layout: { id: "", children: [] } },
+    {
+      borders: [{ location: "bottom" }],
+      layout: {
+        children: [
+          {
+            type: "tabset",
+            children: [
+              {
+                id: "border_bottom",
+                component: "worksplit.document",
+                config: { href: "/documents/A" },
+              },
+            ],
+          },
+        ],
+      },
+    },
+  ])("rejects malformed or conflicting native identities before creating Routers: %j", (layout) => {
+    const { makeRouter } = setup();
+    const factory = vi.fn<typeof makeRouter>(makeRouter);
+    expect(() =>
+      createWorkbench({ createRouter: factory, layout: layout as unknown as IJsonModel }),
+    ).toThrow(/snapshot|duplicate|unique|native/iu);
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("allows native undefined attribute resets without enabling float or popout content", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    await workbench.dispatch(
+      Actions.updateNodeAttributes(a, { enableFloat: false, enablePopout: false }),
+    );
+    expect(
+      await workbench.dispatch(
+        // Native updateAttrs supports undefined resets; upstream optional TS fields are narrower.
+        Actions.updateNodeAttributes(a, {
+          enableFloat: undefined,
+          enablePopout: undefined,
+        } as unknown as Parameters<typeof Actions.updateNodeAttributes>[1]),
+      ),
+    ).toEqual({ status: "applied" });
+    expect(
+      await workbench.dispatch(
+        Actions.updateModelAttributes({
+          tabEnableFloat: undefined,
+          tabEnablePopout: undefined,
+        } as unknown as Parameters<typeof Actions.updateModelAttributes>[0]),
+      ),
+    ).toEqual({ status: "applied" });
+    expect(tab(workbench, a).isEnableFloat()).toBe(false);
+    expect(tab(workbench, a).isEnablePopout()).toBe(false);
+    const before = workbench.getLayout();
+    expect(
+      await workbench.dispatch(Actions.updateNodeAttributes(a, { enableFloat: true })),
+    ).toEqual({ status: "rejected" });
+    expect(
+      await workbench.dispatch(Actions.updateModelAttributes({ tabEnablePopout: true })),
+    ).toEqual({ status: "rejected" });
+    expect(workbench.getLayout()).toEqual(before);
+  });
+
+  it("rejects children on a native Tab without silently dropping their documents or changing the candidate", () => {
+    const { makeRouter } = setup();
+    const factory = vi.fn<typeof makeRouter>(makeRouter);
+    const candidate = {
+      layout: {
+        children: [
+          {
+            type: "tabset",
+            children: [
+              {
+                type: "tab",
+                id: "A",
+                component: "worksplit.document",
+                config: { href: "/documents/A" },
+                children: [
+                  {
+                    type: "tab",
+                    id: "B",
+                    component: "worksplit.document",
+                    config: { href: "/documents/B" },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const original = structuredClone(candidate);
+    expect(() =>
+      createWorkbench({ createRouter: factory, layout: candidate as unknown as IJsonModel }),
+    ).toThrow(/children/u);
+    expect(factory).not.toHaveBeenCalled();
+    expect(candidate).toEqual(original);
+  });
+
+  it("preserves a Border document URL when a native tool selection or collapse leaves central B selected", async () => {
+    const { workbench, open } = setup({
+      tools: [{ id: "inspector", title: "Inspector", render: () => null }],
+      layout: {
+        ...withBorder,
+        borders: [
+          {
+            type: "border",
+            location: "bottom",
+            selected: 0,
+            children: [{ type: "tab", id: "inspector", component: "worksplit.tool" }],
+          },
+        ],
+      },
+    });
+    workbench.connectBrowser();
+    const a = await open("A", "main");
+    const b = await open("B", "other");
+    await workbench.dispatch(Actions.moveNode(a, "border_bottom", DockLocation.CENTER, -1));
+    workbench.activate(a);
+    await Promise.resolve();
+    expect(native(workbench).getActiveTabset()?.getSelectedNode()?.getId()).toBe(b);
+    const focusA = vi.fn<() => void>();
+    const focusB = vi.fn<() => void>();
+    integrationState(workbench).register(a, { focus: focusA });
+    integrationState(workbench).register(b, { focus: focusB });
+    expect(await workbench.dispatch(Actions.selectTab("inspector"))).toEqual({ status: "applied" });
+    expect(
+      (native(workbench).getNodeById("border_bottom") as BorderNode).getSelectedNode()?.getId(),
+    ).toBe("inspector");
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(window.location.pathname).toBe("/documents/A");
+    await workbench.dispatch(Actions.selectTab("inspector"));
+    expect((native(workbench).getNodeById("border_bottom") as BorderNode).getSelected()).toBe(-1);
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(window.location.pathname).toBe("/documents/A");
+    await workbench.dispatch(Actions.selectTab(a));
+    await workbench.dispatch(Actions.selectTab(a));
+    expect((native(workbench).getNodeById("border_bottom") as BorderNode).getSelected()).toBe(-1);
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(window.location.pathname).toBe("/documents/A");
+    await Promise.resolve();
+    expect(focusA).not.toHaveBeenCalled();
+    expect(focusB).not.toHaveBeenCalled();
+  });
+
+  it("lets native selection and active-tabset interactions own DOM focus while public activation restores it", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    const a = await open("A", "main");
+    const b = await open("B", "other");
+    const focusA = vi.fn<() => void>();
+    const focusB = vi.fn<() => void>();
+    integrationState(workbench).register(a, { focus: focusA });
+    integrationState(workbench).register(b, { focus: focusB });
+    await workbench.dispatch(Actions.selectTab(a));
+    await Promise.resolve();
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(focusA).not.toHaveBeenCalled();
+    await workbench.dispatch(Actions.setActiveTabset("other"));
+    await Promise.resolve();
+    expect(workbench.getActiveDocument()?.id).toBe(b);
+    expect(focusB).not.toHaveBeenCalled();
+    workbench.activate(a);
+    await Promise.resolve();
+    expect(focusA).toHaveBeenCalledTimes(1);
+    expect(focusB).not.toHaveBeenCalled();
+  });
+
+  it.each(["native tool selection", "observed tool focus"] as const)(
+    "cancels a queued public focus restoration after %s",
+    async (interaction) => {
+      const { workbench, open } = setup({
+        tools: [{ id: "inspector", title: "Inspector", render: () => null }],
+        layout: {
+          ...withBorder,
+          borders: [
+            {
+              type: "border",
+              location: "bottom",
+              selected: 0,
+              children: [{ type: "tab", id: "inspector", component: "worksplit.tool" }],
+            },
+          ],
+        },
+      });
+      const a = await open("A", "main");
+      const focus = vi.fn<() => void>();
+      integrationState(workbench).register(a, { focus });
+      workbench.activate(a);
+      if (interaction === "native tool selection") {
+        await workbench.dispatch(Actions.selectTab("inspector"));
+      } else {
+        integrationState(workbench).focus("inspector", "tool");
+      }
+      await Promise.resolve();
+      expect(workbench.getActiveDocument()?.id).toBe(a);
+      expect(focus).not.toHaveBeenCalled();
+      workbench.activate(a);
+      await Promise.resolve();
+      expect(focus).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("retains a Border document URL when a native batch selects only a tool and resizes its Border", async () => {
+    const { workbench, open } = setup({
+      tools: [{ id: "inspector", title: "Inspector", render: () => null }],
+      layout: {
+        ...withBorder,
+        borders: [
+          {
+            type: "border",
+            location: "bottom",
+            selected: 0,
+            children: [{ type: "tab", id: "inspector", component: "worksplit.tool" }],
+          },
+        ],
+      },
+    });
+    workbench.connectBrowser();
+    const a = await open("A", "main");
+    const b = await open("B", "other");
+    await workbench.dispatch(Actions.moveNode(a, "border_bottom", DockLocation.CENTER, -1));
+    workbench.activate(a);
+    await Promise.resolve();
+    const focus = vi.fn<() => void>();
+    integrationState(workbench).register(b, { focus });
+    const model = native(workbench);
+    const action = Actions.group([
+      Actions.selectTab("inspector"),
+      Actions.updateNodeAttributes("border_bottom", { size: 222 }),
+    ]);
+    model.doAction(action);
+    expect(await workbench.dispatch(action)).toEqual({ status: "applied" });
+    expect(workbench.getLayout()).toEqual(model.toJson());
+    expect(native(workbench).getActiveTabset()?.getSelectedNode()?.getId()).toBe(b);
+    expect(
+      (native(workbench).getNodeById("border_bottom") as BorderNode).getSelectedNode()?.getId(),
+    ).toBe("inspector");
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(window.location.pathname).toBe("/documents/A");
+    await Promise.resolve();
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["tab", "scalar"],
+    ["tab", "singleton"],
+    ["tab", "nested singleton"],
+    ["group", "scalar"],
+  ] as const)(
+    "follows native selection when a %s moves into an already open Border via %s",
+    async (kind, wrapper) => {
+      const { workbench, open } = setup({
+        tools: [{ id: "inspector", title: "Inspector", render: () => null }],
+        layout: {
+          ...withBorder,
+          borders: [
+            {
+              type: "border",
+              location: "bottom",
+              selected: 0,
+              children: [{ type: "tab", id: "inspector", component: "worksplit.tool" }],
+            },
+          ],
+        },
+      });
+      workbench.connectBrowser();
+      const a = await open("A", "main");
+      const b = await open("B", "main");
+      let moving = a;
+      if (kind === "group") {
+        const c = await open("C", "main");
+        moving = await group(workbench, a);
+        await workbench.dispatch(Actions.moveNode(c, moving, DockLocation.CENTER, -1));
+      }
+      workbench.activate(a);
+      await Promise.resolve();
+      const focus = vi.fn<() => void>();
+      integrationState(workbench).register(a, { focus });
+      const model = native(workbench);
+      const leaf = Actions.moveNode(moving, "border_bottom", DockLocation.CENTER, -1);
+      const action =
+        wrapper === "scalar"
+          ? leaf
+          : Actions.group([wrapper === "singleton" ? leaf : Actions.group([leaf])]);
+      model.doAction(action);
+      expect((model.getNodeById("border_bottom") as BorderNode).getSelectedNode()?.getId()).toBe(
+        kind === "tab" ? a : "inspector",
+      );
+      expect(model.getActiveTabset()?.getSelectedNode()?.getId()).toBe(b);
+      const observe = vi.fn<(action: Action) => void>();
+      const live = integrationState(workbench).model;
+      live.addChangeListener(observe);
+      expect(await workbench.dispatch(action)).toEqual({ status: "applied" });
+      live.removeChangeListener(observe);
+      expect(observe).toHaveBeenCalledTimes(1);
+      expect(observe.mock.calls[0]?.[0]).toBe(action);
+      expect(workbench.getLayout()).toEqual(model.toJson());
+      expect(workbench.getActiveDocument()?.id).toBe(kind === "tab" ? a : b);
+      expect(window.location.pathname).toBe(kind === "tab" ? "/documents/A" : "/documents/B");
+      await Promise.resolve();
+      expect(focus).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["singleton", "nested singleton"] as const)(
+    "activates a Border document selected through a %s native GroupAction without replacing its observer action",
+    async (wrapper) => {
+      const { workbench, open } = setup({ layout: withBorder });
+      workbench.connectBrowser();
+      await open("A", "main");
+      const b = await open("B", "other");
+      const c = await open("C", "border_bottom");
+      workbench.activate(b);
+      await workbench.dispatch(Actions.selectTab(c));
+      expect((native(workbench).getNodeById("border_bottom") as BorderNode).getSelected()).toBe(-1);
+      expect(workbench.getActiveDocument()?.id).toBe(b);
+      const focus = vi.fn<() => void>();
+      integrationState(workbench).register(c, { focus });
+      const leaf = Actions.selectTab(c);
+      const action = Actions.group([wrapper === "singleton" ? leaf : Actions.group([leaf])]);
+      const expected = native(workbench);
+      expected.doAction(action);
+      const observe = vi.fn<(action: Action) => void>();
+      const live = integrationState(workbench).model;
+      live.addChangeListener(observe);
+      expect(await workbench.dispatch(action)).toEqual({ status: "applied" });
+      live.removeChangeListener(observe);
+      expect(observe).toHaveBeenCalledTimes(1);
+      expect(observe.mock.calls[0]?.[0]).toBe(action);
+      expect(workbench.getLayout()).toEqual(expected.toJson());
+      expect(native(workbench).getActiveTabset()?.getSelectedNode()?.getId()).toBe(b);
+      expect(workbench.getActiveDocument()?.id).toBe(c);
+      expect(window.location.pathname).toBe("/documents/C");
+      await Promise.resolve();
+      expect(focus).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["select false", "closed border"] as const)(
+    "does not override native Border move visibility (%s)",
+    async (mode) => {
+      const { workbench, open } = setup({
+        tools: [{ id: "inspector", title: "Inspector", render: () => null }],
+        layout: {
+          ...withBorder,
+          borders: [
+            {
+              type: "border",
+              location: "bottom",
+              selected: mode === "select false" ? 0 : -1,
+              autoSelectTabWhenClosed: false,
+              children: [{ type: "tab", id: "inspector", component: "worksplit.tool" }],
+            },
+          ],
+        },
+      });
+      const a = await open("A", "main");
+      await open("B", "main");
+      workbench.activate(a);
+      await Promise.resolve();
+      const model = native(workbench);
+      const action = Actions.moveNode(
+        a,
+        "border_bottom",
+        DockLocation.CENTER,
+        -1,
+        mode === "select false" ? false : undefined,
+      );
+      model.doAction(action);
+      const selected = (model.getNodeById("border_bottom") as BorderNode)
+        .getSelectedNode()
+        ?.getId();
+      expect(selected).not.toBe(a);
+      expect(await workbench.dispatch(action)).toEqual({ status: "applied" });
+      expect(workbench.getLayout()).toEqual(model.toJson());
+      expect(
+        (native(workbench).getNodeById("border_bottom") as BorderNode).getSelectedNode()?.getId(),
+      ).toBe(selected);
+      expect(workbench.getDocument(a)).not.toBeNull();
+    },
+  );
+
   it("lets native tidy remove emptied default containers through repeated edge splits", async () => {
     const { workbench, open } = setup();
     const a = await open("A");
@@ -399,12 +853,22 @@ describe("native FlexLayout ownership", () => {
     const element = document.createElement("div");
     Object.defineProperty(element, "clientWidth", { configurable: true, value: 390 });
     installTestResizeObserver({ width: 390, height: 844 });
+    const model = integrationState(workbench).model;
+    const maximized: (string | undefined)[] = [];
+    const observe = (action: import("flexlayout-react").Action) => {
+      if (action.type === Actions.MAXIMIZE_TOGGLE)
+        maximized.push(model.getMaximizedTabset()?.getId());
+    };
+    model.addChangeListener(observe);
     const narrow = vi.fn<(value: boolean) => void>();
     const disconnect = connectResponsiveLayout(integrationState(workbench), element, narrow);
     expect(narrow).toHaveBeenLastCalledWith(true);
     expect(native(workbench).getMaximizedTabset()?.getId()).toBe("main");
     expect(Model.fromJson(workbench.snapshot().layout).getMaximizedTabset()?.getId()).toBe("other");
+    expect(maximized).toEqual(["main"]);
     disconnect();
+    model.removeChangeListener(observe);
+    expect(maximized).toEqual(["main", "other"]);
     expect(native(workbench).getMaximizedTabset()?.getId()).toBe("other");
     expect(tab(workbench, a).getParent()).toBeInstanceOf(TabGroupNode);
   });
@@ -443,6 +907,63 @@ describe("native FlexLayout ownership", () => {
     expect(Model.fromJson(workbench.snapshot().layout).getMaximizedTabset()).toBeUndefined();
     disconnect();
     expect(native(workbench).getMaximizedTabset()).toBeUndefined();
+  });
+
+  it("projects a narrow batch's final native owner before maximizing its latest active document", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    const a = await open("A", "main");
+    const c = await open("C", "main");
+    await open("B", "other");
+    workbench.activate(a);
+    const element = document.createElement("div");
+    Object.defineProperty(element, "clientWidth", { configurable: true, value: 390 });
+    installTestResizeObserver({ width: 390, height: 844 });
+    const disconnect = connectResponsiveLayout(
+      integrationState(workbench),
+      element,
+      () => undefined,
+    );
+    try {
+      const expected = native(workbench);
+      const action = Actions.group([
+        Actions.moveNode(a, "other", DockLocation.CENTER, -1),
+        Actions.setActiveTabset("main"),
+      ]);
+      expected.doAction(action);
+      expect(expected.getActiveTabset()?.getId()).toBe("main");
+      expect(expected.getActiveTabset()?.getSelectedNode()?.getId()).toBe(c);
+      expect(await workbench.dispatch(action)).toEqual({ status: "applied" });
+      await Promise.resolve();
+      expect(workbench.getActiveDocument()?.id).toBe(c);
+      expect(workbench.getLayout()).toEqual(expected.toJson());
+      expect(native(workbench).getMaximizedTabset()?.getId()).toBe("main");
+    } finally {
+      disconnect();
+    }
+  });
+
+  it("cancels a queued narrow update when disconnect restores the desktop maximize preference", async () => {
+    const { workbench, open } = setup({ layout: withBorder });
+    const a = await open("A", "main");
+    const c = await open("C", "main");
+    await open("B", "other");
+    await workbench.dispatch(Actions.maximizeToggle("other"));
+    workbench.activate(a);
+    const element = document.createElement("div");
+    Object.defineProperty(element, "clientWidth", { configurable: true, value: 390 });
+    installTestResizeObserver({ width: 390, height: 844 });
+    const disconnect = connectResponsiveLayout(
+      integrationState(workbench),
+      element,
+      () => undefined,
+    );
+    expect(native(workbench).getMaximizedTabset()?.getId()).toBe("main");
+    workbench.activate(c);
+    disconnect();
+    expect(native(workbench).getMaximizedTabset()?.getId()).toBe("other");
+    await Promise.resolve();
+    expect(native(workbench).getMaximizedTabset()?.getId()).toBe("other");
+    expect(Model.fromJson(workbench.snapshot().layout).getMaximizedTabset()?.getId()).toBe("other");
   });
 
   it("passes group members and actual native targets through the docking policy", async () => {
