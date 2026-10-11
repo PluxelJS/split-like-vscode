@@ -1895,6 +1895,13 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       const candidate = candidates.get(id);
       if (candidate) return candidate;
     }
+    // Restored documents are lazy: no active session or MRU exists until startup accepts
+    // a URL. Preserve the native selected comparison when several instances match it.
+    const selected = this.state.model.getActiveTabset()?.getSelectedNode();
+    if (selected) {
+      const candidate = candidates.get(selected.getId());
+      if (candidate) return candidate;
+    }
     return sessions[0];
   }
   private freshId() {

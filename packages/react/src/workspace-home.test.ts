@@ -5,7 +5,7 @@ import {
   redirect,
   type AnyRouter,
 } from "@tanstack/react-router";
-import { Actions, DockLocation } from "flexlayout-react";
+import { Actions, DockLocation, TabGroupNode } from "flexlayout-react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -153,6 +153,56 @@ describe("document-free workspace home", () => {
     expect(window.location.pathname).toBe("/documents/B");
     expect(second.workbench.getDocuments()).toHaveLength(2);
     expect(second.homeLoads).not.toHaveBeenCalled();
+  });
+
+  it("restores the selected comparison instance at its URL without expanding another copy's group", async () => {
+    const first = setup();
+    const original = await first.open("A");
+    await first.workbench.dispatch(Actions.addTabToNewGroup(original.id, "Original"));
+    const group = first.internal.model.getNodeById(original.id)!.getParent()!;
+    expect(group).toBeInstanceOf(TabGroupNode);
+    const duplicate = await first.workbench.duplicate(original.id, {
+      target: original.containerId,
+    });
+    if (duplicate.status !== "committed") throw new Error(duplicate.status);
+    await first.workbench.dispatch(Actions.updateNodeAttributes(group.getId(), { opened: false }));
+    expect(first.workbench.getActiveDocument()?.id).toBe(duplicate.document.id);
+    const load = vi.fn<() => void>();
+    const second = setup(undefined, load, first.workbench.snapshot());
+    second.workbench.connectBrowser();
+
+    expect(await second.workbench.start(original.href)).toMatchObject({
+      status: "committed",
+      reused: true,
+      document: { id: duplicate.document.id },
+    });
+    expect(second.workbench.getActiveDocument()?.id).toBe(duplicate.document.id);
+    expect((second.internal.model.getNodeById(group.getId()) as TabGroupNode).isOpened()).toBe(
+      false,
+    );
+    expect(second.internal.documents.get(original.id)?.router).toBeUndefined();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(window.history.state["worksplit:default"].id).toBe(duplicate.document.id);
+    expect(second.workbench.getDocuments()).toHaveLength(2);
+  });
+
+  it("honors a different startup URL instead of the restored selected comparison", async () => {
+    const first = setup();
+    const original = await first.open("A");
+    const duplicate = await first.workbench.duplicate(original.id);
+    if (duplicate.status !== "committed") throw new Error(duplicate.status);
+    const second = setup(undefined, undefined, first.workbench.snapshot());
+    second.workbench.connectBrowser();
+
+    expect(await second.workbench.start("/documents/B")).toMatchObject({
+      status: "committed",
+      reused: false,
+      document: { href: "/documents/B" },
+    });
+    expect(second.internal.documents.get(original.id)?.router).toBeUndefined();
+    expect(second.internal.documents.get(duplicate.document.id)?.router).toBeUndefined();
+    expect(second.workbench.getDocuments()).toHaveLength(3);
+    expect(window.location.pathname).toBe("/documents/B");
   });
 
   it("revokes an older foreground admission but allows an explicitly background admission to settle", async () => {

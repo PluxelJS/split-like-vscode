@@ -48,6 +48,10 @@ leave/unmount the workspace. This release does not integrate an outer applicatio
 invent cross-application history. Hint ids are not recycled after closing restored tabs. An
 unavailable hint opens by URL; closed drafts are not restored.
 
+At startup, matching restored comparison instances prefer the native active TabSet's selected
+document when no active session or MRU exists yet. Another copy's collapsed group stays collapsed;
+the address still determines the candidate documents, and a different URL routes normally.
+
 With opt-in `homeMode: "empty"`, `start(home)` and an owned home traversal without a live
 hint accept an empty workspace when no documents remain. Existing documents instead resume
 active/native-selected/MRU content and normalize that home entry to its URL. Back to home
