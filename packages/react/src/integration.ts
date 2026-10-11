@@ -440,11 +440,13 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     if (!(node instanceof TabNode)) return;
     this.selecting = true;
     try {
+      const group = tabContainer(node);
+      if (group instanceof BorderNode && !group.isShowing())
+        this.state.model.doAction(Actions.updateNodeAttributes(group.getId(), { show: true }));
       const hidden = closedGroup(node);
       if (hidden)
         this.state.model.doAction(Actions.updateNodeAttributes(hidden.getId(), { opened: true }));
       if (!node.isSelected()) this.state.model.doAction(Actions.selectTab(id));
-      const group = tabContainer(node);
       const maximized = this.state.model.getMaximizedTabset();
       // Selecting an obscured tab does not reveal it in FlexLayout. Follow the explicit
       // document target while retaining the user's maximized workspace mode.
@@ -986,6 +988,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       session === source &&
       node.isSelected() &&
       !hidden &&
+      (!(container instanceof BorderNode) || container.isShowing()) &&
       (!(container instanceof TabSetNode) || !maximized || maximized === container)
     )
       return;
@@ -993,6 +996,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     const selecting = this.selecting;
     this.selecting = true;
     try {
+      if (container instanceof BorderNode && !container.isShowing())
+        model.doAction(Actions.updateNodeAttributes(container.getId(), { show: true }));
       if (maximized) model.doAction(Actions.maximizeToggle(maximized.getId()));
       if (hidden) model.doAction(Actions.updateNodeAttributes(hidden.getId(), { opened: true }));
       if (!node.isSelected()) model.doAction(Actions.selectTab(session.id));

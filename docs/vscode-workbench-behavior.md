@@ -100,6 +100,8 @@ Native selection coordinates the session and URL without calling content focus. 
 arrow navigation and native focus-next-TabSet keep their native focus behavior. Explicit Worksplit
 open/activate restore registered content focus, with an epoch check that cancels queued restoration
 after newer native selection or observed focus.
+Explicit document activation and preserve-focus reveal also show a hidden native Border that
+contains the target, including an already selected document; selection alone cannot reveal it.
 
 Ordinary node/model attributes and pure layout `Actions.group` batches are supported. Node ids,
 document components/config and lifetime admission remain protected. Opening routed documents uses
