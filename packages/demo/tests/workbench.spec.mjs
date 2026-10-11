@@ -11,6 +11,17 @@ async function openB(page) {
 async function ids(page) {
   return page.evaluate(() => window.worksplitDemo.workbench.getDocuments());
 }
+async function tabsetId(page, contentId) {
+  return page.evaluate((id) => {
+    const contains = (node) =>
+      node.id === id || (node.children ?? []).some((child) => contains(child));
+    const find = (node) =>
+      node.type === "tabset" && contains(node)
+        ? node.id
+        : (node.children ?? []).map(find).find(Boolean);
+    return find(window.worksplitDemo.workbench.getLayout().layout);
+  }, contentId);
+}
 
 test("two native route contexts, nested Outlet, typed navigation and tool focus", async ({
   page,
@@ -141,7 +152,7 @@ test("native movement, pin, maximize and Border hiding retain input, scroll and 
   await page.getByRole("button", { name: "Focus group", exact: true }).click();
   await expect(page.getByLabel("Draft B")).toBeVisible();
   await page.getByRole("button", { name: "Pin", exact: true }).click();
-  await page.getByRole("button", { name: "Move right", exact: true }).click();
+  await page.getByRole("button", { name: "Split right", exact: true }).click();
   await expect(page.getByLabel("Draft A")).toHaveValue("retained");
   await page.getByRole("button", { name: "Move to Border" }).click();
   await expect(page.getByLabel("Draft A")).toHaveValue("retained");
@@ -152,7 +163,7 @@ test("native movement, pin, maximize and Border hiding retain input, scroll and 
       window.worksplitDemo.workbench.getDocuments().find((d) => d.href.includes("/documents/A")).id,
     ),
   );
-  await page.getByRole("button", { name: "Move to main" }).click();
+  await page.getByRole("button", { name: "Move to center" }).click();
   await expect(page.getByLabel("Draft A")).toHaveValue("retained");
   expect(await page.getByTestId("scroll-A").evaluate((element) => element.scrollTop)).toBe(480);
   const after = await page.evaluate(() => window.worksplitDemo.metrics);
@@ -356,6 +367,7 @@ test("native drag moves the existing content, and a portal command retains its t
   const docs = await ids(page);
   const a = docs.find((d) => d.href.includes("/documents/A"));
   const b = docs.find((d) => d.href.includes("/documents/B"));
+  const destination = await tabsetId(page, b.id);
   const source = await page.locator(`#flexlayout-tabbutton-${a.id}`).boundingBox();
   const target = await page.locator(`#flexlayout-tabbutton-${b.id}`).boundingBox();
   await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
@@ -370,7 +382,7 @@ test("native drag moves the existing content, and a portal command retains its t
     .poll(() =>
       page.evaluate(() => window.worksplitDemo.workbench.getEditingContext().activeGroupId),
     )
-    .toBe("right");
+    .toBe(destination);
   await expect(page.getByLabel("Draft A")).toHaveValue("drag keeps this");
   await page.getByRole("button", { name: "Tool menu", exact: true }).click();
   await page.getByRole("menuitem", { name: "Run tool command" }).click();
@@ -470,6 +482,15 @@ test("document focus chooses the native default group; a centrally docked tool p
   await start(page);
   await openB(page);
   await page.getByLabel("Draft A").click();
+  const currentDocuments = await ids(page);
+  const aContainer = await tabsetId(
+    page,
+    currentDocuments.find((doc) => doc.href.includes("/documents/A")).id,
+  );
+  const bContainer = await tabsetId(
+    page,
+    currentDocuments.find((doc) => doc.href.includes("/documents/B")).id,
+  );
   const opened = await page.evaluate(() =>
     window.worksplitDemo.workbench.open({
       to: "/documents/$id",
@@ -481,14 +502,16 @@ test("document focus chooses the native default group; a centrally docked tool p
   await expect(page.getByLabel("Draft C")).toBeVisible();
   expect(
     await page.evaluate(() => window.worksplitDemo.workbench.getEditingContext().activeGroupId),
-  ).toBe("left");
+  ).toBe(aContainer);
   await page.getByLabel("Inspector note").fill("tool state");
   const accepted = page.url();
   expect(
-    await page.evaluate(() => {
+    await page.evaluate((destinationId) => {
       const { workbench, Actions, DockLocation } = window.worksplitDemo;
-      return workbench.dispatch(Actions.moveNode("inspector", "right", DockLocation.CENTER, -1));
-    }),
+      return workbench.dispatch(
+        Actions.moveNode("inspector", destinationId, DockLocation.CENTER, -1),
+      );
+    }, bContainer),
   ).toEqual({ status: "applied" });
   await expect(page.getByLabel("Inspector note")).toHaveValue("tool state");
   await page.getByLabel("Inspector note").click();

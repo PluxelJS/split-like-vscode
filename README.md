@@ -97,6 +97,8 @@ replace and browser-link behavior. Global document entrances use `workbench.open
 `open(navigation, { target?, newInstance?, background? })` uses TanStack `NavigateOptions` types.
 `target` is a native Tabset or Border id, not a Worksplit region. Omission uses the active/first
 central Tabset. Invalid targets or policies return a load-stage failure; no document is retained.
+Container ids belong to the live native layout: empty TabSets can disappear after moving or closing
+their last tab, so a previously observed target is not a permanent region id.
 `newInstance: true` explicitly permits another instance. `background: true` runs routing without
 claiming activation. The most recent foreground open supersedes older foreground opens;
 activation separately revokes a pending request's right to take focus or write the URL.
@@ -201,6 +203,11 @@ Tools have no Router and never replace the document URL, including when moved to
 A global tool uses one id; explicit multiple tools use distinct registrations/ids.
 Native Border tab selection collapses or expands content; removing a tool is a separate operation.
 Empty Borders auto-hide when `borderEnableAutoHide` is enabled.
+Empty central TabSets use FlexLayout's default cleanup. Moving the last tab out removes the source
+TabSet; closing all central content leaves one native empty root placeholder. Worksplit does not
+keep a fixed left/right or `main` container alive. Set native `enableDeleteWhenEmpty: false` on a
+specific TabSet only when the application intentionally needs that empty space; disabling native
+TabSet close also prevents its empty cleanup.
 
 Import `Actions`, `DockLocation`, native JSON types and menu helpers directly from `flexlayout-react`.
 `dispatch(Actions...)` keeps their native meaning: selection, movement, pin, maximize, weights,

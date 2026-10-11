@@ -20,6 +20,12 @@ Tool position does not change its role. A tool focused or docked centrally prese
 active document and its URL. A document docked in Border remains a routed document. Native moves,
 grouping, pin, selection, maximize and collapse retain mounted content lifetimes.
 Hidden content keeps running; close and resource registration teardown end its lifetime.
+Empty central TabSets follow native cleanup by default. An edge split that moves the last tab
+removes its empty source, while the final empty main root still gets one native placeholder.
+There are no permanent left/right/main region ids. Explicit native `enableDeleteWhenEmpty: false`
+or disabling TabSet close intentionally retains empty containers. Opening into a pruned target
+fails without retaining a document; admission checks the live tree, including the upstream initial
+`fromJson` case where a pruned node may still be in `getNodeById` until the next Action.
 
 ## Browser history
 

@@ -25,13 +25,36 @@ try {
       await cdp.send("Performance.enable");
       const beforeHeap = await cdp.send("Performance.getMetrics");
       const sample = await page.evaluate(async (number) => {
-        const { workbench, getMetrics, open, Actions, DockLocation } = window.worksplitDemo;
+        const { workbench, getMetrics, open, openBeside, Actions, DockLocation } =
+          window.worksplitDemo;
         const raf = window.requestAnimationFrame.bind(window);
         const frames = () => new Promise((resolve) => raf(() => raf(resolve)));
         const started = getMetrics();
         const openAt = performance.now();
+        const seeds = [workbench.getDocuments()[0].id];
+        const containerId = (id) => {
+          const contains = (node) =>
+            node.id === id || (node.children ?? []).some((child) => contains(child));
+          const find = (node) =>
+            node.type === "tabset" && contains(node)
+              ? node.id
+              : (node.children ?? []).map(find).find(Boolean);
+          const target = find(workbench.getLayout().layout);
+          if (!target) throw new Error(`Missing current native container for ${id}`);
+          return target;
+        };
+        let openTargetLookupMs = 0;
         for (let index = 1; index < number; ++index) {
-          const receipt = await open(`bench${index}`, index % 2 ? "right" : "left");
+          let receipt;
+          if (index === 1) {
+            receipt = await openBeside(`bench${index}`);
+            seeds.push(workbench.getDocuments().find((doc) => doc.href.includes("/bench1?")).id);
+          } else {
+            const lookupAt = performance.now();
+            const target = containerId(seeds[index % 2]);
+            openTargetLookupMs += performance.now() - lookupAt;
+            receipt = await open(`bench${index}`, target);
+          }
           if (receipt.status !== "committed")
             throw new Error(`Open bench${index}: ${JSON.stringify(receipt)}`);
           await frames();
@@ -43,9 +66,7 @@ try {
         const openMs = performance.now() - openAt;
         const opened = getMetrics();
         const ids = workbench.getDocuments().map((document) => document.id);
-        const targets = ["left", "right"];
         const names = ["Bench left", "Bench right"];
-        const seeds = ids.slice(0, 2);
         const groupAt = performance.now();
         const createAt = performance.now();
         const createReceipt = await workbench.dispatch(
@@ -59,13 +80,18 @@ try {
         // This public JSON clone and lookup is timed within grouping, not hidden setup work.
         const lookupAt = performance.now();
         const json = workbench.getLayout();
-        const groups = targets.map((target, index) => {
-          const tabset = json.layout.children.find((node) => node.id === target);
-          const node = tabset?.children.find(
-            (child) => child.type === "tabgroup" && child.name === names[index],
+        const nativeNodes = [];
+        const collectNodes = (node) => {
+          nativeNodes.push(node);
+          for (const child of node.children ?? []) collectNodes(child);
+        };
+        collectNodes(json.layout);
+        const groups = names.map((name) => {
+          const node = nativeNodes.find(
+            (child) => child.type === "tabgroup" && child.name === name,
           );
-          if (!node) throw new Error(`Missing native group in ${target}`);
-          return { id: node.id, target, otherTarget: targets[1 - index] };
+          if (!node) throw new Error(`Missing native group ${name}`);
+          return { id: node.id, name };
         });
         const groupLookupMs = performance.now() - lookupAt;
         const joins = ids
@@ -122,14 +148,20 @@ try {
         const moveAt = performance.now();
         const moveReceipts = [];
         let moveReceiptMs = 0;
-        for (const group of groups) {
-          for (const target of [group.otherTarget, group.target]) {
+        let moveTargetLookupMs = 0;
+        for (let index = 0; index < groups.length; ++index) {
+          const group = groups[index];
+          const otherGroup = groups[1 - index];
+          for (const location of ["CENTER", index === 0 ? "LEFT" : "RIGHT"]) {
+            const targetLookupAt = performance.now();
+            const target = containerId(otherGroup.id);
+            moveTargetLookupMs += performance.now() - targetLookupAt;
             const receiptAt = performance.now();
             const receipt = await workbench.dispatch(
-              Actions.group([Actions.moveNode(group.id, target, DockLocation.CENTER, -1)]),
+              Actions.group([Actions.moveNode(group.id, target, DockLocation[location], -1)]),
             );
             moveReceiptMs += performance.now() - receiptAt;
-            moveReceipts.push({ groupId: group.id, target, receipt });
+            moveReceipts.push({ groupId: group.id, target, location, receipt });
             if (receipt.status !== "applied")
               throw new Error(`Move native group: ${JSON.stringify(receipt)}`);
             await frames();
@@ -140,6 +172,7 @@ try {
           batchCount: moveReceipts.length,
           nodeMoveActionCount: moveReceipts.length,
           receiptMs: moveReceiptMs,
+          targetLookupMs: moveTargetLookupMs,
           totalWithFramesMs: performance.now() - moveAt,
           receipts: moveReceipts,
           after: getMetrics(),
@@ -153,6 +186,7 @@ try {
           count: number,
           started,
           openMs,
+          openTargetLookupMs,
           opened,
           grouping,
           collapseExpand,
@@ -169,14 +203,26 @@ try {
         const { workbench, getMetrics, Actions } = window.worksplitDemo;
         const raf = window.requestAnimationFrame.bind(window);
         const closeAt = performance.now();
+        const lookupAt = performance.now();
+        const targets = [];
+        const collectTargets = (node) => {
+          if (node.type === "tabset" && node.children?.length) targets.push(node.id);
+          for (const child of node.children ?? []) collectTargets(child);
+        };
+        collectTargets(workbench.getLayout().layout);
+        const targetLookupMs = performance.now() - lookupAt;
+        if (targets.length !== 2)
+          throw new Error(`Expected two non-empty native TabSets: ${targets}`);
+        const receiptAt = performance.now();
         const receipt = await workbench.dispatch(
-          Actions.group([Actions.deleteTabset("left"), Actions.deleteTabset("right")]),
+          Actions.group(targets.map((id) => Actions.deleteTabset(id))),
         );
-        const closeReceiptMs = performance.now() - closeAt;
+        const closeReceiptMs = performance.now() - receiptAt;
         await new Promise((resolve) => raf(() => raf(resolve)));
         const result = {
           batchCount: 1,
-          tabsetDeleteActionCount: 2,
+          tabsetDeleteActionCount: targets.length,
+          targetLookupMs,
           closeReceiptMs,
           closeWithFramesMs: performance.now() - closeAt,
           closed: getMetrics(),
@@ -241,11 +287,11 @@ try {
           viewport: "1440x900",
           conditions: [
             "One real fetch per loader; zero injected delay; staleTime Infinity; two native TabSets; every opened document displayed before proceeding.",
-            "Append-open time excludes the first startup document and includes two RAF waits per open plus one final two-RAF settlement. All counters include the first document.",
+            "Append-open time excludes the first startup document and includes two RAF waits per open plus one final two-RAF settlement. The first appended document uses openBeside and a native RIGHT split; later opens locate each seed document's current TabSet through public getLayout clones and traversal. Lookup time is included and also reported separately. All counters include the first document.",
             "Groups are made with native Actions.group; no allowDrop callback. Grouping time includes one public getLayout JSON clone and traversal to find auto-generated native group ids; that lookup is also reported separately.",
             "20 collapse/expand cycles affect both groups: 40 native GROUP batches and 80 attribute Actions, with two RAF waits after every batch.",
-            "Each native group moves to the other TabSet and back: four native GROUP batches/MoveNode Actions, with two RAF waits after every move. The grouped document ids are then selected round-robin 20 times with two RAF waits each.",
-            "Close uses a single native GROUP containing DELETE_TABSET for both TabSets. Clean documents have no confirmation delay. Receipt and two-RAF settlement times are reported separately; instance.dispose is measured afterwards.",
+            "Each native group moves CENTER into the other group’s current TabSet, allowing FlexLayout to prune its emptied source; its return uses native LEFT/RIGHT to create a fresh TabSet. Four native GROUP batches/MoveNode Actions wait two RAF each. Public getLayout clone/traversal to resolve targets after pruning is included in movement time and reported separately. Document ids are then selected round-robin 20 times with two RAF waits each.",
+            "Close resolves the two current non-empty TabSets from public getLayout, then uses a single native GROUP containing DELETE_TABSET for both. Lookup time is included in closeWithFramesMs and reported separately; closeReceiptMs measures only dispatch. Clean documents have no confirmation delay. instance.dispose is measured afterwards.",
             "Render counters are business component committed effects, not speculative attempts or all shell/native renders. Subscription counters cover demo business services and public history.subscribers, not all Router/Store internals.",
             "One sample per document count. RAF waits, dev tooling, shell updates, local scheduling and JSON work are included; durations are not pure CPU costs, production throughput or P95 comparisons.",
             "CDP Performance heap readings have no forced GC and are diagnostic observations, not proof of absence of leaks. The Inspector and host React root remain mounted until the browser context closes.",

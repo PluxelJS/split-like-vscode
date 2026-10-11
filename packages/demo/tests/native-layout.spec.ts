@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { AnyRouter } from "@tanstack/react-router";
 import type { WorkbenchInstance } from "@worksplit/react";
 import type { Actions, DockLocation, IJsonModel } from "flexlayout-react";
@@ -20,6 +20,7 @@ declare global {
       DockLocation: typeof DockLocation;
       metrics: Metrics;
       open: (id: string, target?: string, delay?: number) => Promise<unknown>;
+      openBeside: (id: string, delay?: number) => Promise<unknown>;
     };
     nativeClose?: Promise<DispatchResult>;
     retainedDraft?: HTMLElement | null;
@@ -40,6 +41,14 @@ function nodes(model: IJsonModel): LayoutNode[] {
     ...(node.children ?? []).flatMap(flatten),
   ];
   return [model.layout, ...(model.borders ?? [])].flatMap(flatten);
+}
+function contains(node: LayoutNode, id: string): boolean {
+  return node.id === id || (node.children ?? []).some((child) => contains(child, id));
+}
+function tabset(model: IJsonModel, id: string): LayoutNode {
+  const container = nodes(model).find((node) => node.type === "tabset" && contains(node, id));
+  expect(container).toBeDefined();
+  return container!;
 }
 async function layout(page: Page) {
   return page.evaluate(() => window.worksplitDemo.workbench.getLayout());
@@ -64,13 +73,42 @@ async function start(page: Page) {
   await page.goto("/documents/A?view=edit&delay=0");
   await expect(page.getByLabel("Draft A")).toBeVisible();
 }
-async function open(page: Page, name: string, target = "left") {
+async function open(page: Page, name: string, target?: string) {
   await page.evaluate((request) => window.worksplitDemo.open(request.name, request.target), {
     name,
     target,
   });
   await expect(page.getByLabel(`Draft ${name}`, { exact: true })).toBeVisible();
   return documentId(page, name);
+}
+async function openBeside(page: Page, name: string) {
+  await page.evaluate((contentName) => window.worksplitDemo.openBeside(contentName), name);
+  await expect(page.getByLabel(`Draft ${name}`, { exact: true })).toBeVisible();
+  return documentId(page, name);
+}
+async function beginClose(page: Page, targets: string[]) {
+  await page.evaluate((containerIds) => {
+    const { workbench, Actions } = window.worksplitDemo;
+    window.nativeClose = workbench.dispatch(
+      Actions.group(containerIds.map((id) => Actions.deleteTabset(id))),
+    );
+  }, targets);
+}
+async function mouseDrop(page: Page, source: Locator, target: Locator, side?: "left" | "right") {
+  const from = (await source.boundingBox())!;
+  const to = (await target.boundingBox())!;
+  expect(from).toBeTruthy();
+  expect(to).toBeTruthy();
+  const sourceX = from.x + from.width / 2;
+  const sourceY = from.y + from.height / 2;
+  const targetX =
+    side === "left" ? to.x + 8 : side === "right" ? to.x + to.width - 8 : to.x + to.width / 2;
+  await page.mouse.move(sourceX, sourceY);
+  await page.mouse.down();
+  await page.mouse.move(sourceX + 15, sourceY, { steps: 5 });
+  await page.mouse.move(targetX, to.y + to.height / 2, { steps: 12 });
+  await page.waitForTimeout(150);
+  await page.mouse.up();
 }
 async function menu(page: Page, name: string) {
   const id = await documentId(page, name);
@@ -157,6 +195,97 @@ test("native menus create, rename, color, join, remove, collapse and ungroup tab
   });
 });
 
+test("real edge drags prune empty TabSets, preserve content, merge and reopen the last placeholder", async ({
+  page,
+}) => {
+  await start(page);
+  const a = await documentId(page, "A");
+  const b = await openBeside(page, "B");
+  await activate(page, "A");
+  await page.getByLabel("Draft A").fill("edge drag draft");
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  await page.getByTestId("scroll-A").evaluate((element) => {
+    // Native splits change widths; isolate session scroll retention from browser text anchoring.
+    element.style.overflowAnchor = "none";
+    element.scrollTop = 420;
+  });
+  await page.evaluate(() => {
+    window.retainedDraft = document.querySelector('[aria-label="Draft A"]');
+  });
+  const before = await page.evaluate(() => ({ ...window.worksplitDemo.metrics }));
+  const bPanel = page.locator(".flexlayout__tab").filter({ has: page.getByTestId("document-B") });
+  let groupId: string | undefined;
+  /* eslint-disable no-await-in-loop -- Each real drag must settle before the next source is located. */
+  for (const side of ["right", "left", "right"] as const) {
+    const previousContainer = tabset(await layout(page), a).id!;
+    const source = groupId
+      ? page.getByRole("button", { name: "Dragged group", exact: true })
+      : page.locator(`#flexlayout-tabbutton-${a}`);
+    await mouseDrop(page, source, bPanel, side);
+    await expect.poll(async () => tabset(await layout(page), a).id).not.toBe(previousContainer);
+    const containers = nodes(await layout(page)).filter((node) => node.type === "tabset");
+    expect(containers).toHaveLength(2);
+    expect(containers.every((node) => node.children?.length)).toBe(true);
+    expect(containers.some((node) => node.id === previousContainer)).toBe(false);
+    await expect(page.getByLabel("Draft A")).toBeVisible();
+    await expect(page.getByLabel("Draft B")).toBeVisible();
+    await expect(page.getByLabel("Draft A")).toHaveValue("edge drag draft");
+    expect(await page.getByTestId("scroll-A").evaluate((element) => element.scrollTop)).toBe(420);
+    expect(
+      await page.evaluate(
+        () => window.retainedDraft === document.querySelector('[aria-label="Draft A"]'),
+      ),
+    ).toBe(true);
+    if (!groupId) groupId = await group(page, "A", "Dragged group");
+  }
+  /* eslint-enable no-await-in-loop */
+  expect(await page.evaluate(() => window.worksplitDemo.metrics)).toMatchObject({
+    requests: before.requests,
+    mounts: before.mounts,
+    subscriptions: before.subscriptions,
+    unmounts: before.unmounts,
+  });
+  await page.screenshot({ path: "refactor/acceptance/split-empty-after-desktop.png" });
+  const previousContainer = tabset(await layout(page), a).id!;
+  const destination = tabset(await layout(page), b).id!;
+  await mouseDrop(
+    page,
+    page.getByRole("button", { name: "Dragged group", exact: true }),
+    page.locator(`#flexlayout-tabbutton-${b}`),
+  );
+  await expect.poll(async () => tabset(await layout(page), a).id).toBe(destination);
+  const merged = nodes(await layout(page)).filter((node) => node.type === "tabset");
+  expect(merged).toHaveLength(1);
+  expect(merged.some((node) => node.id === previousContainer)).toBe(false);
+  expect(merged[0]!.children?.length).toBeGreaterThan(0);
+  await activate(page, "A");
+  await expect(page.getByLabel("Draft A")).toHaveValue("edge drag draft");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByTestId("last-result")).toContainText("Saved A");
+  await beginClose(page, [destination]);
+  expect(await page.evaluate(() => window.nativeClose)).toMatchObject({
+    status: "closed",
+    cleanupErrors: [],
+  });
+  await expect.poll(() => documents(page)).toHaveLength(0);
+  const empty = nodes(await layout(page)).filter((node) => node.type === "tabset");
+  expect(empty).toHaveLength(1);
+  expect(empty[0]!.children).toHaveLength(0);
+  await expect(page.getByRole("heading", { name: "Your workspace", exact: true })).toHaveCount(1);
+  await expect(page.getByLabel("Inspector note")).toBeVisible();
+  expect(await page.evaluate(() => window.worksplitDemo.metrics)).toMatchObject({
+    subscriptions: 0,
+    unmounts: 2,
+    disposed: 2,
+  });
+  await open(page, "A");
+  await expect(page.getByLabel("Draft A")).toBeVisible();
+  expect(nodes(await layout(page)).filter((node) => node.type === "tabset")).toHaveLength(1);
+  expect(await page.evaluate(() => window.worksplitDemo.metrics.subscriptions)).toBe(1);
+});
+
 test("moving a native group through TabSet and Border retains DOM, input, scroll and resources", async ({
   page,
 }) => {
@@ -168,16 +297,19 @@ test("moving a native group through TabSet and Border retains DOM, input, scroll
   await page.evaluate(() => {
     window.retainedDraft = document.querySelector('[aria-label="Draft A"]');
   });
-  const b = await open(page, "B", "right");
+  const a = await documentId(page, "A");
+  const c = await open(page, "C");
+  const b = await openBeside(page, "B");
+  const destination = tabset(await layout(page), b).id!;
   const groupId = await group(page, "A", "Moved");
   await page.evaluate(
-    ({ b: contentId, groupId: destinationId }) => {
+    ({ c: contentId, groupId: destinationId }) => {
       const { workbench, Actions, DockLocation } = window.worksplitDemo;
       return workbench.dispatch(
         Actions.moveNode(contentId, destinationId, DockLocation.CENTER, -1),
       );
     },
-    { b, groupId },
+    { c, groupId },
   );
   await activate(page, "A");
   const before = await page.evaluate(() => ({ ...window.worksplitDemo.metrics }));
@@ -202,7 +334,7 @@ test("moving a native group through TabSet and Border retains DOM, input, scroll
     }
   }
   const source = (await page.getByRole("button", { name: "Moved", exact: true }).boundingBox())!;
-  const target = (await page.locator(".flexlayout__tabset_tabbar_outer").nth(1).boundingBox())!;
+  const target = (await page.locator(`#flexlayout-tabbutton-${b}`).boundingBox())!;
   await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
   await page.mouse.down();
   await page.mouse.move(source.x + source.width / 2 + 15, source.y + source.height / 2, {
@@ -213,13 +345,15 @@ test("moving a native group through TabSet and Border retains DOM, input, scroll
   await expect
     .poll(async () =>
       nodes(await layout(page))
-        .find((node) => node.id === "right")
+        .find((node) => node.id === destination)
         ?.children?.some((node) => node.id === groupId),
     )
     .toBe(true);
   await activate(page, "A");
+  expect(nodes(await layout(page)).filter((node) => node.type === "tabset")).toHaveLength(1);
   await moveTo("border_bottom");
-  await moveTo("left");
+  await moveTo(tabset(await layout(page), b).id!);
+  expect(tabset(await layout(page), a).id).toBe(tabset(await layout(page), b).id);
   expect(await page.getByTestId("scroll-A").evaluate((element) => element.scrollTop)).toBe(420);
   expect(
     await page.evaluate(
@@ -323,11 +457,12 @@ test("native TabSet close preserves a group containing a non-closeable global to
     );
   }, groupId);
   await open(page, "C");
+  const containerId = tabset(await layout(page), groupId).id!;
   expect(
-    await page.evaluate(() => {
+    await page.evaluate((id) => {
       const { workbench, Actions } = window.worksplitDemo;
-      return workbench.dispatch(Actions.deleteTabset("left"));
-    }),
+      return workbench.dispatch(Actions.deleteTabset(id));
+    }, containerId),
   ).toMatchObject({ status: "closed" });
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(await documents(page)).toHaveLength(1);
@@ -347,19 +482,14 @@ test("editing or adding a member while TabSet close waits invalidates its approv
 }) => {
   await start(page);
   await page.getByLabel("Draft A").fill("first revision");
-  await page.evaluate(() => {
-    const { workbench, Actions } = window.worksplitDemo;
-    window.nativeClose = workbench.dispatch(Actions.deleteTabset("left"));
-  });
+  const containerId = tabset(await layout(page), await documentId(page, "A")).id!;
+  await beginClose(page, [containerId]);
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.getByLabel("Draft A").fill("new revision");
   await page.getByRole("button", { name: "Discard and continue", exact: true }).click();
   expect(await page.evaluate(() => window.nativeClose)).toMatchObject({ status: "rejected" });
   await expect(page.getByLabel("Draft A")).toHaveValue("new revision");
-  await page.evaluate(() => {
-    const { workbench, Actions } = window.worksplitDemo;
-    window.nativeClose = workbench.dispatch(Actions.deleteTabset("left"));
-  });
+  await beginClose(page, [containerId]);
   await expect(page.getByRole("dialog")).toBeVisible();
   await open(page, "C");
   await page.getByRole("button", { name: "Discard and continue", exact: true }).click();
@@ -375,14 +505,11 @@ test("editing an approved member while the next batch decision waits rejects the
 }) => {
   await start(page);
   await page.getByLabel("Draft A").fill("A first revision");
-  await open(page, "B", "right");
+  const a = await documentId(page, "A");
+  const b = await openBeside(page, "B");
   await page.getByLabel("Draft B").fill("B first revision");
-  await page.evaluate(() => {
-    const { workbench, Actions } = window.worksplitDemo;
-    window.nativeClose = workbench.dispatch(
-      Actions.group([Actions.deleteTabset("left"), Actions.deleteTabset("right")]),
-    );
-  });
+  const before = await layout(page);
+  await beginClose(page, [tabset(before, a).id!, tabset(before, b).id!]);
   await expect(page.getByRole("dialog")).toContainText("Unsaved A");
   await page.getByRole("button", { name: "Discard and continue", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("Unsaved B");
@@ -411,10 +538,7 @@ test("a native route commit while bulk close waits keeps the new content and the
   await open(page, "B");
   await activate(page, "A");
   await page.getByLabel("Draft A").fill("dirty route");
-  await page.evaluate(() => {
-    const { workbench, Actions } = window.worksplitDemo;
-    window.nativeClose = workbench.dispatch(Actions.deleteTabset("left"));
-  });
+  await beginClose(page, [tabset(await layout(page), await documentId(page, "A")).id!]);
   await expect(page.locator('[data-decision="close"]')).toBeVisible();
   await page.getByRole("link", { name: "Fast view", exact: true }).click();
   await page
@@ -437,10 +561,15 @@ test("grouping a global tool and changing its native attributes keeps document U
   await start(page);
   const accepted = page.url();
   await page.getByLabel("Inspector note").fill("global tool state");
-  await page.evaluate(() => {
-    const { workbench, Actions, DockLocation } = window.worksplitDemo;
-    return workbench.dispatch(Actions.moveNode("inspector", "left", DockLocation.CENTER, -1));
-  });
+  await page.evaluate(
+    (containerId) => {
+      const { workbench, Actions, DockLocation } = window.worksplitDemo;
+      return workbench.dispatch(
+        Actions.moveNode("inspector", containerId, DockLocation.CENTER, -1),
+      );
+    },
+    tabset(await layout(page), await documentId(page, "A")).id!,
+  );
   expect(
     await page.evaluate(() => {
       const { workbench, Actions } = window.worksplitDemo;
@@ -465,7 +594,7 @@ test("group snapshots restore native names, colors and collapsed state without u
 }) => {
   await start(page);
   const groupId = await group(page, "A", "Restored group");
-  await open(page, "B", "right");
+  await openBeside(page, "B");
   await page.evaluate((nodeId) => {
     const { workbench, Actions } = window.worksplitDemo;
     return workbench.dispatch(Actions.updateNodeAttributes(nodeId, { opened: false }));
@@ -503,9 +632,12 @@ test("narrow switching resolves grouped tabs to their native TabSets and preserv
   await page.getByLabel("Draft A").fill("narrow retained A");
   const a = await documentId(page, "A");
   await group(page, "A", "Left group");
-  const b = await open(page, "B", "right");
+  const b = await openBeside(page, "B");
   await page.getByLabel("Draft B").fill("narrow retained B");
   await group(page, "B", "Right group");
+  const desktop = await layout(page);
+  const aContainer = tabset(desktop, a).id!;
+  const bContainer = tabset(desktop, b).id!;
   const before = await page.evaluate(() => ({ ...window.worksplitDemo.metrics }));
   await expect(page.getByTestId("metrics")).toContainText('"subscriptions": 2');
   await page.screenshot({ path: "refactor/acceptance/native-groups-desktop.png" });
@@ -517,13 +649,13 @@ test("narrow switching resolves grouped tabs to their native TabSets and preserv
   await page.getByLabel("Draft A").click();
   expect(
     await page.evaluate(() => window.worksplitDemo.workbench.getEditingContext()),
-  ).toMatchObject({ activeGroupId: "left", focusedArea: "document", focusedTabId: a });
+  ).toMatchObject({ activeGroupId: aContainer, focusedArea: "document", focusedTabId: a });
   await switcher.selectOption(b);
   await expect(page.getByLabel("Draft B")).toHaveValue("narrow retained B");
   await page.getByLabel("Draft B").click();
   expect(
     await page.evaluate(() => window.worksplitDemo.workbench.getEditingContext()),
-  ).toMatchObject({ activeGroupId: "right", focusedArea: "document", focusedTabId: b });
+  ).toMatchObject({ activeGroupId: bContainer, focusedArea: "document", focusedTabId: b });
   await page.screenshot({ path: "refactor/acceptance/native-groups-narrow.png" });
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(page.getByLabel("Draft A")).toHaveValue("narrow retained A");
@@ -540,10 +672,13 @@ test("narrow moving the same active group into a native split reveals its new Ta
   page,
 }) => {
   await start(page);
-  await open(page, "B", "right");
+  const b = await openBeside(page, "B");
   const activeId = await activate(page, "A");
   await page.getByLabel("Draft A").fill("active group remains visible");
   const groupId = await group(page, "A", "Active group");
+  const desktop = await layout(page);
+  const previousContainer = tabset(desktop, groupId).id!;
+  const destination = tabset(desktop, b).id!;
   await page.evaluate(() => {
     window.retainedDraft = document.querySelector('[aria-label="Draft A"]');
   });
@@ -557,10 +692,15 @@ test("narrow moving the same active group into a native split reveals its new Ta
     element.scrollTop = 360;
   });
   expect(
-    await page.evaluate((sourceId) => {
-      const { workbench, Actions, DockLocation } = window.worksplitDemo;
-      return workbench.dispatch(Actions.moveNode(sourceId, "right", DockLocation.RIGHT, -1));
-    }, groupId),
+    await page.evaluate(
+      ({ sourceId, destinationId }) => {
+        const { workbench, Actions, DockLocation } = window.worksplitDemo;
+        return workbench.dispatch(
+          Actions.moveNode(sourceId, destinationId, DockLocation.RIGHT, -1),
+        );
+      },
+      { sourceId: groupId, destinationId: destination },
+    ),
   ).toEqual({ status: "applied" });
   await expect(page.getByLabel("Draft A")).toBeVisible();
   await expect(page.getByLabel("Draft A")).toHaveValue("active group remains visible");
@@ -568,7 +708,7 @@ test("narrow moving the same active group into a native split reveals its new Ta
     .poll(() =>
       page.evaluate(() => window.worksplitDemo.workbench.getEditingContext().activeGroupId),
     )
-    .not.toBe("left");
+    .not.toBe(previousContainer);
   const activeContainer = await page.evaluate(
     () => window.worksplitDemo.workbench.getEditingContext().activeGroupId,
   );
@@ -576,6 +716,10 @@ test("narrow moving the same active group into a native split reveals its new Ta
     type: "tabset",
     maximized: true,
   });
+  const finalContainers = nodes(await layout(page)).filter((node) => node.type === "tabset");
+  expect(finalContainers).toHaveLength(2);
+  expect(finalContainers.every((node) => node.children?.length)).toBe(true);
+  expect(finalContainers.some((node) => node.id === previousContainer)).toBe(false);
   expect(
     await page.evaluate(() => window.worksplitDemo.workbench.getEditingContext().activeTabId),
   ).toBe(activeId);
@@ -591,4 +735,5 @@ test("narrow moving the same active group into a native split reveals its new Ta
     subscriptions: before.subscriptions,
     unmounts: before.unmounts,
   });
+  await page.screenshot({ path: "refactor/acceptance/split-empty-after-narrow.png" });
 });

@@ -29,6 +29,8 @@ import {
   TabNode,
   TabSetNode,
   type IJsonModel,
+  type IJsonRowNode,
+  type IJsonTabSetNode,
 } from "flexlayout-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -366,7 +368,6 @@ const layout: IJsonModel = {
     tabEnableRename: true,
     tabEnableFloat: false,
     tabEnablePopout: false,
-    tabSetEnableDeleteWhenEmpty: false,
     tabSetEnableClose: true,
     tabSetEnableCloseButton: true,
     tabSetEnableTabGroups: true,
@@ -395,10 +396,7 @@ const layout: IJsonModel = {
   ],
   layout: {
     type: "row",
-    children: [
-      { type: "tabset", id: "left", weight: 50, children: [] },
-      { type: "tabset", id: "right", weight: 50, children: [] },
-    ],
+    children: [],
   },
 };
 let initialSnapshot: unknown;
@@ -466,6 +464,41 @@ function open(id: string, target?: string, delay = 0) {
       return result;
     });
 }
+// Read current native containers for a toolbar action; never retain region ids or a layout copy.
+function centralTabsets(row: IJsonRowNode): IJsonTabSetNode[] {
+  return (row.children ?? []).flatMap((child) =>
+    child.type === "tabset" ? [child as IJsonTabSetNode] : centralTabsets(child as IJsonRowNode),
+  );
+}
+async function openBeside(id: string, delay = 0) {
+  const result = await open(id, undefined, delay);
+  if (
+    result.status === "committed" &&
+    !result.reused &&
+    workbench.getActiveDocument()?.id === result.document.id
+  ) {
+    const target = workbench.getEditingContext().activeGroupId!;
+    const moved = await workbench.dispatch(
+      Actions.moveNode(result.document.id, target, DockLocation.RIGHT, -1),
+    );
+    message(`Layout: ${moved.status}`);
+  }
+  return result;
+}
+function moveActive(location: DockLocation) {
+  const active = workbench.getActiveDocument();
+  if (!active) return;
+  const tabsets = centralTabsets(workbench.getLayout().layout);
+  const current = workbench.getEditingContext().activeGroupId;
+  const target =
+    (location === DockLocation.RIGHT && tabsets.find((tabset) => tabset.id === current)) ||
+    tabsets[0];
+  if (target?.id)
+    void workbench
+      .dispatch(Actions.moveNode(active.id, target.id, location, -1))
+      .then((result) => message(`Layout: ${result.status}`))
+      .catch((error: unknown) => message(`Layout failed: ${String(error)}`));
+}
 function Navigation() {
   useWorkbenchState(workbench, (state) => `${state.activeDocumentId}:${state.revision}`);
   const active = workbench.getActiveDocument();
@@ -479,15 +512,15 @@ function Navigation() {
       <span className="eyebrow nav-caption" data-testid="navigation-owner">
         {active?.navigationKey ?? "workspace"}
       </span>
-      <button aria-label="A Document A" onClick={() => void open("A", "left")}>
+      <button aria-label="A Document A" onClick={() => void open("A")}>
         <span>A</span>
         <span>Document A</span>
       </button>
-      <button aria-label="B Document B" onClick={() => void open("B", "right")}>
+      <button aria-label="B Document B" onClick={() => void openBeside("B")}>
         <span>B</span>
         <span>Document B</span>
       </button>
-      <button aria-label="◷ Slow document" onClick={() => void open("slow", "left", 1200)}>
+      <button aria-label="◷ Slow document" onClick={() => void open("slow", undefined, 1200)}>
         <span>◷</span>
         <span>Slow document</span>
       </button>
@@ -584,8 +617,8 @@ function App() {
       .then(async (result) => {
         report(result);
         if (location.pathname === "/" && initialSnapshot === undefined) {
-          await open("A", "left");
-          await open("B", "right");
+          await open("A");
+          await openBeside("B");
         }
         return result;
       });
@@ -608,14 +641,7 @@ function App() {
         >
           Pin
         </button>
-        <button
-          onClick={() =>
-            active &&
-            void workbench.dispatch(Actions.moveNode(active, "right", DockLocation.CENTER, -1))
-          }
-        >
-          Move right
-        </button>
+        <button onClick={() => moveActive(DockLocation.RIGHT)}>Split right</button>
         <button
           onClick={() =>
             active &&
@@ -626,14 +652,7 @@ function App() {
         >
           Move to Border
         </button>
-        <button
-          onClick={() =>
-            active &&
-            void workbench.dispatch(Actions.moveNode(active, "left", DockLocation.CENTER, -1))
-          }
-        >
-          Move to main
-        </button>
+        <button onClick={() => moveActive(DockLocation.CENTER)}>Move to center</button>
         <button onClick={() => void workbench.dispatch(Actions.selectTab("inspector"))}>
           Toggle Inspector
         </button>
@@ -734,6 +753,7 @@ Object.assign(window, {
     metrics,
     getMetrics: readMetrics,
     open,
+    openBeside,
     decisions,
     messages,
     Actions,

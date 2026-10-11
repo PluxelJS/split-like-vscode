@@ -154,7 +154,12 @@ describe("real Router session coordination", () => {
     await workbench.dispatch(Actions.setTabPinned(result.document.id, false));
     expect(
       await workbench.dispatch(
-        Actions.moveNode(result.document.id, "main", DockLocation.RIGHT, -1),
+        Actions.moveNode(
+          result.document.id,
+          workbench.getEditingContext().activeGroupId!,
+          DockLocation.RIGHT,
+          -1,
+        ),
       ),
     ).toEqual({ status: "applied" });
     expect(workbench.getDocument(result.document.id)?.href).toContain("/documents/A");

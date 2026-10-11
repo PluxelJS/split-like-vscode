@@ -169,11 +169,10 @@ export const defaultWorkbenchLayout = (): IJsonModel => ({
     tabEnableFloat: false,
     tabEnablePopout: false,
     tabEnablePin: true,
-    tabSetEnableDeleteWhenEmpty: false,
     tabSetEnableTabGroups: true,
   },
   borders: [],
-  layout: { type: "row", children: [{ type: "tabset", id: "main", children: [] }] },
+  layout: { type: "row", children: [] },
 });
 
 /** One owner for the native Model and document Router lifetimes. */
@@ -739,6 +738,14 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         this.state.model.getActiveTabset()?.getId() ??
         this.state.model.getFirstTabSet()?.getId();
       if (!target) throw new Error("Layout requires a central Tabset for opening documents");
+      // fromJson can leave pruned empty Tabsets in the upstream idMap until its next Action.
+      // Validate the live tree rather than admitting content into a detached old container.
+      let liveTarget = false;
+      this.state.model.visitNodes((node) => {
+        if (node.getId() === target && (node instanceof TabSetNode || node instanceof BorderNode))
+          liveTarget = true;
+      });
+      if (!liveTarget) throw new Error(`Cannot add document to missing Tabset or Border ${target}`);
       const session: DocumentSession = {
         id,
         router,
@@ -767,7 +774,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           !options.background && focus === this.focusEpoch,
         ),
       ) as TabNode | undefined;
-      if (!node) throw new Error(`Cannot add document to ${target}`);
+      if (!node || this.state.model.getNodeById(id) !== node)
+        throw new Error(`Cannot add document to ${target}`);
       if (!this.allowMove(node, node.getParent()!, DockLocation.CENTER)) {
         this.state.model.doAction(Actions.deleteTab(id));
         throw new Error(`Docking policy rejected document in ${target}`);

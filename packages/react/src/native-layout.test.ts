@@ -57,8 +57,18 @@ function setup(
     staticData: { worksplit: { title: "Document", navigationKey: "documents" } },
   });
   const routeTree = root.addChildren([page]);
-  const makeRouter = (history: RouterHistory) =>
-    createRouter({ routeTree, history, defaultPendingMinMs: 0, defaultStaleTime: Infinity });
+  const routers: AnyRouter[] = [];
+  const makeRouter = (history: RouterHistory) => {
+    const router = createRouter({
+      routeTree,
+      history,
+      defaultPendingMinMs: 0,
+      defaultStaleTime: Infinity,
+    });
+    vi.spyOn(router.history, "destroy");
+    routers.push(router);
+    return router;
+  };
   const workbench = createWorkbench({ createRouter: makeRouter, ...options });
   disposals.push(() => workbench.dispose());
   const open = async (id: string, target?: string) => {
@@ -69,7 +79,7 @@ function setup(
     if (result.status !== "committed") throw new Error(`Fixture open failed: ${result.status}`);
     return result.document.id;
   };
-  return { workbench, open, makeRouter };
+  return { workbench, open, makeRouter, routers };
 }
 
 type Fixture = ReturnType<typeof setup>;
@@ -87,6 +97,16 @@ function container(node: Node): TabSetNode | BorderNode {
     current = current.getParent();
   if (!current) throw new Error("Tab has no native container");
   return current as TabSetNode | BorderNode;
+}
+function tabsets(workbench: Fixture["workbench"]): TabSetNode[] {
+  const result: TabSetNode[] = [];
+  native(workbench).visitNodes((node) => {
+    if (node instanceof TabSetNode) result.push(node);
+  });
+  return result;
+}
+function liveRouters(routers: readonly AnyRouter[]) {
+  return routers.filter((router) => vi.mocked(router.history.destroy).mock.calls.length === 0);
 }
 async function group(workbench: Fixture["workbench"], id: string) {
   expect(await workbench.dispatch(Actions.addTabToNewGroup(id, "Research", "#3366cc"))).toEqual({
@@ -116,6 +136,113 @@ const withBorder: NonNullable<WorkbenchOptions<AnyRouter>["layout"]> = {
 };
 
 describe("native FlexLayout ownership", () => {
+  it("lets native tidy remove emptied default containers through repeated edge splits", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    const initial = container(tab(workbench, a)).getId();
+    expect(container(tab(workbench, b)).getId()).toBe(initial);
+    const routerA = integrationState(workbench).documents.get(a)?.router;
+    const routerB = integrationState(workbench).documents.get(b)?.router;
+    expect(await workbench.dispatch(Actions.moveNode(a, initial, DockLocation.RIGHT, -1))).toEqual({
+      status: "applied",
+    });
+    for (let iteration = 0; iteration < 8; ++iteration) {
+      const moving = iteration % 2 === 0 ? a : b;
+      const anchor = iteration % 2 === 0 ? b : a;
+      const target = container(tab(workbench, anchor)).getId();
+      // eslint-disable-next-line no-await-in-loop -- Each native move determines the next move's live target.
+      const result = await workbench.dispatch(
+        Actions.moveNode(moving, target, DockLocation.RIGHT, -1),
+      );
+      expect(result).toEqual({ status: "applied" });
+      expect(tabsets(workbench)).toHaveLength(2);
+      expect(tabsets(workbench).every((node) => node.getChildren().length === 1)).toBe(true);
+    }
+    expect(workbench.getDocuments()).toHaveLength(2);
+    expect(integrationState(workbench).documents.get(a)?.router).toBe(routerA);
+    expect(integrationState(workbench).documents.get(b)?.router).toBe(routerB);
+  });
+
+  it("keeps exactly one native empty editor container after closing the last default document and reopens normally", async () => {
+    const { workbench, open, routers } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    await workbench.dispatch(
+      Actions.moveNode(a, container(tab(workbench, b)).getId(), DockLocation.RIGHT, -1),
+    );
+    expect(await workbench.close(a)).toMatchObject({ status: "closed" });
+    expect(await workbench.close(b)).toMatchObject({ status: "closed" });
+    expect(workbench.getDocuments()).toHaveLength(0);
+    expect(tabsets(workbench)).toHaveLength(1);
+    expect(tabsets(workbench)[0]?.getChildren()).toHaveLength(0);
+    expect(liveRouters(routers)).toHaveLength(1); // Inert URL builder; both document routers released.
+    const c = await open("C");
+    expect(workbench.getActiveDocument()?.id).toBe(c);
+    expect(tabsets(workbench)).toHaveLength(1);
+    expect(tabsets(workbench)[0]?.getChildren()).toHaveLength(1);
+    expect(liveRouters(routers)).toHaveLength(2);
+  });
+
+  it("preserves an explicitly configured native empty container while pruning ordinary emptied containers", async () => {
+    const { workbench, open } = setup({
+      layout: {
+        global: { tabEnableFloat: false, tabEnablePopout: false },
+        layout: {
+          type: "row",
+          children: [{ type: "tabset", id: "kept", enableDeleteWhenEmpty: false, children: [] }],
+        },
+      },
+    });
+    const a = await open("A", "kept");
+    const b = await open("B", "kept");
+    await workbench.dispatch(Actions.moveNode(b, "kept", DockLocation.RIGHT, -1));
+    const bContainer = container(tab(workbench, b)).getId();
+    await workbench.dispatch(Actions.moveNode(a, bContainer, DockLocation.RIGHT, -1));
+    const kept = native(workbench).getNodeById("kept");
+    expect(kept).toBeInstanceOf(TabSetNode);
+    expect(kept?.getChildren()).toHaveLength(0);
+    expect(kept?.toJson()).toMatchObject({ enableDeleteWhenEmpty: false });
+    expect(tabsets(workbench)).toHaveLength(3);
+    expect(tabsets(workbench).filter((node) => node.getChildren().length === 0)).toHaveLength(1);
+    expect(workbench.getDocuments()).toHaveLength(2);
+  });
+
+  it("rejects explicit stale native targets without admitting a detached session or retaining its router", async () => {
+    const { workbench, open, routers } = setup({
+      layout: {
+        global: { tabEnableFloat: false, tabEnablePopout: false },
+        layout: {
+          type: "row",
+          children: [
+            { type: "tabset", id: "left", children: [] },
+            { type: "tabset", id: "right", children: [] },
+          ],
+        },
+      },
+    });
+    const model = integrationState(workbench).model;
+    const liveIds = new Set<string>();
+    model.visitNodes((node) => liveIds.add(node.getId()));
+    expect(liveIds.has("left")).toBe(false);
+    expect(liveIds.has("right")).toBe(false);
+    expect(model.getNodeById("left")).toBeInstanceOf(TabSetNode); // Upstream fromJson retains a stale idMap entry.
+    const before = workbench.getLayout();
+    const result = await workbench.open(
+      { to: "/documents/$id", params: { id: "Detached" }, search: { view: "edit" } },
+      { target: "left" },
+    );
+    expect(result).toMatchObject({ status: "failed" });
+    expect(workbench.getLayout()).toEqual(before);
+    expect(workbench.getDocuments()).toHaveLength(0);
+    expect(workbench.getActiveDocument()).toBeNull();
+    expect(liveRouters(routers)).toHaveLength(1);
+    const valid = await open("A");
+    expect(workbench.getDocument(valid)).not.toBeNull();
+    expect(tabsets(workbench)).toHaveLength(1);
+    expect(liveRouters(routers)).toHaveLength(2);
+  });
+
   it("uses native grouping, pinning, selection and container identities", async () => {
     const { workbench, open } = setup({ layout: withBorder });
     const a = await open("A", "main");
@@ -199,6 +326,7 @@ describe("native FlexLayout ownership", () => {
     const { workbench, open, makeRouter } = setup();
     const a = await open("A");
     const b = await open("B");
+    const containerId = container(tab(workbench, a)).getId();
     const groupId = await group(workbench, a);
     await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
     await workbench.dispatch(
@@ -222,7 +350,7 @@ describe("native FlexLayout ownership", () => {
     expect(restoredGroup.isOpened()).toBe(false);
     expect(await restored.start("/documents/A?view=edit")).toMatchObject({ status: "committed" });
     expect(factory).toHaveBeenCalledTimes(2);
-    expect(restored.getEditingContext().activeGroupId).toBe("main");
+    expect(restored.getEditingContext().activeGroupId).toBe(containerId);
     expect(tab(restored, a).isSelected()).toBe(true);
   });
 
@@ -285,6 +413,7 @@ describe("native FlexLayout ownership", () => {
     const { workbench, open } = setup();
     const a = await open("A");
     const b = await open("B");
+    const initialContainer = container(tab(workbench, a)).getId();
     const groupId = await group(workbench, a);
     await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
     workbench.activate(a);
@@ -297,13 +426,13 @@ describe("native FlexLayout ownership", () => {
       element,
       () => undefined,
     );
-    expect(native(workbench).getMaximizedTabset()?.getId()).toBe("main");
+    expect(native(workbench).getMaximizedTabset()?.getId()).toBe(initialContainer);
     expect(workbench.getActiveDocument()?.id).toBe(a);
     expect(
-      await workbench.dispatch(Actions.moveNode(groupId, "main", DockLocation.RIGHT, -1)),
+      await workbench.dispatch(Actions.moveNode(groupId, initialContainer, DockLocation.RIGHT, -1)),
     ).toEqual({ status: "applied" });
     const newContainer = container(tab(workbench, a)).getId();
-    expect(newContainer).not.toBe("main");
+    expect(newContainer).not.toBe(initialContainer);
     expect(native(workbench).getMaximizedTabset()?.getId()).toBe(newContainer);
     expect(workbench.getEditingContext()).toMatchObject({
       activeTabId: a,
