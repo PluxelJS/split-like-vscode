@@ -19,7 +19,7 @@ Use `refactor/flexlayout-tanstack` in a separate checkout and build the two libr
 
 ```sh
 git clone --branch refactor/flexlayout-tanstack --single-branch \
-  https://github.com/ahdg6/split-like-vscode.git worksplit
+  https://github.com/PluxelJS/split-like-vscode.git worksplit
 cd worksplit
 pnpm install --frozen-lockfile
 pnpm build
