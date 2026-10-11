@@ -35,6 +35,16 @@ Vite consumes the same package entry. There are no private source aliases in Vit
 The demo document HTTP fixture is a Vite development middleware; production hosting must supply
 that endpoint. `build` verifies bundles and declarations, not a production document service.
 
+The demo has a bottom Inspector and a right-hand Details tool in native FlexLayout Borders.
+Click the vertical **Details** tab on the right to expand or collapse it; drag its native splitter
+to resize it. Details follows the active document and keeps its own workspace note when hidden
+or moved. It starts collapsed with a configured width of 260 px. No Worksplit sidebar API or
+second size controller is needed.
+
+Saved layouts restore their own tools and positions. If an older saved demo layout has no Details
+tab, uncheck **Restore on refresh** and refresh to use the current default. This does not rewrite
+the saved layout. Tool notes, like document drafts, are not persisted by layout snapshots.
+
 ## A complete routed workspace
 
 Create one TanStack route tree and a Router factory. The factory must use the supplied memory

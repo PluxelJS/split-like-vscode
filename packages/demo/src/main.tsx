@@ -374,6 +374,26 @@ function Inspector() {
     </section>
   );
 }
+function Details() {
+  const active = useWorkbenchState(workbench, (state) =>
+    state.activeDocumentId ? workbench.getDocument(state.activeDocumentId)?.href : null,
+  );
+  return (
+    <section className="details-tool">
+      <span className="eyebrow">GLOBAL TOOL</span>
+      <h2>Document details</h2>
+      <p data-testid="details-active">Active document: {active ?? "none"}</p>
+      <label>
+        Workspace note
+        <textarea
+          aria-label="Details note"
+          placeholder="Notes stay with this tool as you dock it"
+        />
+      </label>
+      <p>Choose a document to update these details. This tool keeps its own note.</p>
+    </section>
+  );
+}
 const layout: IJsonModel = {
   global: {
     tabEnablePin: true,
@@ -405,6 +425,20 @@ const layout: IJsonModel = {
         },
       ],
     },
+    {
+      type: "border",
+      location: "right",
+      size: 260,
+      children: [
+        {
+          type: "tab",
+          id: "details",
+          name: "Details",
+          component: "worksplit.tool",
+          enableClose: false,
+        },
+      ],
+    },
   ],
   layout: {
     type: "row",
@@ -425,7 +459,10 @@ function buildWorkbench(): WorkbenchInstance<DemoRouter> {
   return createWorkbench({
     createRouter: makeRouter,
     layout,
-    tools: [{ id: "inspector", title: "Inspector", render: () => <Inspector /> }],
+    tools: [
+      { id: "inspector", title: "Inspector", render: () => <Inspector /> },
+      { id: "details", title: "Details", render: () => <Details /> },
+    ],
     workspaceId: "demo",
     ...(initialSnapshot === undefined ? {} : { snapshot: initialSnapshot }),
     commands: [

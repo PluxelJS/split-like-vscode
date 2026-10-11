@@ -126,6 +126,8 @@ TanStack Store 只保存必要会话事实，不镜像 Model 或完整 Router �
 
 已读取指定 demo 的实际 `layouts/default.layout`：左右和底部直接使用 Border，底部包含 Terminal、SubLayout 2、Action Log 和 Layout JSON。配置及源码核对不等于浏览器交互已验收。
 
+内部 demo 用公开工具注册与原生 `location: "right"` 配置右侧 Details，保留底部 Inspector；侧栏入口、展开、收起、尺寸与停靠继续归 FlexLayout。具体用法见 [README](../README.md)，实际通过范围和截图见 [验收记录](acceptance.md)。
+
 底部采用用户偏好的默认行为：有工具时标签条保留，内容可展开、切换或收起。**收起内容、隐藏整个 Border、关闭工具是不同操作。** 无工具时不强留空标签条；全局工具存在时，其入口按声明保留。不要再造重复的底部切换器。
 
 左侧仅用于工具选择时，优先使用原生 Border 标签条；业务导航、账户和命令仍使用常驻 shell。同一工具避免两套等价入口。业务导航与工具选择确有不同用途时可并列呈现。

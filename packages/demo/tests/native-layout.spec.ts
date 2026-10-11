@@ -24,6 +24,7 @@ declare global {
     };
     nativeClose?: Promise<DispatchResult>;
     retainedDraft?: HTMLElement | null;
+    retainedDetails?: HTMLElement | null;
   }
 }
 type LayoutNode = {
@@ -49,6 +50,11 @@ function tabset(model: IJsonModel, id: string): LayoutNode {
   const container = nodes(model).find((node) => node.type === "tabset" && contains(node, id));
   expect(container).toBeDefined();
   return container!;
+}
+function rightBorder(model: IJsonModel) {
+  const border = model.borders?.find((node) => node.location === "right");
+  expect(border).toBeDefined();
+  return border!;
 }
 async function layout(page: Page) {
   return page.evaluate(() => window.worksplitDemo.workbench.getLayout());
@@ -1040,4 +1046,204 @@ test("narrow native batches retain the final selected source without automatic m
     unmounts: before.unmounts,
     disposed: before.disposed,
   });
+});
+
+test("native right Border toggle, splitter resize and snapshot preserve the global tool", async ({
+  page,
+}) => {
+  await start(page);
+  const a = await documentId(page, "A");
+  const initial = rightBorder(await layout(page));
+  expect(initial.size).toBe(260);
+  expect(initial.selected ?? -1).toBe(-1);
+  const detailsTab = page.locator("#flexlayout-tabbutton-details");
+  const note = page.getByLabel("Details note", { exact: true });
+  await expect(detailsTab).toBeVisible();
+  await expect(note).toBeHidden();
+  const accepted = page.url();
+  await detailsTab.click();
+  await expect(note).toBeVisible();
+  await expect(page.getByTestId("details-active")).toContainText("/documents/A?");
+  expect(rightBorder(await layout(page)).selected).toBe(0);
+  await note.fill("native right tool note");
+  await expect(page).toHaveURL(accepted);
+  expect(
+    await page.evaluate(() => window.worksplitDemo.workbench.getEditingContext()),
+  ).toMatchObject({ activeTabId: a, focusedArea: "tool", focusedTabId: "details" });
+  await page.evaluate(() => {
+    window.retainedDetails = document.querySelector('[aria-label="Details note"]');
+  });
+  const before = await page.evaluate(() => ({ ...window.worksplitDemo.metrics }));
+  const widthBefore = await page
+    .locator(".details-tool")
+    .evaluate((element) => element.getBoundingClientRect().width);
+  // This is the native separator's DOM path and pointer interaction, not a size action.
+  const splitter = page.locator('[role="separator"][data-layout-path="/border/right/s-1"]');
+  await expect(splitter).toHaveAttribute("aria-orientation", "vertical");
+  await expect(splitter).toHaveAttribute("aria-valuenow", "260");
+  const handle = (await splitter.boundingBox())!;
+  expect(handle).toBeTruthy();
+  const x = handle.x + handle.width / 2;
+  const y = handle.y + handle.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 96, y, { steps: 12 });
+  await page.mouse.up();
+  await expect.poll(async () => rightBorder(await layout(page)).size ?? 0).toBeGreaterThan(260);
+  const resized = rightBorder(await layout(page)).size!;
+  await expect(splitter).toHaveAttribute("aria-valuenow", String(resized));
+  await expect
+    .poll(() =>
+      page.locator(".details-tool").evaluate((element) => element.getBoundingClientRect().width),
+    )
+    .toBeGreaterThan(widthBefore + 40);
+  await expect(note).toHaveValue("native right tool note");
+  await detailsTab.click();
+  await expect(note).toBeHidden();
+  expect(rightBorder(await layout(page)).selected ?? -1).toBe(-1);
+  await expect(page).toHaveURL(accepted);
+  await detailsTab.click();
+  await expect(note).toBeVisible();
+  await expect(note).toHaveValue("native right tool note");
+  expect(
+    await page.evaluate(
+      () => window.retainedDetails === document.querySelector('[aria-label="Details note"]'),
+    ),
+  ).toBe(true);
+  expect(await page.evaluate(() => window.worksplitDemo.metrics)).toMatchObject({
+    requests: before.requests,
+    mounts: before.mounts,
+    subscriptions: before.subscriptions,
+    unmounts: before.unmounts,
+    disposed: before.disposed,
+  });
+  await page.getByRole("button", { name: "B Document B", exact: true }).click();
+  await expect(page.getByLabel("Draft B")).toBeVisible();
+  await expect(page.getByTestId("details-active")).toContainText("/documents/B?");
+  const bUrl = page.url();
+  await note.click();
+  await expect(page).toHaveURL(bUrl);
+  await page.getByRole("button", { name: "A Document A", exact: true }).click();
+  await expect(page.getByTestId("details-active")).toContainText("/documents/A?");
+  await expect(note).toHaveValue("native right tool note");
+  expect(
+    await page.evaluate(
+      () => window.retainedDetails === document.querySelector('[aria-label="Details note"]'),
+    ),
+  ).toBe(true);
+  await page.screenshot({ path: "refactor/acceptance/right-border-desktop.png" });
+  await page.getByRole("button", { name: "Save layout", exact: true }).click();
+  await page.getByLabel("Restore on refresh").check();
+  await page.reload();
+  await expect(note).toBeVisible();
+  // A layout snapshot restores placement and size; this tool's note belongs to its live DOM.
+  await expect(note).toHaveValue("");
+  await expect(page.getByTestId("details-active")).toContainText("/documents/A?");
+  expect(rightBorder(await layout(page))).toMatchObject({ size: resized, selected: 0 });
+  await expect(splitter).toHaveAttribute("aria-valuenow", String(resized));
+});
+
+test("native right Border docking and small-window toggles retain the same tool DOM", async ({
+  page,
+}) => {
+  await start(page);
+  const a = await documentId(page, "A");
+  await page.getByLabel("Draft A").fill("document retained while tool docks");
+  const note = page.getByLabel("Details note", { exact: true });
+  await page.locator("#flexlayout-tabbutton-details").click();
+  await note.fill("tool retained while docking");
+  await page.evaluate(() => {
+    window.retainedDetails = document.querySelector('[aria-label="Details note"]');
+  });
+  const accepted = page.url();
+  const before = await page.evaluate(() => ({ ...window.worksplitDemo.metrics }));
+  const centralId = tabset(await layout(page), a).id!;
+  expect(
+    await page.evaluate((target) => {
+      const { workbench, Actions, DockLocation } = window.worksplitDemo;
+      return workbench.dispatch(Actions.moveNode("details", target, DockLocation.CENTER, -1));
+    }, centralId),
+  ).toEqual({ status: "applied" });
+  await expect(note).toBeVisible();
+  await expect(page.getByLabel("Draft A")).toBeHidden();
+  expect(rightBorder(await layout(page)).children).toHaveLength(0);
+  await expect(page.locator(".flexlayout__border_right")).toBeHidden();
+  await expect(page).toHaveURL(accepted);
+  await expect(note).toHaveValue("tool retained while docking");
+  expect(
+    await page.evaluate(
+      () => window.retainedDetails === document.querySelector('[aria-label="Details note"]'),
+    ),
+  ).toBe(true);
+  expect(
+    await page.evaluate(() => {
+      const { workbench, Actions, DockLocation } = window.worksplitDemo;
+      return workbench.dispatch(
+        Actions.moveNode("details", "border_right", DockLocation.CENTER, -1),
+      );
+    }),
+  ).toEqual({ status: "applied" });
+  await expect(note).toBeHidden();
+  await expect(page.getByLabel("Draft A")).toBeVisible();
+  // Moving a tab into a closed native Border keeps it closed by default.
+  expect(rightBorder(await layout(page)).selected ?? -1).toBe(-1);
+  expect(
+    await page.evaluate(
+      () => window.retainedDetails === document.querySelector('[aria-label="Details note"]'),
+    ),
+  ).toBe(true);
+  await page.locator("#flexlayout-tabbutton-details").click();
+  await expect(note).toBeVisible();
+  await expect(note).toHaveValue("tool retained while docking");
+  expect(rightBorder(await layout(page))).toMatchObject({ size: 260, selected: 0 });
+  const desktop = await layout(page);
+  const desktopSnapshot = await page.evaluate(() => window.worksplitDemo.workbench.snapshot());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  expect(await layout(page)).toEqual(desktop);
+  expect(await page.evaluate(() => window.worksplitDemo.workbench.snapshot())).toEqual(
+    desktopSnapshot,
+  );
+  await expect(page.getByRole("combobox", { name: "Open document" })).toHaveCount(0);
+  await expect(note).toBeVisible();
+  await note.click();
+  await expect(page).toHaveURL(accepted);
+  await expect(note).toBeFocused();
+  await expect(page.getByTestId("details-active")).toContainText("/documents/A?");
+  const detailsTab = page.locator("#flexlayout-tabbutton-details");
+  await detailsTab.click();
+  await expect(note).toBeHidden();
+  expect(rightBorder(await layout(page)).selected ?? -1).toBe(-1);
+  expect(
+    await page.evaluate(
+      () => window.retainedDetails === document.querySelector('[aria-label="Details note"]'),
+    ),
+  ).toBe(true);
+  await detailsTab.click();
+  await expect(note).toBeVisible();
+  await expect(note).toHaveValue("tool retained while docking");
+  await expect(page.getByLabel("Draft A")).toHaveValue("document retained while tool docks");
+  await expect(page).toHaveURL(accepted);
+  expect(await layout(page)).toEqual(desktop);
+  expect(
+    await page.evaluate(
+      () => window.retainedDetails === document.querySelector('[aria-label="Details note"]'),
+    ),
+  ).toBe(true);
+  expect(await page.evaluate(() => window.worksplitDemo.metrics)).toMatchObject({
+    requests: before.requests,
+    mounts: before.mounts,
+    subscriptions: before.subscriptions,
+    unmounts: before.unmounts,
+    disposed: before.disposed,
+  });
+  await page.screenshot({ path: "refactor/acceptance/narrow-right-border.png" });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  expect(await layout(page)).toEqual(desktop);
+  await expect(note).toHaveValue("tool retained while docking");
 });

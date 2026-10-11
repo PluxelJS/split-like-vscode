@@ -210,6 +210,18 @@ h2 {
   color: #aac9f0;
   font-size: 11px;
 }
+.details-tool {
+  padding: 16px;
+  background: #171e2a;
+  min-height: 100%;
+}
+.details-tool p {
+  overflow-wrap: anywhere;
+  margin: 12px 0;
+}
+.details-tool textarea {
+  min-height: 160px;
+}
 .decision {
   position: fixed;
   right: 16px;
