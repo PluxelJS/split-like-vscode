@@ -10,7 +10,7 @@ owns behavior rules; [README](../README.md) owns installation and API use, and
 | ------------------------------------------------------------------------ | ------------------------------------------------------ |
 | Layout tree, TabGroups, selection, dimensions, pin and maximize          | FlexLayout Model                                       |
 | Route matching, hooks, accepted location, loaders and errors             | Each document Router                                   |
-| Tab/Router lifetimes, most recent document, MRU and pending coordination | Worksplit                                              |
+| Tab/Router lifetimes, most recent document, MRU and pending coordination | Worksplit (including replaceable previews)             |
 | Dirty revisions, saves, shared services/cache and business subscriptions | Application                                            |
 | DOM/window focus                                                         | Browser, observed by Worksplit                         |
 | Address/history                                                          | Browser; one Worksplit coordinator for its owned scope |
@@ -75,7 +75,8 @@ operation/session checks prevent it from claiming the URL or resurrecting a clos
 Native `Actions` and JSON retain layout ownership. TabGroups can be authored, restored, created,
 moved, renamed, colored, collapsed and ungrouped without a Worksplit group abstraction. The
 containing TabSet/Border remains the editing group; the TabGroup is its strip organization. An
-explicit document activation expands its collapsed native group before selecting it. Tab renames
+explicit document activation expands its collapsed native group before selecting it, and
+transfers maximization when another central TabSet would otherwise hide the target. Tab renames
 are presentation changes; Router acceptance can subsequently apply a route metadata title.
 
 A native batch with one leaf Action has the same document selection/move behavior as that Action,
@@ -218,3 +219,34 @@ with this integration. Plugin identity, remote renderers, RPC, dirty/save decisi
 services and dynamic availability remain Pluxel owned. This branch changes no Pluxel source,
 dependency or recorded submodule pointer. A second application has not been inspected or accepted;
 internal demo success is not evidence of cross-application compatibility.
+
+## Explorer reuse, previews and bounded workspaces
+
+Explorer entrances may use `reuse: "preserve"`: reuse reveals the final matching identity without
+changing its committed location. Ordinary `open` continues to honor complete requested URLs.
+Unloaded restored documents participate in identity lookup through native route matching, without
+running their loaders. This is not another document registry or a pathname renderer dispatcher.
+
+There is at most one replaceable workspace preview. `preview: true` admits a fresh document
+lifetime before retiring the previous clean preview. Failed admission leaves the old preview
+intact; an already existing target is reused without replacing a different preview. Dirty,
+non-closeable or closing content becomes ordinary retained content. Explicit `keep` and native
+pinning end preview eligibility; keep does not make the native tab non-closeable. Copies are
+ordinary documents and preview requests cannot be background opens. Losing foreground eligibility
+while loading supersedes a preview request. Cleanup errors after retirement cannot turn a successful
+new admission into a load failure. Preview is persisted in the one Worksplit snapshot, not a host
+boolean or a business state machine.
+
+`layoutPolicy: createLayoutPolicy(...)` limits central native topology; `canDispatch` lets menus
+check the same Action they dispatch. Drag admission uses the same complete candidate, including
+native source-group removal after its final tab moves. Borders do not count. The optional helper
+uses a short-lived native Model for prediction without retaining a second layout, triggering live
+save listeners or reimplementing tidy. The authoritative Model remains unique. Unsupported
+multi-step docking batches are refused, not partly applied. Snapshot conversion and choosing
+product-specific detail placement remain host responsibilities.
+
+One content has one live lifecycle owner. Duplicate registration throws before ownership transfer;
+the caller keeps its rejected resources. Navigation decisions receive `{ id, from, to }`, while
+close supplies id and an optional document location. This permits business owners to distinguish
+view changes from resource replacement without bypassing guarded closing. Explicit first-open
+focus waits for registration and is cancelled when real user interaction or disposal supersedes it.

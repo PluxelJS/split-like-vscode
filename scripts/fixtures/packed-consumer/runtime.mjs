@@ -9,6 +9,7 @@ import { createStore } from "@tanstack/react-store";
 import { createSplitLayout, resizeAtSash } from "@worksplit/core";
 import {
   createWorkbench,
+  createLayoutPolicy,
   Workbench,
   SplitView,
   Pane,
@@ -172,6 +173,63 @@ try {
   assert.equal(workbench.getDocument(b).id, b);
 } finally {
   assert.deepEqual(await workbench.dispose(), []);
+}
+const previewWorkbench = createWorkbench({
+  workspaceId: "packed-preview",
+  layoutPolicy: createLayoutPolicy({ maxRows: 2, maxColumns: 2, maxTabsets: 4 }),
+  createRouter: (history) => createRouter({ routeTree, history, context: { services } }),
+});
+try {
+  const first = await previewWorkbench.open(
+    { to: "/documents/$id", params: { id: "Preview-one" }, search: { view: "custom" } },
+    { preview: true },
+  );
+  assert.equal(first.status, "committed");
+  assert.equal(first.document.preview, true);
+  const preserved = await previewWorkbench.open(
+    { to: "/documents/$id", params: { id: "Preview-one" }, search: { view: "reset" } },
+    { reuse: "preserve" },
+  );
+  assert.equal(preserved.status, "committed");
+  assert.equal(preserved.document.href, first.document.href);
+  assert.equal(preserved.document.id, first.document.id);
+  const second = await previewWorkbench.open(
+    { to: "/documents/$id", params: { id: "Preview-two" } },
+    { preview: true },
+  );
+  assert.equal(second.status, "committed");
+  assert.equal(second.document.preview, true);
+  assert.notEqual(second.document.id, first.document.id);
+  assert.equal(previewWorkbench.getDocument(first.document.id), null);
+  await previewWorkbench.dispatch(
+    Actions.updateNodeAttributes(second.document.id, { enableClose: false }),
+  );
+  const third = await previewWorkbench.open(
+    { to: "/documents/$id", params: { id: "Preview-three" } },
+    { preview: true },
+  );
+  assert.equal(third.status, "committed");
+  assert.equal(previewWorkbench.getDocument(second.document.id).preview, false);
+  assert.equal(third.document.preview, true);
+  const restored = createWorkbench({
+    workspaceId: "packed-preview",
+    snapshot: previewWorkbench.snapshot(),
+    layoutPolicy: createLayoutPolicy({ maxRows: 2, maxColumns: 2, maxTabsets: 4 }),
+    createRouter: (history) => createRouter({ routeTree, history, context: { services } }),
+  });
+  try {
+    assert.equal(restored.getDocument(third.document.id).preview, true);
+    restored.keep(third.document.id);
+    assert.equal(restored.getDocument(third.document.id).preview, false);
+    assert.notEqual(
+      Model.fromJson(restored.getLayout()).getNodeById(third.document.id).isPinned(),
+      true,
+    );
+  } finally {
+    assert.deepEqual(await restored.dispose(), []);
+  }
+} finally {
+  assert.deepEqual(await previewWorkbench.dispose(), []);
 }
 const sized = resizeAtSash(
   createSplitLayout({ panes: [{ id: "left" }, { id: "right" }], containerSize: 600 }),

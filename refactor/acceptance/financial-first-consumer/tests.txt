@@ -1,0 +1,98 @@
+$ turbo run test
+
+   • turbo 2.11.7
+   • Packages in scope: @worksplit/core, @worksplit/demo, @worksplit/react
+   • Running test in 3 packages
+   • Remote caching disabled, using shared worktree cache
+
+@worksplit/core:test: cache hit, replaying logs fc1700ef9a44b114
+@worksplit/core:build: cache hit, replaying logs 39a4534e9a8605f0
+@worksplit/core:test: $ vitest run
+@worksplit/core:test: 
+@worksplit/core:test:  RUN  v5.0.3 /home/ahdg/code/shinium/worksplit-flexlayout-tanstack/packages/core
+@worksplit/core:test: 
+@worksplit/core:test:  ✓ src/index.test.ts (5 tests) 12ms
+@worksplit/core:test: 
+@worksplit/core:test:  Test Files  1 passed (1)
+@worksplit/core:test:       Tests  5 passed (5)
+@worksplit/core:test:    Start at  16:09:46
+@worksplit/core:test:    Duration  273ms (transform 61%, import 17%, tests 15%, worker 6%)
+@worksplit/core:test: 
+@worksplit/core:build: $ tsdown
+@worksplit/core:build: ℹ tsdown v0.23.0 powered by rolldown v1.2.12
+@worksplit/core:build: ℹ config file: /home/ahdg/code/shinium/worksplit-flexlayout-tanstack/packages/core/tsdown.config.mts 
+@worksplit/core:build: ℹ entry: src/index.ts
+@worksplit/core:build: ℹ target: esnext
+@worksplit/core:build: ℹ tsconfig: tsconfig.json
+@worksplit/core:build: ℹ Build start
+@worksplit/core:build: ℹ Cleaning 4 files
+@worksplit/core:build: 
+@worksplit/core:build:  WARN  TypeScript 7.0 does not yet have a stable API and is experimental. Some options will be unavailable.
+@worksplit/core:build: 
+@worksplit/core:build: ℹ Emit types with typescript@7.0.2
+@worksplit/core:build: ℹ dist/index.js         3.98 kB │ gzip: 1.56 kB
+@worksplit/core:build: ℹ dist/index.js.map    20.73 kB │ gzip: 5.53 kB
+@worksplit/core:build: ℹ dist/index.d.ts.map   0.58 kB │ gzip: 0.30 kB
+@worksplit/core:build: ℹ dist/index.d.ts       2.12 kB │ gzip: 0.62 kB
+@worksplit/core:build: ℹ 4 files, total: 27.41 kB
+@worksplit/core:build: ✔ Build complete in 105ms
+@worksplit/react:test: cache miss, executing 163d29e24f8b8168
+@worksplit/react:build: cache miss, executing 24957bbc7bf7a246
+@worksplit/react:test: $ vitest run
+@worksplit/react:build: $ tsdown
+@worksplit/react:build: ℹ tsdown v0.23.0 powered by rolldown v1.2.12
+@worksplit/react:build: ℹ config file: /home/ahdg/code/shinium/worksplit-flexlayout-tanstack/packages/react/tsdown.config.mts 
+@worksplit/react:build: ℹ entry: src/index.ts, src/style.css
+@worksplit/react:build: ℹ target: esnext
+@worksplit/react:build: ℹ tsconfig: tsconfig.json
+@worksplit/react:build: ℹ Build start
+@worksplit/react:build: ℹ Cleaning 5 files
+@worksplit/react:build: 
+@worksplit/react:build:  WARN  TypeScript 7.0 does not yet have a stable API and is experimental. Some options will be unavailable.
+@worksplit/react:build: 
+@worksplit/react:build: ℹ Emit types with typescript@7.0.2
+@worksplit/react:test: 
+@worksplit/react:test:  RUN  v5.0.3 /home/ahdg/code/shinium/worksplit-flexlayout-tanstack/packages/react
+@worksplit/react:test: 
+@worksplit/react:build: ℹ dist/index.js         51.80 kB │ gzip: 15.93 kB
+@worksplit/react:build: ℹ dist/index.js.map    200.50 kB │ gzip: 52.31 kB
+@worksplit/react:build: ℹ dist/index.d.ts.map    2.81 kB │ gzip:  1.18 kB
+@worksplit/react:build: ℹ dist/style.css         1.64 kB │ gzip:  0.58 kB
+@worksplit/react:build: ℹ dist/index.d.ts       14.41 kB │ gzip:  4.59 kB
+@worksplit/react:build: ℹ 5 files, total: 271.16 kB
+@worksplit/react:build: ✔ Build complete in 505ms
+@worksplit/react:test:  ✓ src/layout-policy.test.ts (16 tests) 42ms
+@worksplit/react:test: Not implemented: Window's scrollTo() method
+@worksplit/react:test: Not implemented: Window's scrollTo() method
+@worksplit/react:test:  ✓ src/router-proof.test.tsx (1 test) 88ms
+@worksplit/react:test:  ✓ src/layout-policy-integration.test.ts (3 tests) 71ms
+@worksplit/react:test:  ✓ src/document-operations.test.ts (8 tests) 107ms
+@worksplit/react:test:  ✓ src/document-boundaries.test.ts (8 tests) 139ms
+@worksplit/react:test:  ✓ src/integration.test.ts (13 tests) 254ms
+@worksplit/react:test:  ✓ src/focus-lifecycle.test.tsx (9 tests) 378ms
+@worksplit/react:test:    ✓ document focus and lifecycle ownership (9)
+@worksplit/react:test:      ✓ fulfills first-open focus after React mounts and registers the document 326ms
+@worksplit/react:test:  ✓ src/split-view.test.tsx (18 tests) 533ms
+@worksplit/react:test:    ✓ @worksplit/react (18)
+@worksplit/react:test:      ✓ preserves state and DOM through controlled collapse and cleans up on removal 317ms
+@worksplit/react:test:  ✓ src/native-layout.test.ts (83 tests) 655ms
+@worksplit/react:test:  ✓ src/workbench-native.test.tsx (4 tests) 695ms
+@worksplit/react:test:    ✓ native React interaction (4)
+@worksplit/react:test:      ✓ leaves a 390 px layout, maximize state, and resize observers under native ownership 459ms
+@worksplit/react:test: stderr | src/workbench-customization.test.tsx > public React customization > uses application Router pending and error components without replacing a sibling provider or Router
+@worksplit/react:test: Warning: Error in route match: /documents/$name/documents/A{"view":"error"}
+@worksplit/react:test: 
+@worksplit/react:test:  ✓ src/workbench-customization.test.tsx (8 tests) 953ms
+@worksplit/react:test:    ✓ public React customization (8)
+@worksplit/react:test:      ✓ inherits native host HotkeysProvider defaults for built-in command bindings and unregisters them 396ms
+@worksplit/react:test: 
+@worksplit/react:test:  Test Files  11 passed (11)
+@worksplit/react:test:       Tests  171 passed (171)
+@worksplit/react:test:    Start at  17:45:51
+@worksplit/react:test:    Duration  3.09s (environment 65%, tests 16%, import 12%, transform 7%)
+@worksplit/react:test: 
+
+ Tasks:    4 successful, 4 total
+Cached:    2 cached, 4 total
+  Time:    4.063s 
+

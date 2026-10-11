@@ -1349,19 +1349,20 @@ describe("registered native tool admission", () => {
     expect(reopenedNode).toBeInstanceOf(TabNode);
     expect(reopenedNode).not.toBe(originalNode);
     expect(() => retainedRegister({})).toThrow("Cannot register closed content");
-    internal.register("outline", originalLifecycle, reopenedNode);
+    const releaseReopened = internal.register("outline", originalLifecycle, reopenedNode);
     dirty = true;
     retainedUnregister();
     expect(await workbench.close("outline")).toEqual({ status: "rejected", reason: "decision" });
-    expect(decision).toHaveBeenCalledWith("close");
+    expect(decision).toHaveBeenCalledWith("close", { id: "outline" });
     expect(cleanup).toHaveBeenCalledTimes(1);
     expect(internal.model.getNodeById("outline")).toBe(reopenedNode);
 
     const nextCleanup = vi.fn<() => void>();
+    releaseReopened();
     internal.register("outline", { dispose: nextCleanup }, reopenedNode);
     expect(await workbench.close("outline")).toMatchObject({ status: "closed", cleanupErrors: [] });
     expect(nextCleanup).toHaveBeenCalledTimes(1);
-    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(cleanup).toHaveBeenCalledTimes(2);
     expect(workbench.getActiveDocument()?.id).toBe(a);
     expect(window.location.pathname).toBe("/documents/A");
     expect(liveRouters(routers)).toHaveLength(2);

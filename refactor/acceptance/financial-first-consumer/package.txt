@@ -1,0 +1,86 @@
+$ node scripts/check-package-consumer.mjs --browser
+Packed consumer evidence: /home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-ldzdJa
+
+pnpm --filter @worksplit/core pack --out /home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-ldzdJa/core.tgz --json
+{
+  "name": "@worksplit/core",
+  "version": "0.1.0",
+  "filename": "/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-ldzdJa/core.tgz",
+  "files": [
+    {
+      "path": "dist/index.d.ts"
+    },
+    {
+      "path": "dist/index.d.ts.map"
+    },
+    {
+      "path": "dist/index.js"
+    },
+    {
+      "path": "dist/index.js.map"
+    },
+    {
+      "path": "package.json"
+    }
+  ]
+}
+
+pnpm --filter @worksplit/react pack --out /home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-ldzdJa/react.tgz --json
+{
+  "name": "@worksplit/react",
+  "version": "0.1.0",
+  "filename": "/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-ldzdJa/react.tgz",
+  "files": [
+    {
+      "path": "dist/index.d.ts"
+    },
+    {
+      "path": "dist/index.d.ts.map"
+    },
+    {
+      "path": "dist/index.js"
+    },
+    {
+      "path": "dist/index.js.map"
+    },
+    {
+      "path": "dist/style.css"
+    },
+    {
+      "path": "package.json"
+    }
+  ]
+}
+
+npm install --ignore-scripts --no-audit --no-fund
+
+added 39 packages in 2s
+
+/home/ahdg/.var/app/io.github.trumank.CodeStudio/home/.local/share/mise/installs/node/24.21.0/bin/node runtime.mjs
+Packed JS, Store/Hotkeys peers, native tool admission, routes, close cleanup, CSS and maps passed
+
+/home/ahdg/.var/app/io.github.trumank.CodeStudio/home/.local/share/mise/installs/node/24.21.0/bin/node --conditions=development runtime.mjs
+Packed JS, Store/Hotkeys peers, native tool admission, routes, close cleanup, CSS and maps passed
+
+/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-ldzdJa/node_modules/.bin/tsc -p tsconfig.json
+
+/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-ldzdJa/node_modules/.bin/tsc -p tsconfig.json --customConditions development
+
+/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-ldzdJa/node_modules/.bin/vite build
+vite v8.3.3 building client environment for production...
+transforming...
+✓ 144 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.41 kB │ gzip:   0.27 kB
+dist/assets/index-DpcAtsNo.css   27.21 kB │ gzip:   4.56 kB
+dist/assets/index-DR0p5h1K.js   571.11 kB │ gzip: 168.35 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 209ms
+Packed production browser acceptance passed: 18 checks
+Packed public JS, types and CSS checks passed. Evidence and preview app: /home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-ldzdJa

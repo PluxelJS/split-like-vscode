@@ -92,3 +92,13 @@ pre {
   overflow: auto;
   font-size: 11px;
 }
+
+.document-actions {
+  margin: 0 0 12px;
+  padding: 8px;
+  border: 1px solid #63829a;
+}
+.document-actions summary {
+  cursor: pointer;
+  margin-bottom: 8px;
+}

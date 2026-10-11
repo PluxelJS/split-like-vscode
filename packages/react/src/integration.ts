@@ -1,6 +1,7 @@
 import type { UseHotkeyDefinition } from "@tanstack/react-hotkeys";
 import {
   createMemoryHistory,
+  defaultParseSearch,
   type AnyRouter,
   type NavigateOptions,
   type RouterHistory,
@@ -23,6 +24,7 @@ import type { ReactNode } from "react";
 
 import { BrowserHistoryCoordinator } from "./browser-history";
 import { createDocumentHistory, navigateDocument } from "./document-history";
+import type { WorkbenchLayoutPolicy } from "./layout-policy";
 import { actionsIn, closedGroup, tabContainer, tabsIn } from "./native-layout";
 
 export interface WorkbenchRouteMetadata {
@@ -41,6 +43,8 @@ export interface WorkbenchDocument {
   readonly id: string;
   readonly href: string;
   readonly title: string;
+  /** Replaceable workspace preview; independent of native pinned/closeable state. */
+  readonly preview: boolean;
   readonly navigationKey: string | null;
 }
 export interface WorkbenchEditingContext {
@@ -71,12 +75,20 @@ export type CloseResult =
     }
   | { status: "superseded" }
   | { status: "failed"; error: unknown };
+export interface WorkbenchLeaveContext {
+  id: string;
+  from?: string;
+  to?: string;
+}
 export interface WorkbenchContentLifecycle {
   isDirty?: () => boolean;
   /** Existing application editing revision. Dirty multi-content close requires this token. */
   getCloseRevision?: () => string | number;
   /** The application must recheck its editing revision/save receipt before approving. */
-  beforeLeave?: (reason: "close" | "navigate") => boolean | Promise<boolean>;
+  beforeLeave?: (
+    reason: "close" | "navigate",
+    context: WorkbenchLeaveContext,
+  ) => boolean | Promise<boolean>;
   focus?: () => void;
   save?: () => void | Promise<void>;
   dispose?: () => void | Promise<void>;
@@ -107,6 +119,7 @@ export interface WorkbenchOptions<TRouter extends AnyRouter> {
   workspaceId?: string;
   snapshot?: unknown;
   /** Trusted native policy callback; do not mutate the supplied nodes or their Model. */
+  layoutPolicy?: WorkbenchLayoutPolicy;
   allowDrop?: (tabs: readonly TabNode[], target: Node, location: DockLocation) => boolean;
   onIssue?: (issue: {
     code: "operation-failed" | "native-identity-conflict" | "history" | "history-outside-scope";
@@ -118,6 +131,10 @@ export interface OpenDocumentOptions {
   target?: string;
   newInstance?: boolean;
   background?: boolean;
+  /** Reveal a matching document with its existing location. Default honors the requested URL. */
+  reuse?: "navigate" | "preserve";
+  /** One replaceable preview per workspace. Explicit copies are always ordinary documents. */
+  preview?: boolean;
 }
 
 type DocumentSession = {
@@ -126,6 +143,7 @@ type DocumentSession = {
   router?: AnyRouter | undefined;
   identity?: string | undefined;
   multi: boolean;
+  preview: boolean;
   operation: number;
   contentVersion: number;
   lifecycle?: WorkbenchContentLifecycle | undefined;
@@ -181,6 +199,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   private browser: BrowserHistoryCoordinator | undefined;
   private disposed = false;
   private focusEpoch = 0;
+  private pendingFocus: { id: string; epoch: number } | undefined;
   private openEpoch = 0;
   private nextId = 0;
   private readonly instancePrefix = Array.from(
@@ -223,12 +242,14 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       loadDocument: (id) => this.loadDocument(id),
       register: (id, lifecycle, expectedNode) => this.register(id, lifecycle, expectedNode),
       focus: (id, area) => this.observeFocus(id, area),
-      setWindowFocus: (windowFocused) =>
+      setWindowFocus: (windowFocused) => {
+        if (!windowFocused) this.cancelContentFocus();
         this.state.store.setState((s) => ({
           ...s,
           windowFocused,
           ...(!windowFocused ? { focusedArea: null } : {}),
-        })),
+        }));
+      },
       modelAction: (action) => {
         void this.dispatch(action).catch((error: unknown) => this.issue("operation-failed", error));
         return undefined;
@@ -256,6 +277,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           id: node.getId(),
           href,
           multi: (config as Record<string, unknown>).multi === true,
+          preview: (config as Record<string, unknown>).preview === true && !node.isPinned(),
           operation: 0,
           contentVersion: 0,
           release: [],
@@ -264,7 +286,16 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         throw new Error(`Unknown Worksplit content: ${node.getId()} (${node.getComponent()})`);
       }
     });
-    model.setOnAllowDrop((drag, drop) => this.allowMove(drag, drop.node, drop.location));
+    if ([...documents.values()].filter((session) => session.preview).length > 1)
+      throw new Error("A workspace snapshot may contain only one preview");
+    if (options.layoutPolicy && !options.layoutPolicy.allows(model))
+      throw new Error("Snapshot violates layout policy; explicitly convert it before restoring");
+    model.setOnAllowDrop(
+      (drag, drop) =>
+        this.allowMove(drag, drop.node, drop.location) &&
+        (options.layoutPolicy?.allowsDrop(model, drag, drop.node, drop.location, drop.index) ??
+          true),
+    );
     if (options.allowDrop) {
       model.visitNodes((node) => {
         if (
@@ -317,6 +348,16 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     return this.openHref(location.href, options, !!navigation.replace);
   }
 
+  /** Copy committed view conditions, never a draft, into a new ordinary document lifetime. */
+  duplicate(
+    id: string,
+    options: Pick<OpenDocumentOptions, "target" | "background"> = {},
+  ): Promise<NavigationResult> {
+    const session = this.state.documents.get(id);
+    if (!session || this.disposed) return Promise.resolve({ status: "rejected", reason: "closed" });
+    return this.openHref(session.href, { ...options, newInstance: true }, false);
+  }
+
   getDocument(id: string): WorkbenchDocument | null {
     const session = this.state.documents.get(id);
     if (!session) return null;
@@ -327,8 +368,16 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       id,
       href: session.href,
       title: (this.state.model.getNodeById(id) as TabNode).getName(),
+      preview: session.preview,
       navigationKey: metadata?.navigationKey ?? null,
     };
+  }
+  /** Keep a preview as an ordinary, still-closeable document. Does not pin the native tab. */
+  keep(id: string): void {
+    const session = this.state.documents.get(id);
+    if (!session?.preview || this.disposed) return;
+    session.preview = false;
+    this.changed();
   }
   getDocuments(): readonly WorkbenchDocument[] {
     return [...this.state.documents.keys()].map((id) => this.getDocument(id)!);
@@ -365,32 +414,26 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         this.state.model.doAction(Actions.updateNodeAttributes(hidden.getId(), { opened: true }));
       if (!node.isSelected()) this.state.model.doAction(Actions.selectTab(id));
       const group = tabContainer(node);
+      const maximized = this.state.model.getMaximizedTabset();
+      // Selecting an obscured tab does not reveal it in FlexLayout. Follow the explicit
+      // document target while retaining the user's maximized workspace mode.
+      if (group instanceof TabSetNode && maximized && maximized !== group)
+        this.state.model.doAction(Actions.maximizeToggle(group.getId()));
       if (group instanceof TabSetNode && this.state.model.getActiveTabset() !== group)
         this.state.model.doAction(Actions.setActiveTabset(group.getId()));
     } finally {
       this.selecting = false;
     }
-    const focus = ++this.focusEpoch;
+    this.cancelContentFocus();
     if (this.state.store.get().activeDocumentId !== id) {
       this.state.store.setState((s) => ({ ...s, activeDocumentId: id }));
     }
     this.remember(id);
     if (session.router && options.history !== false) this.browser?.publish(session.href, id, true);
-    if (options.focus !== false)
-      queueMicrotask(() => {
-        if (
-          focus === this.focusEpoch &&
-          this.state.store.get().activeDocumentId === id &&
-          this.state.documents.has(id)
-        ) {
-          this.restoringFocus = true;
-          try {
-            session.lifecycle?.focus?.();
-          } finally {
-            this.restoringFocus = false;
-          }
-        }
-      });
+    if (options.focus !== false) {
+      this.pendingFocus = { id, epoch: this.focusEpoch };
+      this.restoreContentFocus(session);
+    }
     void this.loadDocument(id).catch((error: unknown) => this.issue("operation-failed", error, id));
   }
 
@@ -404,20 +447,25 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     return this.closeAction(Actions.deleteTab(id)) as Promise<CloseResult>;
   }
 
-  async dispatch(action: Action): Promise<CloseResult | { status: "applied" | "rejected" }> {
-    if (this.disposed) return { status: "rejected" };
+  /** Synchronous eligibility only. Close still makes asynchronous content decisions. */
+  canDispatch(action: Action): boolean {
+    if (this.disposed) return false;
     const actions = actionsIn(action);
+    if (actions.length === 0) return false;
     const removals = actions.filter(
       (a) => a.type === Actions.DELETE_TAB || a.type === Actions.DELETE_TABSET,
     );
     if (removals.length > 0)
-      return removals.length === actions.length ? this.closeAction(action) : { status: "rejected" };
-    // Tool admission is a single native insertion. Do not partially admit resources while
-    // guessing later batch targets, identities or policies.
-    if (actions.length !== 1 && actions.some((a) => a.type === Actions.ADD_TAB))
-      return { status: "rejected" };
-    // Policy callbacks can depend on the current Model. Do not simulate a second layout to
-    // predict multi-step docking batches, or partially apply them before rejecting a later step.
+      return (
+        removals.length === actions.length &&
+        removals.every((a) => {
+          const node = this.state.model.getNodeById(a.data.node as string);
+          return a.type === Actions.DELETE_TAB
+            ? node instanceof TabNode && node.isCloseable()
+            : node instanceof TabSetNode && node.isEnableClose();
+        })
+      );
+    if (actions.length !== 1 && actions.some((a) => a.type === Actions.ADD_TAB)) return false;
     if (
       this.options.allowDrop &&
       actions.length > 1 &&
@@ -430,8 +478,22 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         ].includes(a.type),
       )
     )
-      return { status: "rejected" };
-    if (!actions.every((a) => this.allowLayoutAction(a))) return { status: "rejected" };
+      return false;
+    return (
+      actions.every((a) => this.allowLayoutAction(a)) &&
+      (this.options.layoutPolicy?.allowsAction(this.state.model, action) ?? true)
+    );
+  }
+
+  async dispatch(action: Action): Promise<CloseResult | { status: "applied" | "rejected" }> {
+    if (this.disposed) return { status: "rejected" };
+    const actions = actionsIn(action);
+    const removals = actions.filter(
+      (a) => a.type === Actions.DELETE_TAB || a.type === Actions.DELETE_TABSET,
+    );
+    if (removals.length > 0)
+      return removals.length === actions.length ? this.closeAction(action) : { status: "rejected" };
+    if (!this.canDispatch(action)) return { status: "rejected" };
     return { status: this.applyLayoutAction(action, actions) ? "applied" : "rejected" };
   }
 
@@ -590,17 +652,22 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       !(model.getNodeById((operation.data.json as { id: string }).id) instanceof TabNode)
     )
       return false;
+    for (const session of this.state.documents.values()) {
+      const node = model.getNodeById(session.id);
+      if (session.preview && node instanceof TabNode && node.isPinned()) this.keep(session.id);
+    }
     if (selecting) return true;
     // Native selection cancels pending foreground work, including queued content focus.
     if (
       actions.some(
         (a) =>
           a.type === Actions.SET_ACTIVE_TABSET ||
+          a.type === Actions.MOVE_NODE ||
           (a.type === Actions.SELECT_TAB &&
             model.getNodeById(a.data.tabNode as string) instanceof TabNode),
       )
     )
-      ++this.focusEpoch;
+      this.cancelContentFocus();
     // A single native selection owns only that tab. Selecting a tool or collapsing a Border
     // must not reactivate an unrelated central document or steal the native strip's focus.
     if (operation.type === Actions.SELECT_TAB) {
@@ -698,7 +765,11 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     }) => {
       if (node.type === "tab" && node.id && this.state.documents.has(node.id)) {
         const session = this.state.documents.get(node.id)!;
-        node.config = { href: session.href, multi: session.multi };
+        node.config = {
+          href: session.href,
+          multi: session.multi,
+          ...(session.preview ? { preview: true } : {}),
+        };
       }
       node.children?.forEach((child) => update(child as Parameters<typeof update>[0]));
     };
@@ -718,6 +789,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       finish = resolve;
     });
     this.disposed = true;
+    this.cancelContentFocus();
     ++this.openEpoch;
     const errors: unknown[] = [];
     const browser = this.browser;
@@ -779,10 +851,15 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     if (this.disposed) return { status: "rejected", reason: "closed" };
     if (!fromPop && this.browser?.busy) return { status: "rejected", reason: "history-busy" };
     this.checkHref(href);
+    if (options.preview && !options.newInstance && options.background)
+      throw new Error("A preview cannot open in the background");
     const epoch = options.background ? this.openEpoch : ++this.openEpoch;
     const focus = this.focusEpoch;
     const valid = () =>
-      !this.disposed && current() && (options.background || epoch === this.openEpoch);
+      !this.disposed &&
+      current() &&
+      (options.background || epoch === this.openEpoch) &&
+      (!options.preview || options.newInstance || focus === this.focusEpoch);
     // Exact accepted URLs can be reused without speculative loaders.
     const active = this.state.store.get().activeDocumentId;
     const exact =
@@ -807,15 +884,18 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       const initialTarget = options.newInstance
         ? undefined
         : (this.preferred(
-            [...this.state.documents.values()].filter((s) => s.identity === initialIdentity),
+            [...this.state.documents.values()].filter(
+              (s) => this.sessionIdentity(s) === initialIdentity,
+            ),
           ) ??
           (exact || undefined));
       const initialOperation = initialTarget ? ++initialTarget.operation : undefined;
 
       if (
-        initialTarget?.href === href &&
+        initialTarget &&
+        (initialTarget.href === href || options.reuse === "preserve") &&
         (!initialTarget.router ||
-          (initialTarget.router.history.location.href === href &&
+          (initialTarget.router.history.location.href === initialTarget.href &&
             !initialTarget.router.state.isLoading))
       ) {
         await this.loadDocument(initialTarget.id);
@@ -841,11 +921,13 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         (initialTarget?.href === router.state.location.href
           ? initialTarget
           : this.preferred(
-              [...this.state.documents.values()].filter((s) => s.identity === identity),
+              [...this.state.documents.values()].filter(
+                (s) => this.sessionIdentity(s) === identity,
+              ),
             ));
       if (existing) {
         const finalHref = router.state.location.href;
-        if (existing.href === finalHref) {
+        if (existing.href === finalHref || options.reuse === "preserve") {
           if (!options.background && focus === this.focusEpoch) {
             this.activate(existing.id, { history: false });
             if (!fromPop) this.browser?.publish(existing.href, existing.id, replace);
@@ -862,9 +944,16 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           options.background || focus !== this.focusEpoch,
         );
       }
+      const preview = !!options.preview && !options.newInstance;
+      const previousPreview = preview
+        ? [...this.state.documents.values()].find((session) => session.preview)
+        : undefined;
       const id = this.freshId();
       const target =
         options.target ??
+        (previousPreview
+          ? tabContainer(this.state.model.getNodeById(previousPreview.id))?.getId()
+          : undefined) ??
         this.state.model.getActiveTabset()?.getId() ??
         this.state.model.getFirstTabSet()?.getId();
       if (!target) throw new Error("Layout requires a central Tabset for opening documents");
@@ -882,6 +971,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         href: router.state.location.href,
         identity,
         multi: !!options.newInstance,
+        preview,
         operation: 0,
         contentVersion: 0,
         release: [],
@@ -943,7 +1033,10 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           throw new Error(`Cannot add document to ${target}`);
         // Admission is provisional until policy approval. Foreground selection belongs to
         // activate below; native ADD may still change the active Tabset even with select:false.
-        if (!this.allowMove(node, node.getParent()!, DockLocation.CENTER))
+        if (
+          !this.allowMove(node, node.getParent()!, DockLocation.CENTER) ||
+          (this.options.layoutPolicy && !this.options.layoutPolicy.allows(model))
+        )
           throw new Error(`Docking policy rejected document in ${target}`);
         if (options.background || focus !== this.focusEpoch) restoreSelection();
       } catch (error) {
@@ -973,6 +1066,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           ? error
           : new AggregateError(errors, `Failed to discard provisional document ${id}`);
       }
+      const retirePreview = previousPreview?.preview === true;
+      if (previousPreview) this.keep(previousPreview.id);
       this.state.documents.set(id, session);
       this.pending.delete(router);
       this.attachRouter(session);
@@ -980,6 +1075,29 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       if (!options.background && focus === this.focusEpoch) {
         this.activate(id, { history: false });
         if (!fromPop) this.browser?.publish(session.href, id, replace);
+      }
+      // Admission has succeeded before retiring the previous preview. A new Router/content id
+      // gives resource owners a real lifetime boundary; no same-path React state is repurposed.
+      // Dirty, protected or already-closing content is kept, never implicitly discarded.
+      if (
+        retirePreview &&
+        previousPreview &&
+        this.state.documents.get(previousPreview.id) === previousPreview
+      ) {
+        try {
+          const previousNode = model.getNodeById(previousPreview.id);
+          if (
+            previousNode instanceof TabNode &&
+            previousNode.isCloseable() &&
+            !previousPreview.lifecycle?.isDirty?.() &&
+            !this.closing.has(previousPreview.id)
+          )
+            void this.close(previousPreview.id);
+        } catch (error) {
+          // Retirement is post-admission cleanup. Keep the old document and preserve the
+          // committed receipt even if an application getter cannot establish safe removal.
+          this.issue("operation-failed", error, previousPreview.id);
+        }
       }
       return { status: "committed", document: this.getDocument(id)!, reused: false };
     } catch (error) {
@@ -1021,7 +1139,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       this.state.documents.get(session.id) === session &&
       operation === session.operation;
     try {
-      if (!(await this.decide(session, "navigate")))
+      if (!(await this.decide(session, "navigate", href)))
         return { status: "rejected", reason: "decision" };
       if (!valid() || before !== session.contentVersion) return { status: "superseded" };
       // The application's native Router blockers still run. Our one-shot approval prevents a second prompt.
@@ -1077,7 +1195,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           const before = session.contentVersion;
           const operation = ++session.operation;
           return (
-            !(await this.decide(session, "navigate")) ||
+            !(await this.decide(session, "navigate", nextLocation.href)) ||
             !this.state.documents.has(session.id) ||
             before !== session.contentVersion ||
             operation !== session.operation
@@ -1148,9 +1266,15 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     await this.settle(router);
     if (this.state.documents.get(id) === session) this.acceptRouter(session);
   }
-  private async decide(session: DocumentSession, reason: "close" | "navigate") {
+  private async decide(session: DocumentSession, reason: "close" | "navigate", to?: string) {
     if (!session.lifecycle?.isDirty?.()) return true;
-    return session.lifecycle.beforeLeave ? await session.lifecycle.beforeLeave(reason) : false;
+    return session.lifecycle.beforeLeave
+      ? await session.lifecycle.beforeLeave(reason, {
+          id: session.id,
+          from: session.href,
+          ...(to ? { to } : {}),
+        })
+      : false;
   }
   /** Interpret removal effects only. Model remains the sole layout authority. */
   private closeAction(action: Action): Promise<CloseActionResult> {
@@ -1237,14 +1361,16 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         contentLifecycles.some((lifecycle, i) => dirty[i] && !lifecycle?.getCloseRevision)
       )
         return { status: "rejected", reason: "revision-required" };
-      for (const lifecycle of contentLifecycles) {
+      for (const [index, lifecycle] of contentLifecycles.entries()) {
         if (this.disposed) return { status: "superseded" };
         if (!lifecycle?.isDirty?.()) continue;
         if (tabs.length > 1 && !lifecycle.getCloseRevision)
           return { status: "rejected", reason: "revision-required" };
+        const id = tabs[index]!.getId();
+        const from = this.state.documents.get(id)?.href;
         // eslint-disable-next-line no-await-in-loop -- Dirty decisions may display a dialog; ask in strip order.
-        if (!(await lifecycle.beforeLeave?.("close")))
-          return { status: "rejected", reason: "decision" };
+        const approved = await lifecycle.beforeLeave?.("close", { id, ...(from ? { from } : {}) });
+        if (!approved) return { status: "rejected", reason: "decision" };
       }
       if (this.disposed || sessions.some((s) => this.state.documents.get(s.id) !== s))
         return { status: "superseded" };
@@ -1336,7 +1462,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
               ),
             ) ?? this.preferred(remaining);
           this.state.store.setState((s) => ({ ...s, activeDocumentId: null }));
-          ++this.focusEpoch;
+          this.cancelContentFocus();
           if (successor) this.activate(successor.id);
           else this.browser?.publish(this.options.home ?? "/", undefined, true);
         }
@@ -1404,9 +1530,12 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     )
       throw new Error(`Cannot register closed content ${id}`);
     const session = this.state.documents.get(id);
+    if (session?.lifecycle || this.toolLifecycles.has(id))
+      throw new Error(`Content ${id} already has a lifecycle owner`);
     if (session) session.lifecycle = lifecycle;
     else if (this.state.tools.has(id)) this.toolLifecycles.set(id, lifecycle);
     else throw new Error(`Cannot register closed content ${id}`);
+    if (session) this.restoreContentFocus(session);
     return () => {
       if (this.state.model.getNodeById(id) !== node) return;
       if (session?.lifecycle !== lifecycle && this.toolLifecycles.get(id) !== lifecycle) return;
@@ -1467,10 +1596,41 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     }
     return errors;
   }
+  private cancelContentFocus() {
+    ++this.focusEpoch;
+    this.pendingFocus = undefined;
+  }
+  private restoreContentFocus(session: DocumentSession) {
+    const request = this.pendingFocus;
+    if (!request || request.id !== session.id || !session.lifecycle?.focus) return;
+    queueMicrotask(() => {
+      if (
+        this.disposed ||
+        this.pendingFocus !== request ||
+        request.epoch !== this.focusEpoch ||
+        this.state.store.get().activeDocumentId !== session.id ||
+        this.state.documents.get(session.id) !== session
+      )
+        return;
+      const focus = session.lifecycle?.focus;
+      // A route can unmount between scheduling and commit. Keep the request available
+      // for the next owner, provided no user interaction has superseded it.
+      if (!focus) return;
+      this.pendingFocus = undefined;
+      this.restoringFocus = true;
+      try {
+        focus();
+      } catch (error) {
+        this.issue("operation-failed", error, session.id);
+      } finally {
+        this.restoringFocus = false;
+      }
+    });
+  }
   private observeFocus(id: string | null, area: WorkbenchState["focusedArea"]) {
     if (id && this.state.documents.has(id) && !this.restoringFocus)
       this.activate(id, { focus: false });
-    else if (!this.restoringFocus) ++this.focusEpoch;
+    else if (!this.restoringFocus) this.cancelContentFocus();
     this.state.store.setState((s) => ({
       ...s,
       focusedTabId: id,
@@ -1514,6 +1674,14 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   private routeMetadata(router: AnyRouter): WorkbenchRouteMetadata | undefined {
     return [...router.state.matches].toReversed().find((m) => m.staticData?.worksplit)?.staticData
       .worksplit;
+  }
+  private sessionIdentity(session: DocumentSession): string | undefined {
+    if (session.identity) return session.identity;
+    // Lazy restored documents have no Router yet. Match their saved location with the same
+    // real route definition, without starting loaders or retaining a second Router per tab.
+    const url = new URL(session.href, "https://worksplit.invalid");
+    const search = (this.resolver.options.parseSearch ?? defaultParseSearch)(url.search);
+    return this.identity(this.resolver, this.resolver.matchRoutes(url.pathname, search));
   }
   private identity(router: AnyRouter, matches = router.state.matches) {
     const owner = matches.toReversed().find((m) => m.staticData?.worksplit) ?? matches.at(-1);

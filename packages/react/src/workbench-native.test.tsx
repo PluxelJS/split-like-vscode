@@ -139,10 +139,10 @@ describe("native React interaction", () => {
     const initial = workbench.getLayout();
     const expected = Model.fromJson(initial);
     expect(expected.getActiveTabset()?.getId()).toBe(right);
-    expect(expected.getMaximizedTabset()?.getId()).toBe(left);
+    expect(expected.getMaximizedTabset()?.getId()).toBe(right);
     const observed = vi.fn<NonNullable<ILayoutProps["onModelChange"]>>();
     const view = render(<Workbench workbench={workbench} native={{ onModelChange: observed }} />);
-    await screen.findByTestId(`editor-${b}`);
+    await screen.findByTestId(`editor-${c}`);
     await act(async () => undefined);
     const integratedObservers = resizeObservers.length;
     const expectNativeLayout = () => {
@@ -155,6 +155,7 @@ describe("native React interaction", () => {
     expectNativeLayout();
 
     expected.doAction(Actions.selectTab(a));
+    expected.doAction(Actions.maximizeToggle(left));
     await act(async () => workbench.activate(a));
     expect(workbench.getActiveDocument()?.id).toBe(a);
     expectNativeLayout();
@@ -174,7 +175,7 @@ describe("native React interaction", () => {
     expectNativeLayout();
     expect(
       observed.mock.calls.filter(([, action]) => action.type === Actions.MAXIMIZE_TOGGLE),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
 
     view.unmount();
     measuredWidth = 390;

@@ -13,6 +13,13 @@ export {
 } from "./split-view";
 export type { PaneSizeValue, SplitLayout, SplitOrientation } from "@worksplit/core";
 export {
+  createLayoutPolicy,
+  getLayoutTopology,
+  type LayoutLimits,
+  type LayoutTopology,
+  type WorkbenchLayoutPolicy,
+} from "./layout-policy";
+export {
   createWorkbench,
   WorkbenchInstance,
   type WorkbenchOptions,
@@ -24,6 +31,7 @@ export {
   type WorkbenchState,
   type WorkbenchTool,
   type WorkbenchContentLifecycle,
+  type WorkbenchLeaveContext,
   type WorkbenchSnapshot,
   type WorkbenchRouteMetadata,
   type OpenDocumentOptions,

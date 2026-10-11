@@ -191,7 +191,7 @@ replace and browser-link behavior. Global document entrances use `workbench.open
 
 ## Document operations and completion
 
-`open(navigation, { target?, newInstance?, background? })` uses TanStack `NavigateOptions` types.
+`open(navigation, { target?, newInstance?, background?, reuse?, preview? })` uses TanStack `NavigateOptions` types.
 `target` is a native Tabset or Border id, not a Worksplit region. Omission uses the active/first
 central Tabset. Invalid targets or policies return a load-stage failure; no document is retained.
 Container ids belong to the live native layout: empty TabSets can disappear after moving or closing
@@ -216,6 +216,23 @@ Full requested locations are honored, including when an existing
 instance's search/hash must change. `activate(id)` preserves its committed location and restores
 its registered synchronous focus callback. Reuse selects the active matching instance, then MRU,
 then creation order. Layout position and pin do not enter identity.
+
+Use `reuse: "preserve"` for an explorer/tree entrance that should reveal an already open
+identity without changing its filters, hash or draft. The default `reuse: "navigate"` honors the
+complete requested location. Redirect resolution still determines the final target; saved lazy
+documents are matched through the same route definition without loading every restored tab.
+
+`preview: true` requests the workspace's single replaceable preview. A new identity gets a new
+document id and Router, and retires the previous clean preview only after successful admission.
+Existing identities are reused first, leaving any different preview alone. Dirty, non-closeable
+or already-closing previews are kept as ordinary documents. `keep(id)` keeps a comparison document
+without native pinning, so it remains normally closeable. Explicit native pinning also keeps it.
+`getDocument(id).preview` and snapshot config expose the state; do not mirror it in a host catalog.
+`newInstance: true` always creates an ordinary document. `duplicate(id, { target?, background? })`
+copies an existing document's committed location into a new ordinary lifetime, without copying drafts. Background preview requests are invalid.
+A preview request that loses foreground qualification while loading is superseded rather than
+retiring content behind the user's current focus. Retirement cleanup errors are reported separately
+from the successful new admission; a committed receipt still does not mean React has painted.
 
 `open` resolves to `committed`, `rejected` (with a reason), `superseded`, or `failed` (with the
 original error and stage). A commit means Router/session/Model admission, not completion of
@@ -276,8 +293,14 @@ before the batch and checked again after all decisions, so edits to an earlier a
 invalidate the whole request while a later dialog waits. A member that becomes dirty also
 invalidates approval. For single close, `beforeLeave` still validates its own editing revision.
 The imperative `useWorkbenchContent().register(lifecycle)` returns the registration cleanup;
-it throws for removed/replaced content. A rejected registration has not transferred resource
+it throws for removed/replaced content or a second live owner. Register one stable lifecycle per
+content; compose business editor resources inside that owner instead of overwriting the registration. A rejected registration has not transferred resource
 ownership, so the caller still releases any resources it acquired.
+
+`beforeLeave(reason, { id, from?, to? })` receives the content id and, for document navigation,
+the current and requested locations. Use this to permit view-only search changes that preserve a
+draft while protecting a real resource transition. Close supplies the document's current `from`
+(or just the id for a tool). The application still validates its own business editing revision.
 
 Tools may register guarded closing and disposal resources; they need no Router to be dirty.
 Save and document focus callbacks apply to document operations. Use native `enableClose: false`
@@ -427,6 +450,34 @@ batches are rejected; they do not apply layout changes before asking to discard 
 installed version needs a narrow leaf-deletion adaptation for grouped TabSet close; see the
 [coordination boundary](docs/vscode-workbench-behavior.md#coordination-boundary).
 
+Optional structural limits are supplied once when creating the workspace:
+
+```tsx
+import { createLayoutPolicy, createWorkbench } from "@worksplit/react";
+const workbench = createWorkbench({
+  createRouter: createRouterForHistory,
+  layoutPolicy: createLayoutPolicy({ maxRows: 2, maxColumns: 2, maxTabsets: 4 }),
+});
+// Use the very same native Action for a menu's eligibility and its invocation.
+const allowed = workbench.canDispatch(action);
+if (allowed) await workbench.dispatch(action);
+```
+
+`createLayoutPolicy` measures native central TabSet topology; Borders are excluded. Side-by-side
+children add columns and stacked children add rows, including retained empty TabSets. This is a
+structural limit, not pixel alignment of independent splitters. `getLayoutTopology(model)` exposes
+the same read-only measurement. Limits are opt-in positive integers; the library has no default
+2×2 product policy. A restore violating the policy is rejected for the host to explicitly convert.
+
+Native drop previews, program Actions, new document admission and restoration share the policy.
+Move checks run the actual native Action and empty-container tidy on a short-lived native candidate,
+without firing live content save callbacks, mounting views or retaining another layout owner.
+`canDispatch` is synchronous eligibility, not a dirty-close approval or a reservation: use the
+returned dispatch/close receipt. Native restriction checks and `allowDrop` still apply separately.
+A bounded workspace rejects batches containing multiple Actions with a move/add; public Model APIs
+cannot faithfully clone new-TabSet callbacks across later steps. Submit these operations individually.
+Normal native callbacks are trusted host extensions and must not mutate coordinator-owned state.
+
 `allowDrop(tabs, target, location)` applies to all members of a moved group, native preview,
 program moves, initial admission and restoration. It is a trusted pure policy: do not mutate
 native nodes/Model. A TabGroup target is checked as the actual native node and against its containing
@@ -479,7 +530,10 @@ tool selection or stealing navigation focus. Mounted content stays mounted throu
 pin, maximize, selection and Border collapse. Hidden effects continue until content is removed.
 Native tab selection and keyboard navigation own DOM focus; Worksplit coordinates the document
 and URL without invoking content focus. Explicit `open`/`activate` restore the registered focus
-callback, unless a newer activation, selection or observed focus supersedes it.
+callback, retaining a pending request until first content registration when needed. A newer
+activation, native selection/move, observed focus, window blur or disposal supersedes it. Activating
+a document in another central TabSet transfers native maximization to that group, keeping the
+target visible without changing the split topology.
 
 Content uses FlexLayout's scroll container and `enableScrollbars` attributes; its wrapper adds no
 overflow clipping. Non-Router render failures use FlexLayout's per-tab error boundary and Retry;

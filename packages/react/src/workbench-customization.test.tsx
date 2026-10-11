@@ -345,6 +345,7 @@ describe("public React customization", () => {
     const props: WorkbenchProps = {
       workbench: consumer.workbench,
       "aria-label": "Keyboard workspace",
+      tabIndex: -1,
       empty: null,
     };
     const shell = (enabled: boolean, preventDefault: boolean) => (
@@ -358,6 +359,7 @@ describe("public React customization", () => {
     });
     const editor = await screen.findByLabelText("Editor A");
     const workspace = screen.getByLabelText("Keyboard workspace");
+    act(() => workspace.focus());
     expect(pressSave(workspace).defaultPrevented).toBe(false);
     expect(execute).not.toHaveBeenCalled();
 
@@ -823,6 +825,7 @@ describe("public React customization", () => {
     const current = consumer.contents.get("helper")!;
     Object.assign(old.lifecycle, current.lifecycle);
     await act(async () => {
+      current.unregister();
       current.content.register(old.lifecycle);
       old.unregister();
     });

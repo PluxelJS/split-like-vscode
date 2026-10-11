@@ -10,6 +10,7 @@ import {
 import { createStore, useStore } from "@tanstack/react-store";
 import {
   createWorkbench,
+  createLayoutPolicy,
   Workbench,
   useWorkbenchState,
   useWorkbenchContent,
@@ -58,6 +59,7 @@ const services = {
     providers: 0,
     pendingSaveId: "",
     lastSavedId: "",
+    lastLeave: "",
   }),
 };
 const keyboardPreferences = createStore({
@@ -94,6 +96,7 @@ const documentRoute = createRoute({
   component: Editor,
 });
 const routeTree = rootRoute.addChildren([documentRoute]);
+const boundedScenario = window.location.hash === "#bounded";
 const layout: IJsonModel = {
   global: {
     tabEnableFloat: false,
@@ -121,13 +124,17 @@ const layout: IJsonModel = {
     type: "row",
     children: [
       { type: "tabset", id: "left", name: "Writing", enableDeleteWhenEmpty: false, children: [] },
-      {
-        type: "tabset",
-        id: "right",
-        name: "Reference",
-        enableDeleteWhenEmpty: false,
-        children: [],
-      },
+      ...(boundedScenario
+        ? []
+        : [
+            {
+              type: "tabset" as const,
+              id: "right",
+              name: "Reference",
+              enableDeleteWhenEmpty: false,
+              children: [],
+            },
+          ]),
     ],
   },
 };
@@ -158,6 +165,7 @@ const createRouterForHistory = (history: RouterHistory) => {
 export const workbench = createWorkbench({
   createRouter: createRouterForHistory,
   layout,
+  layoutPolicy: createLayoutPolicy({ maxRows: 2, maxColumns: 2, maxTabsets: 4 }),
   tools: [
     { id: "inspector", render: ({ id }) => <Tool id={id} /> },
     { id: "outline", render: ({ id }) => <Tool id={id} /> },
@@ -255,7 +263,13 @@ function Editor() {
     () => ({
       isDirty: () => dirty.current,
       getCloseRevision: () => revision.current,
-      beforeLeave: () => !dirty.current || window.confirm("Discard this unsaved draft?"),
+      beforeLeave: (reason, context) => {
+        services.metrics.setState((state) => ({
+          ...state,
+          lastLeave: JSON.stringify({ reason, ...context }),
+        }));
+        return !dirty.current || window.confirm("Discard this unsaved draft?");
+      },
       focus: () => input.current?.focus(),
       save: () => {
         dirty.current = false;
@@ -509,6 +523,82 @@ function App() {
             >
               Open B
             </button>
+            <details className="document-actions">
+              <summary>Document and layout actions</summary>
+              <button
+                type="button"
+                onClick={() =>
+                  run(() =>
+                    workbench.open(
+                      { to: "/documents/$id", params: { id: "A" }, search: { view: "edit" } },
+                      { reuse: "preserve" },
+                    ),
+                  )
+                }
+              >
+                Reveal A preserving filters
+              </button>
+              {["C", "D", "E", "F"].map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() =>
+                    run(() =>
+                      workbench.open(
+                        { to: "/documents/$id", params: { id }, search: { view: "edit" } },
+                        { preview: true },
+                      ),
+                    )
+                  }
+                >
+                  Preview {id}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  if (active) workbench.keep(active);
+                }}
+              >
+                Keep active document
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  run(async () => {
+                    const document = workbench.getActiveDocument();
+                    if (!document) throw new Error("An active document is required");
+                    return workbench.duplicate(document.id);
+                  })
+                }
+              >
+                Duplicate active document
+              </button>
+              {(["bottom", "right"] as const).map((side) => (
+                <button
+                  key={side}
+                  type="button"
+                  onClick={() =>
+                    run(async () => {
+                      const document = workbench.getActiveDocument();
+                      const target = workbench.getEditingContext().activeGroupId;
+                      if (!document || !target)
+                        throw new Error("An active document group is required");
+                      return workbench.dispatch(
+                        Actions.moveNode(
+                          document.id,
+                          target,
+                          side === "bottom" ? DockLocation.BOTTOM : DockLocation.RIGHT,
+                          -1,
+                        ),
+                      );
+                    })
+                  }
+                >
+                  Split active {side}
+                </button>
+              ))}
+            </details>
             <button
               type="button"
               onClick={() => {
@@ -580,7 +670,7 @@ void (async () => {
   if (initial.status !== "committed") throw new Error("Initial document failed: " + initial.status);
   const second = await workbench.open(
     { to: "/documents/$id", params: { id: "B" }, search: { view: "edit" } },
-    { target: "right" },
+    { target: boundedScenario ? "left" : "right" },
   );
   if (second.status !== "committed") throw new Error("Reference document failed: " + second.status);
   workbench.activate(initial.document.id, { focus: false });

@@ -166,7 +166,10 @@ export function Workbench({
     const doc = element.ownerDocument;
     const win = doc.defaultView!;
     const observe = (target: EventTarget | null) => {
-      if (!(target instanceof Element) || !element.contains(target)) return;
+      if (!(target instanceof Element) || !element.contains(target)) {
+        internal.focus(null, null);
+        return;
+      }
       const content = target.closest<HTMLElement>("[data-worksplit-content]");
       if (content)
         internal.focus(

@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { chromium, expect } from "@playwright/test";
 
 const repository = resolve(import.meta.dirname, "..");
-const acceptance = resolve(repository, "refactor/acceptance");
+const acceptance = resolve(repository, "refactor/acceptance/financial-first-consumer");
 
 /** Drive the built app installed from Worksplit tarballs, using the real public consumer fixture. */
 export async function checkPackageBrowser(consumerDirectory) {
@@ -24,6 +24,7 @@ export async function checkPackageBrowser(consumerDirectory) {
       distribution: "Packed public JS, declarations and CSS; Vite production build and preview",
       browser: "Headless Chromium installed by this repository's Playwright",
       desktop: { width: 1440, height: 900 },
+      compact: { width: 1366, height: 768 },
       narrow: { width: 390, height: 844 },
       keyboard:
         "Control modifier in Linux Chromium; application-owned native Store and HotkeysProvider",
@@ -51,6 +52,9 @@ export async function checkPackageBrowser(consumerDirectory) {
       if (message.type() === "error") report.consoleErrors.push(message.text());
     });
     await checkConsumer(page, url, report);
+    await checkDocumentOperations(page, url, report);
+    await checkBoundedWorkspace(page, url, report, report.conditions.desktop, "desktop");
+    await checkBoundedWorkspace(page, url, report, report.conditions.compact, "compact");
     assert.equal(preview.exit, null, "The packed consumer preview exited during acceptance");
     assert.deepEqual(report.pageErrors, [], "The packed consumer raised an unhandled page error");
     assert.deepEqual(report.consoleErrors, [], "The packed consumer logged a console error");
@@ -324,6 +328,253 @@ async function checkConsumer(page, url, report) {
     "Public instance disposal releases the fixture's remaining Routers and subscriptions",
   );
   report.screenshots = ["packed-consumer-desktop.png", "packed-consumer-narrow.png"];
+}
+
+async function checkDocumentOperations(page, url, report) {
+  await page.setViewportSize(report.conditions.desktop);
+  await page.goto(`${url}/documents/A?view=edit`);
+  await expect(page.getByLabel("Draft A", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Draft B", { exact: true })).toBeVisible();
+  await page.getByText("Document and layout actions", { exact: true }).click();
+  const a = await documentNamed(page, "A");
+  const b = await documentNamed(page, "B");
+  await page.locator(`#flexlayout-tabbutton-${a.id}`).click();
+  await page.getByRole("link", { name: "Preview with native Link", exact: true }).first().click();
+  await expect(page).toHaveURL(/\/documents\/A\?view=preview$/);
+  await page.getByLabel("Draft A", { exact: true }).fill("Unsaved filters must survive reveal");
+  const beforeReveal = await sample(page);
+  await page.getByRole("button", { name: "Reveal A preserving filters", exact: true }).click();
+  await expect(page.getByLabel("Operation status", { exact: true })).toContainText(
+    '"status":"committed"',
+  );
+  await expect(page).toHaveURL(/\/documents\/A\?view=preview$/);
+  await expect(page.getByLabel("Draft A", { exact: true })).toHaveValue(
+    "Unsaved filters must survive reveal",
+  );
+  assert.equal((await sample(page)).metrics.loads, beforeReveal.metrics.loads);
+  assert.equal((await sample(page)).metrics.lastLeave, beforeReveal.metrics.lastLeave);
+  await expect(page.getByLabel("Draft A", { exact: true })).toBeFocused();
+  dismissNext(page, report);
+  await page.getByRole("button", { name: "Open A", exact: true }).click();
+  await expect(page.getByLabel("Operation status", { exact: true })).toContainText(
+    '"status":"rejected"',
+  );
+  const leave = JSON.parse((await sample(page)).metrics.lastLeave);
+  assert.deepEqual(leave, {
+    reason: "navigate",
+    id: a.id,
+    from: "/documents/A?view=preview",
+    to: "/documents/A?view=edit",
+  });
+  await page
+    .locator(`article.editor[data-document-id="${a.id}"]`)
+    .getByRole("button", { name: "Save document", exact: true })
+    .click();
+  await expect.poll(async () => (await sample(page)).metrics.lastSavedId).toBe(a.id);
+  report.checks.push(
+    "Preserving identity reuse retains dirty content, filters, focus and loaders; explicit navigation receives from/to decision context",
+  );
+
+  const aGroup = page
+    .locator(".flexlayout__tabset")
+    .filter({ has: page.locator(`#flexlayout-tabbutton-${a.id}`) });
+  await aGroup.getByRole("button", { name: "Maximize tabset", exact: true }).click();
+  await expect(page.getByLabel("Draft B", { exact: true })).toBeHidden();
+  await page.getByRole("button", { name: "Open B", exact: true }).click();
+  await expect(page.getByLabel("Draft B", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Draft B", { exact: true })).toBeFocused();
+  assert.equal((await sample(page)).editing.activeTabId, b.id);
+  // Explicit activation may transfer maximization or restore; both must reveal its target.
+  const restore = page.getByRole("button", { name: "Restore tabset", exact: true });
+  if (await restore.count()) await restore.click();
+  report.checks.push(
+    "Opening an existing document in another maximized group makes its content visible and restores its registered focus",
+  );
+
+  await page.getByRole("button", { name: "Preview C", exact: true }).click();
+  await expect(page.getByLabel("Draft C", { exact: true })).toBeFocused();
+  const c = await documentNamed(page, "C");
+  assert.equal(c.preview, true);
+  const beforeReplace = await sample(page);
+  await page.getByRole("button", { name: "Preview D", exact: true }).click();
+  await expect(page.getByLabel("Draft D", { exact: true })).toBeFocused();
+  const d = await documentNamed(page, "D");
+  assert.notEqual(d.id, c.id, "Preview replacement owns a fresh document and Router identity");
+  await expect(page.getByLabel("Draft C", { exact: true })).toHaveCount(0);
+  const replaced = await sample(page);
+  assert.equal(replaced.documents.length, beforeReplace.documents.length);
+  assert.equal(replaced.metrics.disposals, beforeReplace.metrics.disposals + 1);
+  assert.equal(replaced.documents.filter((document) => document.preview).length, 1);
+  await page.getByRole("button", { name: "Keep active document", exact: true }).click();
+  await expect.poll(async () => (await documentNamed(page, "D")).preview).toBe(false);
+  const nativeD = (await sample(page)).layout;
+  assert.ok(
+    !findNativeTab(nativeD, d.id).pinned,
+    "Keeping a preview does not native-pin it against closing",
+  );
+  await page.getByRole("button", { name: "Preview E", exact: true }).click();
+  await expect(page.getByLabel("Draft E", { exact: true })).toBeFocused();
+  const e = await documentNamed(page, "E");
+  await page.getByRole("button", { name: "Preview D", exact: true }).click();
+  await expect(page.getByLabel("Draft D", { exact: true })).toBeFocused();
+  assert.equal((await documentNamed(page, "E")).id, e.id);
+  assert.equal((await documentNamed(page, "E")).preview, true);
+  assert.equal((await documentNamed(page, "D")).id, d.id);
+  await page.locator(`#flexlayout-tabbutton-${e.id}`).click();
+  await page.getByLabel("Draft E", { exact: true }).fill("Dirty preview retained automatically");
+  await page.getByRole("button", { name: "Preview F", exact: true }).click();
+  await expect(page.getByLabel("Draft F", { exact: true })).toBeFocused();
+  const f = await documentNamed(page, "F");
+  assert.equal((await documentNamed(page, "E")).preview, false);
+  await expect(page.getByLabel("Draft E", { exact: true })).toHaveValue(
+    "Dirty preview retained automatically",
+  );
+  assert.equal(f.preview, true);
+  await page.getByRole("button", { name: "Duplicate active document", exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        (await sample(page)).documents.filter((document) => document.href.includes("/documents/F?"))
+          .length,
+    )
+    .toBe(2);
+  const copies = (await sample(page)).documents.filter((document) =>
+    document.href.includes("/documents/F?"),
+  );
+  assert.equal(copies.find((document) => document.id !== f.id).preview, false);
+  assert.equal(copies.find((document) => document.id === f.id).preview, true);
+  report.checks.push(
+    "Clean preview replacement disposes once with fresh identity; keep stays closeable; existing targets preserve another preview; dirty preview auto-keeps; copies are ordinary documents",
+  );
+  await expect(page.getByLabel("Issues", { exact: true })).toHaveText("No issues");
+  report.documentOperations = {
+    documents: (await sample(page)).documents,
+    metrics: (await sample(page)).metrics,
+  };
+}
+
+async function checkBoundedWorkspace(page, url, report, viewport, label) {
+  await page.setViewportSize(viewport);
+  await page.goto(`${url}/documents/A?view=edit#bounded`);
+  await expect.poll(async () => (await sample(page)).documents.length).toBe(2);
+  await expect(page.getByLabel("Draft A", { exact: true })).toBeVisible();
+  await page.getByText("Document and layout actions", { exact: true }).click();
+  const a = await documentNamed(page, "A");
+  const b = await documentNamed(page, "B");
+  assert.equal(nativeTabsets((await sample(page)).layout).length, 1);
+  await page.locator(`#flexlayout-tabbutton-${b.id}`).click();
+  await page.getByRole("button", { name: "Split active right", exact: true }).click();
+  await expect.poll(async () => nativeTabsets((await sample(page)).layout).length).toBe(2);
+  await expect(page.getByLabel("Draft A", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Draft B", { exact: true })).toBeVisible();
+  await page.locator(`#flexlayout-tabbutton-${a.id}`).click();
+  await page.getByRole("button", { name: "Preview C", exact: true }).click();
+  await expect(page.getByLabel("Draft C", { exact: true })).toBeVisible();
+  const c = await documentNamed(page, "C");
+  await page.getByRole("button", { name: "Keep active document", exact: true }).click();
+  // A real mouse gesture splits the left pane; programmatic model calls are not drag acceptance.
+  const leftContent = page.locator(`.worksplit-content[data-worksplit-content="${c.id}"]`);
+  await mouseDropContent(
+    page,
+    page.locator(`#flexlayout-tabbutton-${c.id}`),
+    leftContent,
+    "bottom",
+  );
+  await expect.poll(async () => nativeTabsets((await sample(page)).layout).length).toBe(3);
+  await expect(page.getByLabel("Draft A", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Draft C", { exact: true })).toBeVisible();
+  await page.locator(`#flexlayout-tabbutton-${b.id}`).click();
+  await page.getByRole("button", { name: "Preview D", exact: true }).click();
+  await expect(page.getByLabel("Draft D", { exact: true })).toBeVisible();
+  const d = await documentNamed(page, "D");
+  await page.getByRole("button", { name: "Keep active document", exact: true }).click();
+  await page.getByRole("button", { name: "Split active bottom", exact: true }).click();
+  await expect.poll(async () => nativeTabsets((await sample(page)).layout).length).toBe(4);
+  await expect(page.getByLabel("Draft B", { exact: true })).toBeVisible();
+  const boxes = await Promise.all(
+    [a, b, c, d].map((document) =>
+      page.locator(`.worksplit-content[data-worksplit-content="${document.id}"]`).boundingBox(),
+    ),
+  );
+  assert.ok(boxes.every((box) => box && box.width > 200 && box.height > 80));
+  assert.ok(boxes[0].x < boxes[1].x && boxes[2].x < boxes[3].x);
+  assert.ok(boxes[0].y < boxes[2].y && boxes[1].y < boxes[3].y);
+  // Keep an extra tab in its source: releasing an empty source could make this move legal.
+  await page.getByRole("button", { name: "Preview E", exact: true }).click();
+  await expect(page.getByLabel("Draft E", { exact: true })).toBeVisible();
+  const e = await documentNamed(page, "E");
+  const beforeRejected = await sample(page);
+  await page.getByRole("button", { name: "Split active right", exact: true }).click();
+  await expect(page.getByLabel("Operation status", { exact: true })).toHaveText(
+    '{"status":"rejected"}',
+  );
+  assert.deepEqual((await sample(page)).layout, beforeRejected.layout);
+  await mouseDropContent(
+    page,
+    page.locator(`#flexlayout-tabbutton-${e.id}`),
+    page.locator(`.worksplit-content[data-worksplit-content="${a.id}"]`),
+    "right",
+  );
+  await settle(page);
+  assert.deepEqual(
+    (await sample(page)).layout,
+    beforeRejected.layout,
+    "The actual fifth-group/third-column drag must be rejected before changing native JSON",
+  );
+  await page.screenshot({ path: resolve(acceptance, `packed-consumer-bounded-${label}.png`) });
+  await mouseDropContent(
+    page,
+    page.locator(`#flexlayout-tabbutton-${e.id}`),
+    page.locator(`.worksplit-content[data-worksplit-content="${a.id}"]`),
+    "center",
+  );
+  await expect
+    .poll(async () => await currentContainer(page, e.id))
+    .toBe(await currentContainer(page, a.id));
+  assert.equal(nativeTabsets((await sample(page)).layout).length, 4);
+  report.checks.push(
+    `${viewport.width}×${viewport.height}: application menu makes two columns; real drag plus menu makes 2×2; program and real over-limit drag reject; center drag still moves tabs`,
+  );
+  report.screenshots.push(`packed-consumer-bounded-${label}.png`);
+  (report.bounded ??= {})[label] = { viewport, boxes, snapshot: (await sample(page)).snapshot };
+  await expect(page.getByLabel("Issues", { exact: true })).toHaveText("No issues");
+}
+
+async function documentNamed(page, name) {
+  const document = (await sample(page)).documents.find((candidate) =>
+    candidate.href.startsWith(`/documents/${name}?`),
+  );
+  assert.ok(document, "Missing document " + name);
+  return document;
+}
+
+function collectTabsets(node) {
+  return node.type === "tabset" ? [node] : (node.children ?? []).flatMap(collectTabsets);
+}
+
+function nativeTabsets(layout) {
+  return collectTabsets(layout.layout);
+}
+
+function findNativeTab(layout, id) {
+  const visit = (node) => (node.id === id ? node : (node.children ?? []).map(visit).find(Boolean));
+  return visit(layout.layout);
+}
+
+async function mouseDropContent(page, source, target, side) {
+  const from = await source.boundingBox();
+  const to = await target.boundingBox();
+  assert.ok(from && to, "Both drag endpoints must be real visible rectangles");
+  const x = side === "right" ? to.x + to.width - 10 : to.x + to.width / 2;
+  const y = side === "bottom" ? to.y + to.height - 10 : to.y + to.height / 2;
+  await page.mouse.move(from.x + Math.min(from.width / 2, 60), from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(from.x + Math.min(from.width / 2, 60) + 20, from.y + from.height / 2, {
+    steps: 5,
+  });
+  await page.mouse.move(x, y, { steps: 15 });
+  await settle(page);
+  await page.mouse.up();
 }
 
 async function checkKeyboardPreferences(page, a, b, report) {

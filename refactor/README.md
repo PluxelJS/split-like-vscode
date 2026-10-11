@@ -17,9 +17,9 @@
 
 | 事实或资源                                               | 所有者                                   | Worksplit 的职责                                                |
 | -------------------------------------------------------- | ---------------------------------------- | --------------------------------------------------------------- |
-| 布局树、TabSet/TabGroup、Border、尺寸、pin、选择与最大化 | FlexLayout Model                         | 持有唯一 Model，接线 Layout；不镜像布局、不复制算法             |
+| 布局树、TabSet/TabGroup、Border、尺寸、pin、选择与最大化 | FlexLayout Model                         | 持有唯一 Model，接线 Layout；不镜像布局、不复制移动算法         |
 | 路由定义、匹配、location、loader、blocker 和错误页       | 应用的 TanStack route tree / 文档 Router | 每个文档借用同一份定义和独立 memory history；不维护第二套路由表 |
-| Tab 会话、Router 寿命、文档身份、MRU 与操作资格          | Worksplit 实例                           | 接纳、激活、关闭、释放；阻止失效操作再次发布                    |
+| Tab 会话、Router 寿命、文档身份、预览、MRU 与操作资格    | Worksplit 实例                           | 接纳、激活、关闭、释放；阻止失效操作再次发布                    |
 | DOM 与窗口焦点                                           | 浏览器                                   | 观察实际焦点，协调文档目标，不把选中标签当作输入焦点            |
 | 浏览器地址与历史                                         | 浏览器，工作台范围内由 Worksplit 协调    | 发布已接受的文档地址，消费和恢复所属历史项                      |
 | dirty、编辑修订、保存回执、草稿、共享服务和缓存          | 应用                                     | 读取已登记的事实和决策；不猜测已保存，不建立版本管理框架        |
@@ -61,7 +61,7 @@ FlexLayout 0.11.1 整 TabSet 删除 TabGroup 的兼容处理仅转换为获准�
 会话有效性和操作资格控制晚到结果；底层工作可能继续，不能称为已取消。
 焦点变化撤销抢占前台的资格；导航竞争与关闭按操作资格判定旧结果能否提交。
 
-原生标签选择与键盘操作拥有 DOM 焦点；显式 open/activate 才恢复已登记的内容焦点。
+原生标签选择与键盘操作拥有 DOM 焦点；显式 open/activate 才恢复内容焦点；首次挂载延迟登记时保留可撤销请求。跨组激活同步迁移原生最大化，保证目标可见。
 工具、菜单、弹窗与 shell 焦点保留最近活动文档。导航归属是只读投影，不反向触发导航，也不抢工具和树内焦点。
 浏览器只有一个 URL；工作台范围内由一个 history 协调器写入，外层应用不能同时提交同一目标。
 外层 Router 接入和范围外历史处理仍由实际宿主负责，当前证据不覆盖跨应用路由集成。
@@ -96,6 +96,7 @@ Worksplit 没有手机模式、自动最大化策略或桌面布局覆盖层。�
 | [integration.ts](../packages/react/src/integration.ts)                                    | 唯一协调实例；文档接纳、身份、操作资格、受控 Actions、关闭与资源释放                   |
 | [workbench.tsx](../packages/react/src/workbench.tsx)                                      | 原生 Layout / RouterProvider 接线、内容 context、只读 Store hook、焦点观察与便利快捷键 |
 | [native-layout.ts](../packages/react/src/native-layout.ts)                                | 原生节点和 Actions 遍历；不实现布局算法                                                |
+| [layout-policy.ts](../packages/react/src/layout-policy.ts)                                | 可配置中央拓扑限制；原生临时候选统一校验拖拽与 Action，不触发内容保存                  |
 | [document-history.ts](../packages/react/src/document-history.ts)                          | 观察公开 memory-history blocker 决策，结算 Worksplit 导航回执                          |
 | [browser-history.ts](../packages/react/src/browser-history.ts)                            | 所属浏览器历史项的提交、遍历与拒绝恢复                                                 |
 | [core](../packages/core/src/index.ts) / [SplitView](../packages/react/src/split-view.tsx) | 独立 pane 尺寸与分隔条，未成为 Workbench 的第二个 docking 引擎                         |
@@ -105,7 +106,7 @@ Worksplit 没有手机模式、自动最大化策略或桌面布局覆盖层。�
 
 ## 后续修改与应用迁移
 
-修改前核对 exports、上游锁定版本、实现、调用方和相应测试；正常原生操作不能因包装新增另一套语义。
+修改前核对 exports、上游锁定版本、实现、调用方和相应测试；正常原生操作不能因包装新增另一套语义。可选 layoutPolicy 在短寿命原生候选上执行 Action 验证结构上限，不保留第二个 Model，也不自写 tidy。
 受保护身份、dirty 与资源移除路径必须在 UI、程序 Actions 和恢复入口保持同一约束。
 遇到上游缺口，先以源码和最小复现确定范围，再同步行为、用法和回归；不为维持原推荐而复制流水线。
 

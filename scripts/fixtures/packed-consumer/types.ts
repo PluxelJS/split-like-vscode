@@ -41,6 +41,8 @@ export async function routeAndReceiptTypes() {
     workbench: fakeInstance,
   };
   void fakeProps;
+  const previewOptions: OpenDocumentOptions = { preview: true, reuse: "preserve" };
+  void previewOptions;
   const options: OpenDocumentOptions = { newInstance: true, background: true };
   const navigation: NavigationResult = await workbench.open(
     { to: "/documents/$id", params: { id: "Typed" }, search: { view: "edit" } },
@@ -56,6 +58,9 @@ export async function routeAndReceiptTypes() {
   await workbench.open({ to: "/undeclared" });
   if (navigation.status === "committed") {
     const document: WorkbenchDocument = navigation.document;
+    const preview: boolean = document.preview;
+    void preview;
+    workbench.keep(document.id);
     const closed: CloseResult = await workbench.close(document.id);
     if (closed.status === "closed") {
       const cleanupErrors: readonly unknown[] = closed.cleanupErrors;
