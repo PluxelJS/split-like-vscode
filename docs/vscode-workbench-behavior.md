@@ -57,7 +57,8 @@ replace to disguise a damaged stack. Program focus restoration never starts a hi
 
 Open uses real Router loading before final identity admission. Redirect conflicts reuse the
 accepted target, leave the source alive, and respect the target's dirty decision when its view
-state differs. The nearest route with Worksplit metadata determines identity. Native nested
+state differs. The nearest route with Worksplit metadata determines identity; when none declares
+metadata, the last matched route owns identity. Native nested
 routes continue to match/render through Router, not a second route table.
 
 Native Link/navigate is scoped to its document Router. It can commit a duplicate identity;
@@ -130,7 +131,7 @@ mutation. The installed Model only invokes its drop hook for previews; it has no
 veto inside a native batch. Worksplit neither simulates a second layout nor guesses whether later
 steps will still satisfy a state-dependent policy. Submit those operations individually.
 
-Every document removal uses the close coordinator, including native whole-Tabset closing and
+Interactive content removal uses the close coordinator, including native whole-Tabset closing and
 pure deletion batches. All affected decisions finish before removal. Identical pending requests
 share a decision; overlapping requests are rejected with `closing`. Approval is invalidated when
 route content, lifecycle, affected membership, application close revision or closeability changes.
@@ -164,6 +165,19 @@ registered lifecycle or committed route changes invalidate older approval. Close
 cleanup errors after removal. Ending a registration disposes its resources once; close/dispose
 wait for relevant in-flight cleanup. A node is never recreated to pretend failed cleanup did not
 happen. Shared application services outlive individual document Routers.
+
+`dispose` is the host's explicit shutdown operation. It closes admission without running dirty
+decisions or saves, settles registered cleanup and returns collected errors; repeated calls share
+its completion. Router cleanup attempts abort, cache release and history destruction even when
+one stage fails, and failures do not prevent the remaining content from being released.
+Browser refresh/page close and the host's decision to leave are application-owned; Worksplit
+does not install a beforeunload approval policy. Resource ownership transfers only after a
+successful lifecycle registration; a rejected registration leaves cleanup with the caller.
+
+Command targets are captured before awaiting execution. A `document` command uses the active
+document. A `focused` command uses the supplied content id or last focused content;
+the content hook supplies its originating id even through portals. Changing focus afterwards
+does not retarget an accepted command. Application callbacks still own their async work and saves.
 
 Docking targets desktop workspaces. FlexLayout owns container resize, weights, overflow and native
 maximize. Worksplit does not introduce a viewport breakpoint, document selector or automatic

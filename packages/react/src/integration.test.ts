@@ -6,19 +6,43 @@ import {
   type AnyRouter,
   type RouterHistory,
 } from "@tanstack/react-router";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { Actions, DockLocation, Model } from "flexlayout-react";
+import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createWorkbench, type WorkbenchOptions } from "./index";
+import {
+  createWorkbench,
+  useWorkbenchContentLifecycle,
+  Workbench,
+  type WorkbenchContentLifecycle,
+  type WorkbenchOptions,
+} from "./index";
 import { integrationState } from "./integration";
 
 const disposals: (() => Promise<unknown>)[] = [];
+const pendingGates: (() => void)[] = [];
 const centralDocuments: NonNullable<WorkbenchOptions<AnyRouter>["allowDrop"]> = (tabs, target) =>
   tabs.every((tab) => tab.getComponent() !== "worksplit.document" || target.getType() !== "border");
 afterEach(async () => {
+  pendingGates.splice(0).forEach((finish) => finish());
   await Promise.all(disposals.splice(0).map((dispose) => dispose()));
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
-function setup(options: Pick<WorkbenchOptions<AnyRouter>, "layout" | "allowDrop"> = {}) {
+function deferred<T>(fallback: T) {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((finish) => {
+    resolve = finish;
+  });
+  pendingGates.push(() => resolve(fallback));
+  return { promise, resolve };
+}
+function setup(
+  options: Pick<WorkbenchOptions<AnyRouter>, "layout" | "allowDrop"> = {},
+  load: (id: string) => string | Promise<string> = (id) => id,
+) {
   const root = createRootRoute();
   const page = createRoute({
     getParentRoute: () => root,
@@ -26,7 +50,7 @@ function setup(options: Pick<WorkbenchOptions<AnyRouter>, "layout" | "allowDrop"
     validateSearch: (search: Record<string, unknown>) => ({
       view: typeof search.view === "string" ? search.view : "edit",
     }),
-    loader: ({ params }) => params.id,
+    loader: ({ params }) => load(params.id),
     staticData: { worksplit: { title: "Document", navigationKey: "documents" } },
   });
   const alias = createRoute({
@@ -270,24 +294,276 @@ describe("real Router session coordination", () => {
     const a = await open("A");
     if (a.status !== "committed") throw new Error("Fixture open failed");
     let finish!: () => void;
-    const cleanup = vi.fn<() => Promise<void>>(
+    const disposeResource = vi.fn<() => Promise<void>>(
       () =>
         new Promise<void>((resolve) => {
           finish = resolve;
         }),
     );
-    const unregister = integrationState(workbench).register(a.document.id, { dispose: cleanup });
+    const unregister = integrationState(workbench).register(a.document.id, {
+      dispose: disposeResource,
+    });
     unregister();
     unregister();
     const closing = workbench.close(a.document.id);
     await Promise.resolve();
-    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(disposeResource).toHaveBeenCalledTimes(1);
     finish();
     expect(await closing).toEqual({ status: "closed", id: a.document.id, cleanupErrors: [] });
     const disposed = workbench.dispose();
     expect(workbench.dispose()).toBe(disposed);
     expect(await disposed).toEqual([]);
-    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(disposeResource).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("owned Router teardown failures", () => {
+  it("caches shutdown before reentrant cleanup, collects a resolver failure and settles registered async resources", async () => {
+    const { makeRouter } = setup();
+    const routers: ReturnType<typeof makeRouter>[] = [];
+    const resolverError = new Error("Resolver history teardown failed");
+    const factory = (history: RouterHistory) => {
+      const router = makeRouter(history);
+      const destroy = vi.spyOn(router.history, "destroy");
+      if (routers.length === 0)
+        destroy.mockImplementationOnce(() => {
+          throw resolverError;
+        });
+      routers.push(router);
+      return router;
+    };
+    const resource = deferred<void>(undefined);
+    let reentered: Promise<readonly unknown[]> | undefined;
+    const disposeResource = vi.fn<() => Promise<void>>(() => {
+      reentered = workbench.dispose();
+      return resource.promise;
+    });
+    const isDirty = vi.fn<NonNullable<WorkbenchContentLifecycle["isDirty"]>>(() => true);
+    const beforeLeave = vi.fn<NonNullable<WorkbenchContentLifecycle["beforeLeave"]>>(() => false);
+    const save = vi.fn<NonNullable<WorkbenchContentLifecycle["save"]>>();
+    const lifecycle = { isDirty, beforeLeave, save, dispose: disposeResource };
+    function ResourceTool() {
+      useWorkbenchContentLifecycle(lifecycle);
+      return createElement("span", null, "Registered async resource");
+    }
+    const workbench = createWorkbench({
+      createRouter: factory,
+      tools: [{ id: "resource", render: () => createElement(ResourceTool) }],
+      layout: {
+        borders: [
+          {
+            location: "bottom",
+            selected: 0,
+            children: [{ id: "resource", component: "worksplit.tool" }],
+          },
+        ],
+        layout: {},
+      },
+    });
+    disposals.push(() => workbench.dispose());
+    const opened = await workbench.open({
+      to: "/documents/$id",
+      params: { id: "A" },
+      search: { view: "edit" },
+    });
+    expect(opened.status).toBe("committed");
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => new DOMRect(0, 0, 800, 600),
+    );
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+    vi.stubGlobal("scrollTo", vi.fn<typeof window.scrollTo>());
+    vi.stubGlobal(
+      "ResizeObserver",
+      class implements ResizeObserver {
+        observe = vi.fn<(target: Element) => void>();
+        unobserve = vi.fn<(target: Element) => void>();
+        disconnect = vi.fn<() => void>();
+      },
+    );
+    render(createElement(Workbench, { workbench }));
+    await waitFor(() => expect(screen.queryByText("Registered async resource")).not.toBeNull());
+    let shutdown: Promise<readonly unknown[]> | undefined;
+    expect(() => {
+      shutdown = workbench.dispose();
+    }).not.toThrow();
+    expect(workbench.dispose()).toBe(shutdown);
+    expect(
+      await workbench.open({ to: "/documents/$id", params: { id: "B" }, search: { view: "edit" } }),
+    ).toEqual({ status: "rejected", reason: "closed" });
+    await waitFor(() => expect(disposeResource).toHaveBeenCalledTimes(1));
+    expect(reentered).toBe(shutdown);
+    expect(routers.map((router) => vi.mocked(router.history.destroy).mock.calls.length)).toEqual([
+      1, 1,
+    ]);
+    let settled = false;
+    void shutdown!.then(() => {
+      settled = true;
+      return undefined;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    resource.resolve(undefined);
+    expect(await shutdown).toEqual([resolverError]);
+    expect(workbench.getDocuments()).toHaveLength(0);
+    expect(workbench.dispose()).toBe(shutdown);
+    expect(disposeResource).toHaveBeenCalledTimes(1);
+    expect(isDirty).not.toHaveBeenCalled();
+    expect(beforeLeave).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+    expect(routers.map((router) => vi.mocked(router.history.destroy).mock.calls.length)).toEqual([
+      1, 1,
+    ]);
+  });
+
+  it("continues pending, resolver and document cleanup when a provisional Router fails to clear and destroy", async () => {
+    const pending = deferred("pending");
+    const { makeRouter } = setup({}, (id) => (id === "pending" ? pending.promise : id));
+    const routers: ReturnType<typeof makeRouter>[] = [];
+    const clearError = new Error("Pending Router cache teardown failed");
+    const destroyError = new Error("Pending Router history teardown failed");
+    const factory = (history: RouterHistory) => {
+      const router = makeRouter(history);
+      const clear = vi.spyOn(router, "clearCache");
+      const destroy = vi.spyOn(router.history, "destroy");
+      if (routers.length === 2) {
+        clear.mockImplementationOnce(() => {
+          throw clearError;
+        });
+        destroy.mockImplementationOnce(() => {
+          throw destroyError;
+        });
+      }
+      routers.push(router);
+      return router;
+    };
+    const workbench = createWorkbench({ createRouter: factory });
+    disposals.push(() => workbench.dispose());
+    expect(
+      (
+        await workbench.open({
+          to: "/documents/$id",
+          params: { id: "A" },
+          search: { view: "edit" },
+        })
+      ).status,
+    ).toBe("committed");
+    const opening = workbench.open({
+      to: "/documents/$id",
+      params: { id: "pending" },
+      search: { view: "edit" },
+    });
+    await vi.waitFor(() => expect(routers[2]?.state.isLoading).toBe(true));
+    const shutdown = workbench.dispose();
+    expect(workbench.dispose()).toBe(shutdown);
+    expect(await shutdown).toEqual([clearError, destroyError]);
+    expect(workbench.getDocuments()).toHaveLength(0);
+    expect(routers.map((router) => vi.mocked(router.history.destroy).mock.calls.length)).toEqual([
+      1, 1, 1,
+    ]);
+    pending.resolve("late");
+    expect(await opening).toEqual({ status: "superseded" });
+    expect(routers.map((router) => vi.mocked(router.history.destroy).mock.calls.length)).toEqual([
+      1, 1, 1,
+    ]);
+  });
+
+  it("reports provisional Router teardown failures without replacing a committed navigation receipt", async () => {
+    const { makeRouter } = setup();
+    const routers: ReturnType<typeof makeRouter>[] = [];
+    const clearError = new Error("Probe cache teardown failed");
+    const destroyError = new Error("Probe history teardown failed");
+    const issues = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["onIssue"]>>();
+    const factory = (history: RouterHistory) => {
+      const router = makeRouter(history);
+      const clear = vi.spyOn(router, "clearCache");
+      const destroy = vi.spyOn(router.history, "destroy");
+      if (routers.length === 2) {
+        clear.mockImplementationOnce(() => {
+          throw clearError;
+        });
+        destroy.mockImplementationOnce(() => {
+          throw destroyError;
+        });
+      }
+      routers.push(router);
+      return router;
+    };
+    const workbench = createWorkbench({ createRouter: factory, onIssue: issues });
+    disposals.push(() => workbench.dispose());
+    const a = await workbench.open({
+      to: "/documents/$id",
+      params: { id: "A" },
+      search: { view: "edit" },
+    });
+    if (a.status !== "committed") throw new Error("Fixture admission failed");
+    const result = await workbench.open({
+      to: "/documents/$id",
+      params: { id: "A" },
+      search: { view: "preview" },
+    });
+    expect(result).toMatchObject({
+      status: "committed",
+      reused: true,
+      document: { id: a.document.id },
+    });
+    expect(workbench.getDocument(a.document.id)?.href).toContain("view=preview");
+    expect(issues.mock.calls).toEqual([
+      [{ code: "operation-failed", error: clearError }],
+      [{ code: "operation-failed", error: destroyError }],
+    ]);
+    expect(vi.mocked(routers[2]!.history.destroy)).toHaveBeenCalledTimes(1);
+    expect(await workbench.dispose()).toEqual([]);
+    expect(vi.mocked(routers[2]!.history.destroy)).toHaveBeenCalledTimes(1);
+  });
+
+  it("collects document abort and cache errors and still destroys history through guarded close", async () => {
+    const { makeRouter } = setup();
+    const routers: ReturnType<typeof makeRouter>[] = [];
+    const clearError = new Error("Document cache teardown failed");
+    const abortError = new Error("Document abort failed");
+    const issues = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["onIssue"]>>();
+    const factory = (history: RouterHistory) => {
+      const router = makeRouter(history);
+      vi.spyOn(router.history, "destroy");
+      if (routers.length === 1)
+        vi.spyOn(router, "clearCache").mockImplementationOnce(() => {
+          throw clearError;
+        });
+      routers.push(router);
+      return router;
+    };
+    const workbench = createWorkbench({ createRouter: factory, onIssue: issues });
+    disposals.push(() => workbench.dispose());
+    const a = await workbench.open({
+      to: "/documents/$id",
+      params: { id: "A" },
+      search: { view: "edit" },
+    });
+    if (a.status !== "committed") throw new Error("Fixture admission failed");
+    const match = routers[1]!.state.matches[0];
+    if (!match) throw new Error("Missing actual Router match");
+    vi.spyOn(match.abortController, "abort").mockImplementationOnce(() => {
+      throw abortError;
+    });
+    expect(await workbench.close(a.document.id)).toEqual({
+      status: "closed",
+      id: a.document.id,
+      cleanupErrors: [abortError, clearError],
+    });
+    expect(issues).toHaveBeenCalledWith({
+      code: "operation-failed",
+      error: abortError,
+      id: a.document.id,
+    });
+    expect(issues).toHaveBeenCalledWith({
+      code: "operation-failed",
+      error: clearError,
+      id: a.document.id,
+    });
+    expect(vi.mocked(routers[1]!.history.destroy)).toHaveBeenCalledTimes(1);
+    expect(await workbench.dispose()).toEqual([]);
+    expect(vi.mocked(routers[1]!.history.destroy)).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -5,6 +5,7 @@ import {
   type SplitLayout,
 } from "@worksplit/core";
 import {
+  useWorkbenchState,
   type NavigationResult,
   type CloseResult,
   type WorkbenchSnapshot,
@@ -12,12 +13,34 @@ import {
   type WorkbenchTool,
   type WorkbenchDocument,
   type WorkbenchEditingContext,
+  type WorkbenchProps,
 } from "@worksplit/react";
 import { Model, type IJsonModel } from "flexlayout-react";
 
 import { workbench } from "./app.js";
 
 export async function routeAndReceiptTypes() {
+  const fakeInstance = {
+    activate() {},
+    getDocument() {
+      return null;
+    },
+    executeCommand: async () => {},
+    getEditingContext() {
+      return {
+        activeGroupId: null,
+        activeTabId: null,
+        focusedArea: null,
+        focusedTabId: null,
+        windowFocused: true,
+      };
+    },
+  };
+  const fakeProps: WorkbenchProps = {
+    // @ts-expect-error Rendering requires a real Worksplit instance, not an API-shaped object.
+    workbench: fakeInstance,
+  };
+  void fakeProps;
   const options: OpenDocumentOptions = { newInstance: true, background: true };
   const navigation: NavigationResult = await workbench.open(
     { to: "/documents/$id", params: { id: "Typed" }, search: { view: "edit" } },
@@ -56,4 +79,20 @@ export async function routeAndReceiptTypes() {
   const panes: PaneConstraints[] = [{ id: "left" }, { id: "right" }];
   const sized: SplitLayout = resizeAtSash(createSplitLayout({ panes, containerSize: 600 }), 0, 20);
   return { model: Model.fromJson(nativeJson), context, renderer, sized };
+}
+
+export function useReadonlyWorkbenchProjection() {
+  return useWorkbenchState(workbench, (state) => {
+    // @ts-expect-error The selector cannot replace the document owner.
+    state.activeDocumentId = null;
+    // @ts-expect-error Layout/catalogue invalidation is owned by Worksplit.
+    state.revision += 1;
+    // @ts-expect-error Focus state is observed by Worksplit.
+    state.focusedTabId = null;
+    // @ts-expect-error Focus state is observed by Worksplit.
+    state.focusedArea = null;
+    // @ts-expect-error Window focus state is observed by Worksplit.
+    state.windowFocused = false;
+    return state.activeDocumentId;
+  });
 }

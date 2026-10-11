@@ -1,8 +1,8 @@
 {
-  "startedAt": "2026-10-11T08:10:18.821Z",
+  "startedAt": "2026-10-11T08:57:19.668Z",
   "status": "passed",
-  "consumerDirectory": "/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-axpoMG",
-  "url": "http://127.0.0.1:42785",
+  "consumerDirectory": "/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-qTN9Se",
+  "url": "http://127.0.0.1:33787",
   "conditions": {
     "distribution": "Packed public JS, declarations and CSS; Vite production build and preview",
     "browser": "Headless Chromium installed by this repository's Playwright",
@@ -65,13 +65,13 @@
   "initial": {
     "documents": [
       {
-        "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-1",
+        "id": "document-e4d09d9e11d39995604ebae4f2ca89ff-1",
         "href": "/documents/A?view=edit",
         "title": "Published document",
         "navigationKey": "documents"
       },
       {
-        "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-2",
+        "id": "document-e4d09d9e11d39995604ebae4f2ca89ff-2",
         "href": "/documents/B?view=edit",
         "title": "Published document",
         "navigationKey": "documents"
@@ -107,11 +107,11 @@
       "providerUnmounts": 0,
       "providers": 2,
       "pendingSaveId": "",
-      "lastSavedId": "document-118ddfb6cb8420e6f3ce56064cf9825e-2"
+      "lastSavedId": "document-e4d09d9e11d39995604ebae4f2ca89ff-2"
     },
     "whileSavePending": {
-      "activeDocumentId": "document-118ddfb6cb8420e6f3ce56064cf9825e-2",
-      "pendingSaveId": "document-118ddfb6cb8420e6f3ce56064cf9825e-1"
+      "activeDocumentId": "document-e4d09d9e11d39995604ebae4f2ca89ff-2",
+      "pendingSaveId": "document-e4d09d9e11d39995604ebae4f2ca89ff-1"
     },
     "after": {
       "loads": 2,
@@ -126,7 +126,7 @@
       "providerUnmounts": 0,
       "providers": 2,
       "pendingSaveId": "",
-      "lastSavedId": "document-118ddfb6cb8420e6f3ce56064cf9825e-2"
+      "lastSavedId": "document-e4d09d9e11d39995604ebae4f2ca89ff-2"
     },
     "events": {
       "first": {
@@ -173,7 +173,7 @@
       "providerUnmounts": 0,
       "providers": 2,
       "pendingSaveId": "",
-      "lastSavedId": "document-118ddfb6cb8420e6f3ce56064cf9825e-2"
+      "lastSavedId": "document-e4d09d9e11d39995604ebae4f2ca89ff-2"
     }
   },
   "nativeSnapshots": {
@@ -203,7 +203,7 @@
         ],
         "layout": {
           "type": "row",
-          "id": "#47271d5e-568a-4c2d-9dbc-1732a71e34e9",
+          "id": "#07b4f523-8448-4c17-8944-e2557853843b",
           "children": [
             {
               "type": "tabset",
@@ -213,7 +213,7 @@
               "children": [
                 {
                   "type": "tab",
-                  "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-1",
+                  "id": "document-e4d09d9e11d39995604ebae4f2ca89ff-1",
                   "name": "Published document",
                   "component": "worksplit.document",
                   "config": {
@@ -240,7 +240,7 @@
               "children": [
                 {
                   "type": "tab",
-                  "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-2",
+                  "id": "document-e4d09d9e11d39995604ebae4f2ca89ff-2",
                   "name": "Published document",
                   "component": "worksplit.document",
                   "config": {
@@ -283,7 +283,7 @@
         ],
         "layout": {
           "type": "row",
-          "id": "#47271d5e-568a-4c2d-9dbc-1732a71e34e9",
+          "id": "#07b4f523-8448-4c17-8944-e2557853843b",
           "children": [
             {
               "type": "tabset",
@@ -293,7 +293,7 @@
               "children": [
                 {
                   "type": "tab",
-                  "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-1",
+                  "id": "document-e4d09d9e11d39995604ebae4f2ca89ff-1",
                   "name": "Published document",
                   "component": "worksplit.document",
                   "config": {
@@ -321,7 +321,7 @@
               "children": [
                 {
                   "type": "tab",
-                  "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-2",
+                  "id": "document-e4d09d9e11d39995604ebae4f2ca89ff-2",
                   "name": "Published document",
                   "component": "worksplit.document",
                   "config": {
@@ -342,7 +342,7 @@
   "beforeDispose": {
     "documents": [
       {
-        "id": "document-118ddfb6cb8420e6f3ce56064cf9825e-2",
+        "id": "document-e4d09d9e11d39995604ebae4f2ca89ff-2",
         "href": "/documents/B?view=edit",
         "title": "Published document",
         "navigationKey": "documents"
@@ -361,7 +361,7 @@
       "providerUnmounts": 1,
       "providers": 1,
       "pendingSaveId": "",
-      "lastSavedId": "document-118ddfb6cb8420e6f3ce56064cf9825e-2"
+      "lastSavedId": "document-e4d09d9e11d39995604ebae4f2ca89ff-2"
     }
   },
   "disposed": {
@@ -379,17 +379,17 @@
       "providerUnmounts": 2,
       "providers": 0,
       "pendingSaveId": "",
-      "lastSavedId": "document-118ddfb6cb8420e6f3ce56064cf9825e-2"
+      "lastSavedId": "document-e4d09d9e11d39995604ebae4f2ca89ff-2"
     },
     "cleanup": []
   },
   "screenshots": ["packed-consumer-desktop.png", "packed-consumer-narrow.png"],
-  "completedAt": "2026-10-11T08:10:21.954Z",
+  "completedAt": "2026-10-11T08:57:22.829Z",
   "preview": {
     "exit": {
       "code": 143,
       "signal": null
     },
-    "log": "  ➜  Local:   http://127.0.0.1:42785/\n"
+    "log": "  ➜  Local:   http://127.0.0.1:33787/\n"
   }
 }

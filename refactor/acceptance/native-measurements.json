@@ -1,6 +1,6 @@
 {
   "environment": {
-    "measuredAt": "2026-10-11T07:05:30.129Z",
+    "measuredAt": "2026-10-11T08:59:07.253Z",
     "browser": "156.0.8078.4",
     "node": "v24.21.0",
     "platform": "linux x64",
@@ -34,7 +34,7 @@
         "disposed": 0,
         "historySubscriptions": 1
       },
-      "openMs": 132.29999999701977,
+      "openMs": 71.79999999701977,
       "openTargetLookupMs": 0,
       "opened": {
         "requests": 2,
@@ -52,10 +52,10 @@
         "createActionCount": 2,
         "joinActionCount": 0,
         "batchCount": 1,
-        "createReceiptMs": 13.199999988079071,
+        "createReceiptMs": 7.700000002980232,
         "joinReceiptMs": 0,
-        "groupLookupMs": 1,
-        "totalWithFramesMs": 33.3999999910593,
+        "groupLookupMs": 0.29999999701976776,
+        "totalWithFramesMs": 33.29999999701977,
         "createReceipt": {
           "status": "applied"
         },
@@ -76,8 +76,8 @@
         "cycles": 20,
         "batchCount": 40,
         "nodeAttributeActionCount": 80,
-        "receiptMs": 606.5999999791384,
-        "totalWithFramesMs": 1335.5,
+        "receiptMs": 413.00000001490116,
+        "totalWithFramesMs": 1366.6000000089407,
         "receipts": [
           {
             "status": "applied"
@@ -216,37 +216,37 @@
         "groupCount": 2,
         "batchCount": 4,
         "nodeMoveActionCount": 4,
-        "receiptMs": 82.49999998509884,
-        "targetLookupMs": 2.5,
-        "totalWithFramesMs": 147.3999999910593,
+        "receiptMs": 35.599999994039536,
+        "targetLookupMs": 0.5000000149011612,
+        "totalWithFramesMs": 133.5,
         "receipts": [
           {
-            "groupId": "#17acc6c8-94d0-4359-bc1f-032c2b15fa79",
-            "target": "#6fd52e0d-479c-4d05-96f7-6e3af9c2d872",
+            "groupId": "#077b857c-3008-4df2-b6de-959dd29bc83d",
+            "target": "#9bb162bb-d888-4fd7-9c90-9720e415acc4",
             "location": "CENTER",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#17acc6c8-94d0-4359-bc1f-032c2b15fa79",
-            "target": "#6fd52e0d-479c-4d05-96f7-6e3af9c2d872",
+            "groupId": "#077b857c-3008-4df2-b6de-959dd29bc83d",
+            "target": "#9bb162bb-d888-4fd7-9c90-9720e415acc4",
             "location": "LEFT",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#b06e02ba-37a3-4b14-b1f0-663fea0aaba0",
-            "target": "#3d48d25e-fe26-4e9a-b545-497fb973f090",
+            "groupId": "#033ddaaa-7633-4a27-a10f-311fa00a34d7",
+            "target": "#3536f87c-a097-4a5e-a149-116f7a526902",
             "location": "CENTER",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#b06e02ba-37a3-4b14-b1f0-663fea0aaba0",
-            "target": "#3d48d25e-fe26-4e9a-b545-497fb973f090",
+            "groupId": "#033ddaaa-7633-4a27-a10f-311fa00a34d7",
+            "target": "#3536f87c-a097-4a5e-a149-116f7a526902",
             "location": "RIGHT",
             "receipt": {
               "status": "applied"
@@ -267,7 +267,7 @@
       },
       "switching": {
         "count": 20,
-        "totalWithFramesMs": 666.7999999970198,
+        "totalWithFramesMs": 666.5,
         "after": {
           "requests": 2,
           "renders": 2,
@@ -283,9 +283,9 @@
       "closing": {
         "batchCount": 1,
         "tabsetDeleteActionCount": 2,
-        "targetLookupMs": 0.20000000298023224,
-        "closeReceiptMs": 17.200000002980232,
-        "closeWithFramesMs": 25.5,
+        "targetLookupMs": 0.29999999701976776,
+        "closeReceiptMs": 16.900000005960464,
+        "closeWithFramesMs": 28.200000002980232,
         "closed": {
           "requests": 2,
           "renders": 2,
@@ -300,13 +300,13 @@
         "remaining": 0,
         "receipt": {
           "status": "closed",
-          "id": "document-e4365bd02df6633378ec89876fd0f587-1",
+          "id": "document-0c410e47354d32017584d8c017d8a53f-1",
           "cleanupErrors": []
         }
       },
       "disposal": {
-        "disposeReceiptMs": 1.7000000029802322,
-        "disposeWithFramesMs": 28.799999997019768,
+        "disposeReceiptMs": 1,
+        "disposeWithFramesMs": 31.19999998807907,
         "cleanupErrors": [],
         "disposed": {
           "requests": 2,
@@ -321,10 +321,10 @@
         }
       },
       "httpRequests": 2,
-      "heapBeforeBytes": 11120264,
-      "heapAfterLayoutBytes": 17518564,
-      "heapAfterCloseBytes": 18540224,
-      "heapAfterDisposeBytes": 18647492
+      "heapBeforeBytes": 11104832,
+      "heapAfterLayoutBytes": 14657136,
+      "heapAfterCloseBytes": 15678804,
+      "heapAfterDisposeBytes": 15781856
     },
     {
       "count": 10,
@@ -339,8 +339,8 @@
         "disposed": 0,
         "historySubscriptions": 1
       },
-      "openMs": 600.2999999970198,
-      "openTargetLookupMs": 3.4000000059604645,
+      "openMs": 344.8999999910593,
+      "openTargetLookupMs": 1.6999999731779099,
       "opened": {
         "requests": 10,
         "renders": 10,
@@ -357,10 +357,10 @@
         "createActionCount": 2,
         "joinActionCount": 8,
         "batchCount": 2,
-        "createReceiptMs": 31.900000005960464,
-        "joinReceiptMs": 32,
-        "groupLookupMs": 0.5999999940395355,
-        "totalWithFramesMs": 82.70000000298023,
+        "createReceiptMs": 31,
+        "joinReceiptMs": 24.299999997019768,
+        "groupLookupMs": 0.5,
+        "totalWithFramesMs": 66.5,
         "createReceipt": {
           "status": "applied"
         },
@@ -383,8 +383,8 @@
         "cycles": 20,
         "batchCount": 40,
         "nodeAttributeActionCount": 80,
-        "receiptMs": 955.899999961257,
-        "totalWithFramesMs": 1633.1000000089407,
+        "receiptMs": 540.7999998927116,
+        "totalWithFramesMs": 1366.5,
         "receipts": [
           {
             "status": "applied"
@@ -523,37 +523,37 @@
         "groupCount": 2,
         "batchCount": 4,
         "nodeMoveActionCount": 4,
-        "receiptMs": 94,
-        "targetLookupMs": 1.199999988079071,
-        "totalWithFramesMs": 166.5,
+        "receiptMs": 60.80000002682209,
+        "targetLookupMs": 0.6999999731779099,
+        "totalWithFramesMs": 133.29999999701977,
         "receipts": [
           {
-            "groupId": "#933a08c0-d39b-4bb4-8ed7-e0a14d9d17c3",
-            "target": "#07b6ed21-3907-449e-93c3-186d63864f10",
+            "groupId": "#8c8fcb0b-a3da-4a69-bb8c-00e2bc938800",
+            "target": "#7d8ad903-4e52-4990-a5bf-0d0d713c7df0",
             "location": "CENTER",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#933a08c0-d39b-4bb4-8ed7-e0a14d9d17c3",
-            "target": "#07b6ed21-3907-449e-93c3-186d63864f10",
+            "groupId": "#8c8fcb0b-a3da-4a69-bb8c-00e2bc938800",
+            "target": "#7d8ad903-4e52-4990-a5bf-0d0d713c7df0",
             "location": "LEFT",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#bfd6a13d-9c76-4025-8792-f0063a24cbf9",
-            "target": "#a7be379c-65d8-458d-be33-f953b19e6c24",
+            "groupId": "#31f43d99-355f-435b-83cd-b88fd0a5f3ac",
+            "target": "#e4fdb293-7a57-489c-8124-a3027cb7a171",
             "location": "CENTER",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#bfd6a13d-9c76-4025-8792-f0063a24cbf9",
-            "target": "#a7be379c-65d8-458d-be33-f953b19e6c24",
+            "groupId": "#31f43d99-355f-435b-83cd-b88fd0a5f3ac",
+            "target": "#e4fdb293-7a57-489c-8124-a3027cb7a171",
             "location": "RIGHT",
             "receipt": {
               "status": "applied"
@@ -574,7 +574,7 @@
       },
       "switching": {
         "count": 20,
-        "totalWithFramesMs": 716.7000000029802,
+        "totalWithFramesMs": 666.7000000029802,
         "after": {
           "requests": 10,
           "renders": 10,
@@ -590,9 +590,9 @@
       "closing": {
         "batchCount": 1,
         "tabsetDeleteActionCount": 2,
-        "targetLookupMs": 0.3999999910593033,
-        "closeReceiptMs": 25.5,
-        "closeWithFramesMs": 30.299999997019768,
+        "targetLookupMs": 0.09999999403953552,
+        "closeReceiptMs": 12,
+        "closeWithFramesMs": 29.19999998807907,
         "closed": {
           "requests": 10,
           "renders": 10,
@@ -607,13 +607,13 @@
         "remaining": 0,
         "receipt": {
           "status": "closed",
-          "id": "document-7a795b22022ae2c3faab6ee5852fc20b-1",
+          "id": "document-f45aa22159644829d30a9ba3177db158-1",
           "cleanupErrors": []
         }
       },
       "disposal": {
-        "disposeReceiptMs": 3.0999999940395355,
-        "disposeWithFramesMs": 26.200000002980232,
+        "disposeReceiptMs": 0.7000000029802322,
+        "disposeWithFramesMs": 31.30000001192093,
         "cleanupErrors": [],
         "disposed": {
           "requests": 10,
@@ -628,10 +628,10 @@
         }
       },
       "httpRequests": 10,
-      "heapBeforeBytes": 11093164,
-      "heapAfterLayoutBytes": 21999244,
-      "heapAfterCloseBytes": 23292944,
-      "heapAfterDisposeBytes": 23395260
+      "heapBeforeBytes": 11173952,
+      "heapAfterLayoutBytes": 24416292,
+      "heapAfterCloseBytes": 25231628,
+      "heapAfterDisposeBytes": 25281504
     },
     {
       "count": 50,
@@ -646,8 +646,8 @@
         "disposed": 0,
         "historySubscriptions": 1
       },
-      "openMs": 3591,
-      "openTargetLookupMs": 23.40000008046627,
+      "openMs": 2031.0999999940395,
+      "openTargetLookupMs": 12.000000014901161,
       "opened": {
         "requests": 50,
         "renders": 50,
@@ -664,10 +664,10 @@
         "createActionCount": 2,
         "joinActionCount": 48,
         "batchCount": 2,
-        "createReceiptMs": 46.70000000298023,
-        "joinReceiptMs": 31.599999994039536,
-        "groupLookupMs": 1.0999999940395355,
-        "totalWithFramesMs": 101.90000000596046,
+        "createReceiptMs": 42.1000000089407,
+        "joinReceiptMs": 28.400000005960464,
+        "groupLookupMs": 0.29999999701976776,
+        "totalWithFramesMs": 82.40000000596046,
         "createReceipt": {
           "status": "applied"
         },
@@ -690,8 +690,8 @@
         "cycles": 20,
         "batchCount": 40,
         "nodeAttributeActionCount": 80,
-        "receiptMs": 1624.1000000238419,
-        "totalWithFramesMs": 2229.7000000029802,
+        "receiptMs": 824.0999999791384,
+        "totalWithFramesMs": 1499.9000000059605,
         "receipts": [
           {
             "status": "applied"
@@ -830,37 +830,37 @@
         "groupCount": 2,
         "batchCount": 4,
         "nodeMoveActionCount": 4,
-        "receiptMs": 258.20000000298023,
-        "targetLookupMs": 1.5000000149011612,
-        "totalWithFramesMs": 333.20000000298023,
+        "receiptMs": 75.29999999701977,
+        "targetLookupMs": 0.699999988079071,
+        "totalWithFramesMs": 136.09999999403954,
         "receipts": [
           {
-            "groupId": "#4a9ea33b-02c4-4968-94d5-0527a4e927bf",
-            "target": "#a1494021-8d67-4c49-ab94-6f6b5f884bce",
+            "groupId": "#c0ee953e-dd17-4d45-b967-d416d8e122a9",
+            "target": "#4f987c9a-4edb-42d8-8b6d-23226e42508d",
             "location": "CENTER",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#4a9ea33b-02c4-4968-94d5-0527a4e927bf",
-            "target": "#a1494021-8d67-4c49-ab94-6f6b5f884bce",
+            "groupId": "#c0ee953e-dd17-4d45-b967-d416d8e122a9",
+            "target": "#4f987c9a-4edb-42d8-8b6d-23226e42508d",
             "location": "LEFT",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#907006bf-2832-4b74-8815-4665c0d27eb3",
-            "target": "#b4036d5d-777c-49c3-b374-8bbf5a7424e2",
+            "groupId": "#efae6fae-522c-4638-9314-826c69e67426",
+            "target": "#9b7c0244-14fc-4790-841f-6b12ac577bd2",
             "location": "CENTER",
             "receipt": {
               "status": "applied"
             }
           },
           {
-            "groupId": "#907006bf-2832-4b74-8815-4665c0d27eb3",
-            "target": "#b4036d5d-777c-49c3-b374-8bbf5a7424e2",
+            "groupId": "#efae6fae-522c-4638-9314-826c69e67426",
+            "target": "#9b7c0244-14fc-4790-841f-6b12ac577bd2",
             "location": "RIGHT",
             "receipt": {
               "status": "applied"
@@ -881,7 +881,7 @@
       },
       "switching": {
         "count": 20,
-        "totalWithFramesMs": 1033.6000000089407,
+        "totalWithFramesMs": 847.2000000029802,
         "after": {
           "requests": 50,
           "renders": 50,
@@ -897,9 +897,9 @@
       "closing": {
         "batchCount": 1,
         "tabsetDeleteActionCount": 2,
-        "targetLookupMs": 0.29999999701976776,
-        "closeReceiptMs": 35.400000005960464,
-        "closeWithFramesMs": 39.900000005960464,
+        "targetLookupMs": 0.4000000059604645,
+        "closeReceiptMs": 20.099999994039536,
+        "closeWithFramesMs": 29.700000002980232,
         "closed": {
           "requests": 50,
           "renders": 50,
@@ -914,13 +914,13 @@
         "remaining": 0,
         "receipt": {
           "status": "closed",
-          "id": "document-a59f76190c35d6588a30128b195882ff-1",
+          "id": "document-c1e95ccd5a8f8de81092445f080b669b-1",
           "cleanupErrors": []
         }
       },
       "disposal": {
-        "disposeReceiptMs": 1,
-        "disposeWithFramesMs": 15.299999997019768,
+        "disposeReceiptMs": 0.7000000029802322,
+        "disposeWithFramesMs": 31,
         "cleanupErrors": [],
         "disposed": {
           "requests": 50,
@@ -935,10 +935,10 @@
         }
       },
       "httpRequests": 50,
-      "heapBeforeBytes": 11126884,
-      "heapAfterLayoutBytes": 47493864,
-      "heapAfterCloseBytes": 49300224,
-      "heapAfterDisposeBytes": 49361960
+      "heapBeforeBytes": 11103192,
+      "heapAfterLayoutBytes": 39710076,
+      "heapAfterCloseBytes": 41514536,
+      "heapAfterDisposeBytes": 41564776
     }
   ]
 }

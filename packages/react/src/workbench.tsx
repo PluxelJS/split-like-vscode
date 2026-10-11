@@ -21,11 +21,10 @@ import {
   type WorkbenchState,
 } from "./integration";
 
-type RenderInstance = Pick<
-  WorkbenchInstance<AnyRouter>,
-  "activate" | "getDocument" | "executeCommand" | "getEditingContext"
->;
-const ContentContext = createContext<{ id: string; instance: RenderInstance } | null>(null);
+const ContentContext = createContext<{
+  id: string;
+  instance: WorkbenchInstance<AnyRouter>;
+} | null>(null);
 const defaultEmpty = <p>Open a document to begin.</p>;
 const rejectExternalDrag = () => undefined;
 
@@ -33,7 +32,8 @@ export interface WorkbenchProps extends Omit<
   HTMLAttributes<HTMLDivElement>,
   "children" | "dangerouslySetInnerHTML"
 > {
-  workbench: RenderInstance;
+  /** A real instance returned by createWorkbench or constructed with WorkbenchInstance. */
+  workbench: WorkbenchInstance<AnyRouter>;
   navigation?: ReactNode;
   empty?: ReactNode;
   /** Native Layout ref. Mutations are intercepted; use dispatch for insertion/close receipts. */
@@ -57,7 +57,7 @@ export interface WorkbenchProps extends Omit<
 }
 
 export function useWorkbenchState<T>(
-  workbench: RenderInstance,
+  workbench: WorkbenchInstance<AnyRouter>,
   selector: (state: WorkbenchState) => T,
 ): T {
   return useStore(integrationState(workbench).store, selector);
@@ -84,7 +84,13 @@ export function useWorkbenchContentLifecycle(lifecycle: WorkbenchContentLifecycl
   useEffect(() => content.register(lifecycle), [content, lifecycle]);
 }
 
-const Content = memo(function Content({ id, instance }: { id: string; instance: RenderInstance }) {
+const Content = memo(function Content({
+  id,
+  instance,
+}: {
+  id: string;
+  instance: WorkbenchInstance<AnyRouter>;
+}) {
   const internal = integrationState(instance);
   const router = useStore(internal.store, () => internal.documents.get(id)?.router);
   const tool = internal.tools.get(id);

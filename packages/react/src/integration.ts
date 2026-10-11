@@ -51,12 +51,12 @@ export interface WorkbenchEditingContext {
   windowFocused: boolean;
 }
 export interface WorkbenchState {
-  activeDocumentId: string | null;
+  readonly activeDocumentId: string | null;
   /** Invalidates read-only layout/catalog queries; it is not another layout tree. */
-  revision: number;
-  focusedTabId: string | null;
-  focusedArea: WorkbenchEditingContext["focusedArea"];
-  windowFocused: boolean;
+  readonly revision: number;
+  readonly focusedTabId: string | null;
+  readonly focusedArea: WorkbenchEditingContext["focusedArea"];
+  readonly windowFocused: boolean;
 }
 export type NavigationResult =
   | { status: "committed"; document: WorkbenchDocument; reused: boolean }
@@ -348,6 +348,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       windowFocused: s.windowFocused,
     };
   }
+  /** Returns detached native FlexLayout JSON. */
   getLayout(): IJsonModel {
     return structuredClone(this.state.model.toJson());
   }
@@ -706,13 +707,31 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     return { version: 1, workspaceId: this.options.workspaceId ?? "default", layout };
   }
 
+  /**
+   * Immediately stops admission and releases owned resources without dirty/save decisions.
+   * Repeated calls share one Promise, which resolves with errors after cleanup settles.
+   */
   dispose(): Promise<readonly unknown[]> {
     if (this.disposePromise) return this.disposePromise;
+    let finish!: (errors: readonly unknown[]) => void;
+    this.disposePromise = new Promise((resolve) => {
+      finish = resolve;
+    });
     this.disposed = true;
     ++this.openEpoch;
-    this.browser?.dispose();
+    const errors: unknown[] = [];
+    const browser = this.browser;
     this.browser = undefined;
-    this.state.model.removeChangeListener(this.modelListener);
+    try {
+      browser?.dispose();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      this.state.model.removeChangeListener(this.modelListener);
+    } catch (error) {
+      errors.push(error);
+    }
     const sessions = [...this.state.documents.values()];
     const sessionIds = new Set(sessions.map((session) => session.id));
     const otherCleanupIds = new Set(
@@ -721,20 +740,32 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       ),
     );
     this.state.documents.clear();
-    for (const router of this.pending) this.releaseRouter(router);
+    const pending = [...this.pending];
     this.pending.clear();
-    this.releaseRouter(this.resolver);
-    this.state.store.setState((s) => ({
-      ...s,
-      activeDocumentId: null,
-      focusedTabId: null,
-      focusedArea: null,
-      revision: s.revision + 1,
-    }));
-    this.disposePromise = Promise.all([
+    for (const router of pending) errors.push(...this.releaseRouter(router));
+    errors.push(...this.releaseRouter(this.resolver));
+    try {
+      this.state.store.setState((s) => ({
+        ...s,
+        activeDocumentId: null,
+        focusedTabId: null,
+        focusedArea: null,
+        revision: s.revision + 1,
+      }));
+    } catch (error) {
+      errors.push(error);
+    }
+    void Promise.allSettled([
       ...sessions.map((s) => this.releaseSession(s)),
       ...[...otherCleanupIds].map((id) => this.releaseTool(id)),
-    ]).then((errors) => errors.flat());
+    ]).then((results) => {
+      return finish([
+        ...errors,
+        ...results.flatMap((result) =>
+          result.status === "fulfilled" ? result.value : [result.reason],
+        ),
+      ]);
+    });
     return this.disposePromise;
   }
 
@@ -955,7 +986,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       this.issue("operation-failed", error);
       return { status: "failed", stage: "load", error };
     } finally {
-      if (this.pending.delete(router)) this.releaseRouter(router);
+      if (this.pending.delete(router))
+        this.releaseRouter(router).forEach((error) => this.issue("operation-failed", error));
     }
   }
 
@@ -1401,11 +1433,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         errors.push(error);
       }
     });
-    try {
-      if (session.router) this.releaseRouter(session.router);
-    } catch (error) {
-      errors.push(error);
-    }
+    if (session.router) errors.push(...this.releaseRouter(session.router));
     const lifecycle = session.lifecycle;
     session.lifecycle = undefined;
     const previous = [...(this.cleanupTasks.get(session.id) ?? [])];
@@ -1414,10 +1442,30 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     );
     return errors;
   }
-  private releaseRouter(router: AnyRouter) {
-    router.state.matches.forEach((match) => match.abortController.abort());
-    router.clearCache();
-    router.history.destroy();
+  private releaseRouter(router: AnyRouter): unknown[] {
+    const errors: unknown[] = [];
+    try {
+      for (const match of router.state.matches) {
+        try {
+          match.abortController.abort();
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      router.clearCache();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      router.history.destroy();
+    } catch (error) {
+      errors.push(error);
+    }
+    return errors;
   }
   private observeFocus(id: string | null, area: WorkbenchState["focusedArea"]) {
     if (id && this.state.documents.has(id) && !this.restoringFocus)

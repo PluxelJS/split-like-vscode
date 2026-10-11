@@ -13,6 +13,15 @@ This is a breaking replacement of the old Workbench descriptors, arrangement/gri
 state and snapshots. Pluxel and the second application have **not** been migrated. See
 [behavior and migration](docs/vscode-workbench-behavior.md) and [acceptance evidence](refactor/acceptance.md).
 
+| Task                                         | Start here                                                                                                            |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Install in another React application         | [Branch trial](#try-this-branch-in-another-project)                                                                   |
+| Create a routed workspace                    | [Initialization](#a-complete-routed-workspace)                                                                        |
+| Guard edits and own resource cleanup         | [Content decisions](#content-decisions-commands-and-resources)                                                        |
+| Customize shell, providers and native Layout | [Host customization](#customize-the-host-with-native-apis)                                                            |
+| Use application stores and dynamic shortcuts | [Store and Hotkeys](#host-shortcuts-and-frontend-stores)                                                              |
+| Change the integration or assess its limits  | [Architecture](refactor/README.md), [behavior](docs/vscode-workbench-behavior.md), [evidence](refactor/acceptance.md) |
+
 ## Try this branch in another project
 
 Use `refactor/flexlayout-tanstack` in a separate checkout and build the two library packages:
@@ -103,9 +112,17 @@ the saved layout. Tool notes, like document drafts, are not persisted by layout 
 Create one TanStack route tree and a Router factory. The factory must use the supplied memory
 history and the same route definition, and may loan shared services through Router context.
 Do not supply another browser history to document Routers.
+Initialize this client-side workspace in the browser; server-side Router loading and hydration
+are outside the current integration's accepted scope.
 
 ```tsx
-import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  redirect,
+} from "@tanstack/react-router";
 import { createWorkbench, Workbench } from "@worksplit/react";
 import { createRoot } from "react-dom/client";
 
@@ -119,7 +136,14 @@ const documentRoute = createRoute({
   component: () => <h1>Document {documentRoute.useParams().id}</h1>,
   staticData: { worksplit: { title: "Document", navigationKey: "documents" } },
 });
-const routeTree = rootRoute.addChildren([documentRoute]);
+const indexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/",
+  beforeLoad: () => {
+    throw redirect({ to: "/documents/$id", params: { id: "A" }, replace: true });
+  },
+});
+const routeTree = rootRoute.addChildren([indexRoute, documentRoute]);
 const workbench = createWorkbench({
   createRouter: (history) => createRouter({ routeTree, history }),
   workspaceId: "my-workspace",
@@ -146,9 +170,18 @@ root.render(
 const disconnect = workbench.connectBrowser();
 const initial = await workbench.start(location.pathname + location.search + location.hash);
 if (initial.status !== "committed") console.error(initial);
-// At host shutdown: dispose first so registered async cleanup is settled, then unmount.
-// disconnect(); await workbench.dispose(); root.unmount();
+// Call after the host has made its own decision to leave the workspace.
+async function stopWorkspace() {
+  disconnect();
+  const cleanupErrors = await workbench.dispose();
+  root.unmount();
+  if (cleanupErrors.length) console.error(cleanupErrors);
+}
 ```
+
+This example's index route redirects `/` to document A. `start` routes its supplied URL normally;
+`/` is not a reserved empty workspace route. The host defines its homepage in the same native
+route tree, including any welcome content or redirect.
 
 `createMemoryHistory` is re-exported by TanStack Router; applications that create standalone
 Routers may use it directly. Worksplit supplies the history for its own document instances.
@@ -177,8 +210,9 @@ activation separately revokes a pending request's right to take focus or write t
 
 The nearest matched route declaring `staticData.worksplit` owns identity. Its parsed params and
 optional `identitySearch` fields determine reuse; other search fields and hash are view state.
-Keep these identity values JSON serializable. Nested routes without their own metadata remain
-in the parent document. Full requested locations are honored, including when an existing
+Keep these identity values JSON serializable. With no matched metadata, the last matched route
+owns identity. Declare metadata on a parent route to keep its nested routes in the same document.
+Full requested locations are honored, including when an existing
 instance's search/hash must change. `activate(id)` preserves its committed location and restores
 its registered synchronous focus callback. Reuse selects the active matching instance, then MRU,
 then creation order. Layout position and pin do not enter identity.
@@ -241,11 +275,18 @@ the request returns `rejected` with `revision-required` before any decisions. To
 before the batch and checked again after all decisions, so edits to an earlier approved member
 invalidate the whole request while a later dialog waits. A member that becomes dirty also
 invalidates approval. For single close, `beforeLeave` still validates its own editing revision.
+The imperative `useWorkbenchContent().register(lifecycle)` returns the registration cleanup;
+it throws for removed/replaced content. A rejected registration has not transferred resource
+ownership, so the caller still releases any resources it acquired.
 
 Tools may register guarded closing and disposal resources; they need no Router to be dirty.
 Save and document focus callbacks apply to document operations. Use native `enableClose: false`
 when a tool should only hide. At shutdown, dispose the instance and then unmount the React root
 to end component effects and binding subscriptions.
+`dispose` releases the instance directly; it does not run dirty decisions or save drafts.
+The host owns its leave policy before shutdown, browser refresh or page close. Worksplit's route
+blockers do not install a `beforeunload` prompt.
+Lifecycle cleanup must not await the owning instance's `dispose()`, which is waiting for that cleanup.
 
 `close(id)` shares a pending decision for that instance and rechecks committed route content and
 registration before removal. Native pin and `enableClose: false` are respected; `close` does not
@@ -264,8 +305,11 @@ Commands have an id, `document` or `focused` target, optional TanStack hotkey, a
 callback. Toolbar/menu calls and shortcuts share `executeCommand`; target identity is captured
 before async execution. Inputs are ignored by default. Opt into `ignoreInputs: false` for an
 intentional editor command such as save, and respect content handlers that stop propagation.
-`useWorkbenchContent().executeCommand(id)` retains an originating tool/document context through
-React portals. Applications own background task policies and shared services.
+For `target: "document"`, the target is the active document even when invoked from another content
+instance. For `target: "focused"`, `useWorkbenchContent().executeCommand(id)` preserves the
+originating content id through React portals; a direct instance call uses the last focused content
+unless `contentId` is supplied. To save a particular document independently of activation, call
+`workbench.save(documentId)` explicitly. Applications own background task policies and shared services.
 
 ### Host shortcuts and frontend stores
 
@@ -461,8 +505,7 @@ duplicate ids, incompatible versions/workspace and forbidden docking fail withou
 dropped records. Provide an explicit reset/conversion. Hidden restored documents do not load
 until first displayed with native render-on-demand defaults; visible groups may each load their
 selected document. Disabling native render-on-demand mounts and loads hidden content too. Browser
-history
-is workspace-local and indexed; the containing host must handle entries outside this workspace.
+history is workspace-local and indexed; the containing host must handle entries outside this workspace.
 See the [behavior contract](docs/vscode-workbench-behavior.md) for the history rules and limits.
 
 ## Customize the host with native APIs
