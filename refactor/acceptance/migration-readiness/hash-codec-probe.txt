@@ -1,0 +1,20 @@
+{
+  "reactRouter": "1.170.42",
+  "builtHash": "accounts=%5B%2200112233-4455-6677-8899-aabbccddeeff%22%2C%2211112233-4455-6677-8899-aabbccddeeff%22%5D",
+  "parsedHash": "accounts=[%2200112233-4455-6677-8899-aabbccddeeff%22%2C%2211112233-4455-6677-8899-aabbccddeeff%22]",
+  "decoded": [
+    "00112233-4455-6677-8899-aabbccddeeff",
+    "11112233-4455-6677-8899-aabbccddeeff"
+  ]
+}
+{
+  "accountCount": 1000,
+  "encodedHashLength": 45012,
+  "hrefLength": 45035,
+  "exactRoundTrip": true,
+  "canonicalization": true,
+  "invalidInputRejected": true,
+  "scope": "Design probe against locked native Router only; not financial application/browser acceptance"
+}
+(node:555749) Warning: Accessing non-existent property 'replaceRouteChunk' of module exports inside circular dependency
+(Use `node --trace-warnings ...` to show where the warning was created)

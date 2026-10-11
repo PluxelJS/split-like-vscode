@@ -7,6 +7,7 @@ import {
 import {
   useWorkbenchState,
   type NavigationResult,
+  type StartResult,
   type CloseResult,
   type WorkbenchSnapshot,
   type OpenDocumentOptions,
@@ -41,6 +42,11 @@ export async function routeAndReceiptTypes() {
     workbench: fakeInstance,
   };
   void fakeProps;
+  const startup: StartResult = await workbench.start("/");
+  if (startup.status === "empty") {
+    const href: string = startup.href;
+    void href;
+  }
   const previewOptions: OpenDocumentOptions = { preview: true, reuse: "preserve" };
   void previewOptions;
   const besideOptions: OpenDocumentOptions = {

@@ -16,7 +16,7 @@ export class BrowserHistoryCoordinator {
       href: string,
       id: string | undefined,
       current: () => boolean,
-    ) => Promise<{ id: string; href: string } | undefined>,
+    ) => Promise<{ id?: string; href: string } | undefined>,
     private readonly report: (error: unknown, outside?: boolean) => void,
   ) {
     this.key = `worksplit:${workspaceId}`;

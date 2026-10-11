@@ -1,0 +1,2024 @@
+{
+  "startedAt": "2026-10-11T10:39:18.976Z",
+  "status": "passed",
+  "consumerDirectory": "/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-KHHuNi",
+  "url": "http://127.0.0.1:37629",
+  "conditions": {
+    "distribution": "Packed public JS, declarations and CSS; Vite production build and preview",
+    "browser": "Headless Chromium installed by this repository's Playwright",
+    "desktop": {
+      "width": 1440,
+      "height": 900
+    },
+    "compact": {
+      "width": 1366,
+      "height": 768
+    },
+    "narrow": {
+      "width": 390,
+      "height": 844
+    },
+    "keyboard": "Control modifier in Linux Chromium; application-owned native Store and HotkeysProvider",
+    "limitations": [
+      "One independent tarball consumer fixture; this does not prove Pluxel compatibility or cross-application generality.",
+      "Application counters and DOM/provider identity describe this fixture's resources, not heap leak detection or performance.",
+      "This application explicitly retains its named native empty TabSets with enableDeleteWhenEmpty:false.",
+      "The small window uses unchanged native docking behavior; touch or phone usability is not asserted."
+    ]
+  },
+  "checks": [
+    "Custom shell, root HTML props/style/theme, and visible native render slots",
+    "Two concurrent public document Routers, application providers and subscriptions",
+    "Direct upstream Layout ref inline rename and redraw preserve the provider and editor",
+    "Both live application subscriptions receive real save receipts after host rerender",
+    "Real keyboard save captures A before native selection changes to B; the next shortcut saves B once",
+    "Application Store preference UI rebinds and disables the native hook without retaining the old binding or duplicating saves",
+    "Native Provider preventDefault and input options govern real keyboard events; app Store updates keep document providers and resources",
+    "Native movement between application-configured TabSets retains uncontrolled input DOM, providers and resources without loaders",
+    "Typed Workbench open refusal and real TanStack Link dirty navigation refusal/approval coordinate the document URL",
+    "Registered native tool insertion, close and reopen keep the document URL and sessions",
+    "Narrow resize keeps native JSON/context/resources; manual maximize persists across widening and restores original DOM",
+    "Actual native dirty close refusal and approval preserve the sibling and release A's resources once",
+    "Public instance disposal releases the fixture's remaining Routers and subscriptions",
+    "Preserving identity reuse retains dirty content, filters, focus and loaders; explicit navigation receives from/to decision context",
+    "Opening an existing document in another maximized group makes its content visible and restores its registered focus",
+    "Clean preview replacement disposes once with fresh identity; keep stays closeable; existing targets preserve another preview; dirty preview auto-keeps; copies are ordinary documents",
+    "1440×900: application menu makes two columns; real drag plus menu makes 2×2; program and real over-limit drag reject; center drag still moves tabs",
+    "1366×768: application menu makes two columns; real drag plus menu makes 2×2; program and real over-limit drag reject; center drag still moves tabs",
+    "1440×900: in-document public open uses source container plus native DockLocation; keyboard retains input selection/scroll and source URL; maximized button opens visibly without stealing button focus; ordinary beside open focuses target; full 2×2 refuses without changing documents/layout",
+    "1440×900: a source preview is kept before preserving-focus detail admission, retaining the original source DOM and browser URL",
+    "1366×768: in-document public open uses source container plus native DockLocation; keyboard retains input selection/scroll and source URL; maximized button opens visibly without stealing button focus; ordinary beside open focuses target; full 2×2 refuses without changing documents/layout",
+    "1366×768: a source preview is kept before preserving-focus detail admission, retaining the original source DOM and browser URL",
+    "An ordinary in-document right-side open selects the new detail, publishes its URL and focuses its first mounted input",
+    "A page action's delayed load keeps its call-time native destination while a newer real tab/input focus preserves the active document and URL",
+    "Empty home start, last close, real browser Back/Forward between empty anchors and reload keep zero documents without document Routers or loaders",
+    "Back to an owned home anchor retains live documents and normalizes its URL; snapshot plus home restores native selected A while hidden B remains lazy",
+    "Real development StrictMode effect replay leaves lifecycle resources live and dirty guards installed; genuine close disposes once, host disposal once, repeat disposal never again",
+    "A genuinely focused tool cannot be hidden by preserve-focus CENTER admission; a separate pane reveals the detail while retaining the tool input, active document and URL"
+  ],
+  "dialogs": [
+    {
+      "message": "Discard this unsaved draft?",
+      "accepted": false
+    },
+    {
+      "message": "Discard this unsaved draft?",
+      "accepted": false
+    },
+    {
+      "message": "Discard this unsaved draft?",
+      "accepted": true
+    },
+    {
+      "message": "Discard this unsaved draft?",
+      "accepted": false
+    },
+    {
+      "message": "Discard this unsaved draft?",
+      "accepted": true
+    },
+    {
+      "message": "Discard this unsaved draft?",
+      "accepted": false
+    },
+    {
+      "message": "Discard this unsaved draft?",
+      "accepted": false
+    },
+    {
+      "message": "Discard this unsaved draft?",
+      "accepted": true
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": [],
+  "chromiumVersion": "156.0.8078.4",
+  "initial": {
+    "documents": [
+      {
+        "id": "document-20ce61936e2ba83cfab541bf3ad4d9db-1",
+        "href": "/documents/A?view=edit",
+        "containerId": "left",
+        "title": "Published document",
+        "preview": false,
+        "navigationKey": "documents"
+      },
+      {
+        "id": "document-20ce61936e2ba83cfab541bf3ad4d9db-2",
+        "href": "/documents/B?view=edit",
+        "containerId": "right",
+        "title": "Published document",
+        "preview": false,
+        "navigationKey": "documents"
+      }
+    ],
+    "metrics": {
+      "loads": 2,
+      "saves": 0,
+      "routersCreated": 3,
+      "liveRouters": 3,
+      "editorMounts": 2,
+      "editorUnmounts": 0,
+      "subscriptions": 2,
+      "disposals": 0,
+      "lifecycleDisposals": 0,
+      "startStatus": "committed",
+      "providerMounts": 2,
+      "providerUnmounts": 0,
+      "providers": 2,
+      "pendingSaveId": "",
+      "lastSavedId": "",
+      "lastLeave": ""
+    }
+  },
+  "externalKeyboard": {
+    "before": {
+      "loads": 2,
+      "saves": 1,
+      "routersCreated": 3,
+      "liveRouters": 3,
+      "editorMounts": 2,
+      "editorUnmounts": 0,
+      "subscriptions": 2,
+      "disposals": 0,
+      "lifecycleDisposals": 0,
+      "startStatus": "committed",
+      "providerMounts": 2,
+      "providerUnmounts": 0,
+      "providers": 2,
+      "pendingSaveId": "",
+      "lastSavedId": "document-20ce61936e2ba83cfab541bf3ad4d9db-2",
+      "lastLeave": ""
+    },
+    "whileSavePending": {
+      "activeDocumentId": "document-20ce61936e2ba83cfab541bf3ad4d9db-2",
+      "pendingSaveId": "document-20ce61936e2ba83cfab541bf3ad4d9db-1"
+    },
+    "after": {
+      "loads": 2,
+      "saves": 5,
+      "routersCreated": 3,
+      "liveRouters": 3,
+      "editorMounts": 2,
+      "editorUnmounts": 0,
+      "subscriptions": 2,
+      "disposals": 0,
+      "lifecycleDisposals": 0,
+      "startStatus": "committed",
+      "providerMounts": 2,
+      "providerUnmounts": 0,
+      "providers": 2,
+      "pendingSaveId": "",
+      "lastSavedId": "document-20ce61936e2ba83cfab541bf3ad4d9db-2",
+      "lastLeave": ""
+    },
+    "events": {
+      "first": {
+        "code": "KeyS",
+        "defaultPrevented": true
+      },
+      "second": {
+        "code": "KeyS",
+        "defaultPrevented": true
+      },
+      "oldBinding": {
+        "code": "KeyS",
+        "defaultPrevented": false
+      },
+      "rebound": {
+        "code": "KeyS",
+        "defaultPrevented": true
+      },
+      "disabled": {
+        "code": "KeyS",
+        "defaultPrevented": false
+      },
+      "ignoredInput": {
+        "code": "KeyS",
+        "defaultPrevented": false
+      },
+      "outsideInput": {
+        "code": "KeyS",
+        "defaultPrevented": true
+      }
+    }
+  },
+  "rejectedWorkbenchNavigation": {
+    "metrics": {
+      "loads": 3,
+      "saves": 5,
+      "routersCreated": 4,
+      "liveRouters": 3,
+      "editorMounts": 2,
+      "editorUnmounts": 0,
+      "subscriptions": 2,
+      "disposals": 0,
+      "lifecycleDisposals": 0,
+      "startStatus": "committed",
+      "providerMounts": 2,
+      "providerUnmounts": 0,
+      "providers": 2,
+      "pendingSaveId": "",
+      "lastSavedId": "document-20ce61936e2ba83cfab541bf3ad4d9db-2",
+      "lastLeave": "{\"reason\":\"navigate\",\"id\":\"document-20ce61936e2ba83cfab541bf3ad4d9db-1\",\"from\":\"/documents/A?view=edit\",\"to\":\"/documents/A?view=preview\"}"
+    }
+  },
+  "nativeSnapshots": {
+    "beforeResize": {
+      "version": 1,
+      "workspaceId": "default",
+      "layout": {
+        "global": {
+          "tabEnableRename": true,
+          "tabEnablePin": true,
+          "tabSetEnableTabGroups": true
+        },
+        "borders": [
+          {
+            "location": "bottom",
+            "type": "border",
+            "selected": 0,
+            "children": [
+              {
+                "type": "tab",
+                "id": "inspector",
+                "name": "Native Inspector title",
+                "component": "worksplit.tool"
+              }
+            ]
+          }
+        ],
+        "layout": {
+          "type": "row",
+          "id": "#1db4bfec-04ac-497b-bd33-ab0ab5341a80",
+          "children": [
+            {
+              "type": "tabset",
+              "id": "left",
+              "name": "Writing",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-20ce61936e2ba83cfab541bf3ad4d9db-1",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/A?view=preview",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                },
+                {
+                  "type": "tab",
+                  "id": "outline",
+                  "name": "Native Outline title",
+                  "component": "worksplit.tool"
+                }
+              ],
+              "active": true
+            },
+            {
+              "type": "tabset",
+              "id": "right",
+              "name": "Reference",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-20ce61936e2ba83cfab541bf3ad4d9db-2",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/B?view=edit",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                }
+              ]
+            }
+          ]
+        },
+        "subLayouts": {}
+      }
+    },
+    "manuallyMaximized": {
+      "version": 1,
+      "workspaceId": "default",
+      "layout": {
+        "global": {
+          "tabEnableRename": true,
+          "tabEnablePin": true,
+          "tabSetEnableTabGroups": true
+        },
+        "borders": [
+          {
+            "location": "bottom",
+            "type": "border",
+            "selected": 0,
+            "children": [
+              {
+                "type": "tab",
+                "id": "inspector",
+                "name": "Native Inspector title",
+                "component": "worksplit.tool"
+              }
+            ]
+          }
+        ],
+        "layout": {
+          "type": "row",
+          "id": "#1db4bfec-04ac-497b-bd33-ab0ab5341a80",
+          "children": [
+            {
+              "type": "tabset",
+              "id": "left",
+              "name": "Writing",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-20ce61936e2ba83cfab541bf3ad4d9db-1",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/A?view=preview",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                },
+                {
+                  "type": "tab",
+                  "id": "outline",
+                  "name": "Native Outline title",
+                  "component": "worksplit.tool"
+                }
+              ],
+              "active": true,
+              "maximized": true
+            },
+            {
+              "type": "tabset",
+              "id": "right",
+              "name": "Reference",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-20ce61936e2ba83cfab541bf3ad4d9db-2",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/B?view=edit",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                }
+              ]
+            }
+          ]
+        },
+        "subLayouts": {}
+      }
+    }
+  },
+  "beforeDispose": {
+    "documents": [
+      {
+        "id": "document-20ce61936e2ba83cfab541bf3ad4d9db-2",
+        "href": "/documents/B?view=edit",
+        "containerId": "right",
+        "title": "Published document",
+        "preview": false,
+        "navigationKey": "documents"
+      }
+    ],
+    "metrics": {
+      "loads": 3,
+      "saves": 5,
+      "routersCreated": 4,
+      "liveRouters": 2,
+      "editorMounts": 2,
+      "editorUnmounts": 1,
+      "subscriptions": 1,
+      "disposals": 1,
+      "lifecycleDisposals": 1,
+      "startStatus": "committed",
+      "providerMounts": 2,
+      "providerUnmounts": 1,
+      "providers": 1,
+      "pendingSaveId": "",
+      "lastSavedId": "document-20ce61936e2ba83cfab541bf3ad4d9db-2",
+      "lastLeave": "{\"reason\":\"close\",\"id\":\"document-20ce61936e2ba83cfab541bf3ad4d9db-1\",\"from\":\"/documents/A?view=preview\"}"
+    }
+  },
+  "disposed": {
+    "documentCount": 0,
+    "metrics": {
+      "loads": 3,
+      "saves": 5,
+      "routersCreated": 4,
+      "liveRouters": 0,
+      "editorMounts": 2,
+      "editorUnmounts": 2,
+      "subscriptions": 0,
+      "disposals": 2,
+      "lifecycleDisposals": 2,
+      "startStatus": "committed",
+      "providerMounts": 2,
+      "providerUnmounts": 2,
+      "providers": 0,
+      "pendingSaveId": "",
+      "lastSavedId": "document-20ce61936e2ba83cfab541bf3ad4d9db-2",
+      "lastLeave": "{\"reason\":\"close\",\"id\":\"document-20ce61936e2ba83cfab541bf3ad4d9db-1\",\"from\":\"/documents/A?view=preview\"}"
+    },
+    "cleanup": []
+  },
+  "screenshots": [
+    "packed-consumer-desktop.png",
+    "packed-consumer-narrow.png",
+    "packed-consumer-bounded-desktop.png",
+    "packed-consumer-bounded-compact.png",
+    "packed-consumer-page-placement-desktop.png",
+    "packed-consumer-page-placement-compact.png",
+    "packed-consumer-empty-home-restored.png",
+    "packed-consumer-strict-mode.png"
+  ],
+  "documentOperations": {
+    "documents": [
+      {
+        "id": "document-c62e4896307cf88988525e4d88e5098a-1",
+        "href": "/documents/A?view=preview",
+        "containerId": "left",
+        "title": "Published document",
+        "preview": false,
+        "navigationKey": "documents"
+      },
+      {
+        "id": "document-c62e4896307cf88988525e4d88e5098a-2",
+        "href": "/documents/B?view=edit",
+        "containerId": "right",
+        "title": "Published document",
+        "preview": false,
+        "navigationKey": "documents"
+      },
+      {
+        "id": "document-c62e4896307cf88988525e4d88e5098a-4",
+        "href": "/documents/D?view=edit",
+        "containerId": "right",
+        "title": "Published document",
+        "preview": false,
+        "navigationKey": "documents"
+      },
+      {
+        "id": "document-c62e4896307cf88988525e4d88e5098a-5",
+        "href": "/documents/E?view=edit",
+        "containerId": "right",
+        "title": "Published document",
+        "preview": false,
+        "navigationKey": "documents"
+      },
+      {
+        "id": "document-c62e4896307cf88988525e4d88e5098a-6",
+        "href": "/documents/F?view=edit",
+        "containerId": "right",
+        "title": "Published document",
+        "preview": true,
+        "navigationKey": "documents"
+      },
+      {
+        "id": "document-c62e4896307cf88988525e4d88e5098a-7",
+        "href": "/documents/F?view=edit",
+        "containerId": "right",
+        "title": "Published document",
+        "preview": false,
+        "navigationKey": "documents"
+      }
+    ],
+    "metrics": {
+      "loads": 8,
+      "saves": 1,
+      "routersCreated": 12,
+      "liveRouters": 7,
+      "editorMounts": 7,
+      "editorUnmounts": 1,
+      "subscriptions": 6,
+      "disposals": 1,
+      "lifecycleDisposals": 1,
+      "startStatus": "committed",
+      "providerMounts": 7,
+      "providerUnmounts": 1,
+      "providers": 6,
+      "pendingSaveId": "",
+      "lastSavedId": "document-c62e4896307cf88988525e4d88e5098a-1",
+      "lastLeave": "{\"reason\":\"navigate\",\"id\":\"document-c62e4896307cf88988525e4d88e5098a-1\",\"from\":\"/documents/A?view=preview\",\"to\":\"/documents/A?view=edit\"}"
+    }
+  },
+  "bounded": {
+    "desktop": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "boxes": [
+        {
+          "x": 221,
+          "y": 119,
+          "width": 605,
+          "height": 251.5
+        },
+        {
+          "x": 834,
+          "y": 119,
+          "width": 605,
+          "height": 251.5
+        },
+        {
+          "x": 221,
+          "y": 408.5,
+          "width": 605,
+          "height": 251.5
+        },
+        {
+          "x": 834,
+          "y": 408.5,
+          "width": 605,
+          "height": 251.5
+        }
+      ],
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "default",
+        "layout": {
+          "global": {
+            "tabEnableRename": true,
+            "tabEnablePin": true,
+            "tabSetEnableTabGroups": true
+          },
+          "borders": [
+            {
+              "location": "bottom",
+              "type": "border",
+              "selected": 0,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "inspector",
+                  "name": "Native Inspector title",
+                  "component": "worksplit.tool"
+                }
+              ]
+            }
+          ],
+          "layout": {
+            "type": "row",
+            "id": "#e4bef8f3-35b2-4c52-a31e-795682b47b2e",
+            "children": [
+              {
+                "type": "row",
+                "id": "#ef925d91-158f-4356-b131-0946d24f8735",
+                "weight": 50,
+                "children": [
+                  {
+                    "type": "tabset",
+                    "id": "left",
+                    "weight": 50,
+                    "selected": 1,
+                    "name": "Writing",
+                    "enableDeleteWhenEmpty": false,
+                    "children": [
+                      {
+                        "type": "tab",
+                        "id": "document-ef6b4bbf67b958d7961b6b95d521234e-1",
+                        "name": "Published document",
+                        "component": "worksplit.document",
+                        "config": {
+                          "href": "/documents/A?view=edit",
+                          "multi": false
+                        },
+                        "enablePopout": false,
+                        "enableFloat": false
+                      },
+                      {
+                        "type": "tab",
+                        "id": "document-ef6b4bbf67b958d7961b6b95d521234e-5",
+                        "name": "Published document",
+                        "component": "worksplit.document",
+                        "config": {
+                          "href": "/documents/E?view=edit",
+                          "multi": false,
+                          "preview": true
+                        },
+                        "enablePopout": false,
+                        "enableFloat": false
+                      }
+                    ],
+                    "active": true
+                  },
+                  {
+                    "type": "tabset",
+                    "id": "#74ba0539-4bef-4350-ad9a-c76b42bc4e64",
+                    "weight": 50,
+                    "children": [
+                      {
+                        "type": "tab",
+                        "id": "document-ef6b4bbf67b958d7961b6b95d521234e-3",
+                        "name": "Published document",
+                        "component": "worksplit.document",
+                        "config": {
+                          "href": "/documents/C?view=edit",
+                          "multi": false
+                        },
+                        "enablePopout": false,
+                        "enableFloat": false
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "id": "#791ddbc7-7c0c-4973-ab45-d3d7e3b4a13b",
+                "weight": 50,
+                "children": [
+                  {
+                    "type": "tabset",
+                    "id": "#d329eba0-3620-4730-a403-9b45da1848e7",
+                    "weight": 50,
+                    "children": [
+                      {
+                        "type": "tab",
+                        "id": "document-ef6b4bbf67b958d7961b6b95d521234e-2",
+                        "name": "Published document",
+                        "component": "worksplit.document",
+                        "config": {
+                          "href": "/documents/B?view=edit",
+                          "multi": false
+                        },
+                        "enablePopout": false,
+                        "enableFloat": false
+                      }
+                    ]
+                  },
+                  {
+                    "type": "tabset",
+                    "id": "#498abbe6-bd75-4999-90dd-50d22974262d",
+                    "weight": 50,
+                    "children": [
+                      {
+                        "type": "tab",
+                        "id": "document-ef6b4bbf67b958d7961b6b95d521234e-4",
+                        "name": "Published document",
+                        "component": "worksplit.document",
+                        "config": {
+                          "href": "/documents/D?view=edit",
+                          "multi": false
+                        },
+                        "enablePopout": false,
+                        "enableFloat": false
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "subLayouts": {}
+        }
+      }
+    },
+    "compact": {
+      "viewport": {
+        "width": 1366,
+        "height": 768
+      },
+      "boxes": [
+        {
+          "x": 221,
+          "y": 119,
+          "width": 568,
+          "height": 185.5
+        },
+        {
+          "x": 797,
+          "y": 119,
+          "width": 568,
+          "height": 185.5
+        },
+        {
+          "x": 221,
+          "y": 342.5,
+          "width": 568,
+          "height": 185.5
+        },
+        {
+          "x": 797,
+          "y": 342.5,
+          "width": 568,
+          "height": 185.5
+        }
+      ],
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "default",
+        "layout": {
+          "global": {
+            "tabEnableRename": true,
+            "tabEnablePin": true,
+            "tabSetEnableTabGroups": true
+          },
+          "borders": [
+            {
+              "location": "bottom",
+              "type": "border",
+              "selected": 0,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "inspector",
+                  "name": "Native Inspector title",
+                  "component": "worksplit.tool"
+                }
+              ]
+            }
+          ],
+          "layout": {
+            "type": "row",
+            "id": "#2bd6d722-9bce-4d75-981d-effe75da5531",
+            "children": [
+              {
+                "type": "row",
+                "id": "#8a9255de-cd7e-4abe-a960-e18c7450110d",
+                "weight": 50,
+                "children": [
+                  {
+                    "type": "tabset",
+                    "id": "left",
+                    "weight": 50,
+                    "selected": 1,
+                    "name": "Writing",
+                    "enableDeleteWhenEmpty": false,
+                    "children": [
+                      {
+                        "type": "tab",
+                        "id": "document-1b61a377d93a0ecc2bb7d66c80870f83-1",
+                        "name": "Published document",
+                        "component": "worksplit.document",
+                        "config": {
+                          "href": "/documents/A?view=edit",
+                          "multi": false
+                        },
+                        "enablePopout": false,
+                        "enableFloat": false
+                      },
+                      {
+                        "type": "tab",
+                        "id": "document-1b61a377d93a0ecc2bb7d66c80870f83-5",
+                        "name": "Published document",
+                        "component": "worksplit.document",
+                        "config": {
+                          "href": "/documents/E?view=edit",
+                          "multi": false,
+                          "preview": true
+                        },
+                        "enablePopout": false,
+                        "enableFloat": false
+                      }
+                    ],
+                    "active": true
+                  },
+                  {
+                    "type": "tabset",
+                    "id": "#7bf5466b-3ab6-463b-bf29-b9846f358297",
+                    "weight": 50,
+                    "children": [
+                      {
+                        "type": "tab",
+                        "id": "document-1b61a377d93a0ecc2bb7d66c80870f83-3",
+                        "name": "Published document",
+                        "component": "worksplit.document",
+                        "config": {
+                          "href": "/documents/C?view=edit",
+                          "multi": false
+                        },
+                        "enablePopout": false,
+                        "enableFloat": false
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "row",
+                "id": "#787c16c3-44c8-41a5-a860-850cfe057a92",
+                "weight": 50,
+                "children": [
+                  {
+                    "type": "tabset",
+                    "id": "#2a752bc5-f7b4-4411-a56b-1dc9af288123",
+                    "weight": 50,
+                    "children": [
+                      {
+                        "type": "tab",
+                        "id": "document-1b61a377d93a0ecc2bb7d66c80870f83-2",
+                        "name": "Published document",
+                        "component": "worksplit.document",
+                        "config": {
+                          "href": "/documents/B?view=edit",
+                          "multi": false
+                        },
+                        "enablePopout": false,
+                        "enableFloat": false
+                      }
+                    ]
+                  },
+                  {
+                    "type": "tabset",
+                    "id": "#b42b7ccb-442c-425c-8c6b-08ae6ef1b35c",
+                    "weight": 50,
+                    "children": [
+                      {
+                        "type": "tab",
+                        "id": "document-1b61a377d93a0ecc2bb7d66c80870f83-4",
+                        "name": "Published document",
+                        "component": "worksplit.document",
+                        "config": {
+                          "href": "/documents/D?view=edit",
+                          "multi": false
+                        },
+                        "enablePopout": false,
+                        "enableFloat": false
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "subLayouts": {}
+        }
+      }
+    }
+  },
+  "pagePlacement": {
+    "desktop": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "keyboardSource": {
+        "before": {
+          "text": "Source line 0: retained caret and scroll\nSource line 1: retained caret and scroll\nSource line 2: retained caret and scroll\nSource line 3: retained caret and scroll\nSource line 4: retained caret and scroll\nSource line 5: retained caret and scroll\nSource line 6: retained caret and scroll\nSource line 7: retained caret and scroll\nSource line 8: retained caret and scroll\nSource line 9: retained caret and scroll\nSource line 10: retained caret and scroll\nSource line 11: retained caret and scroll\nSource line 12: retained caret and scroll\nSource line 13: retained caret and scroll\nSource line 14: retained caret and scroll\nSource line 15: retained caret and scroll\nSource line 16: retained caret and scroll\nSource line 17: retained caret and scroll\nSource line 18: retained caret and scroll\nSource line 19: retained caret and scroll\nSource line 20: retained caret and scroll\nSource line 21: retained caret and scroll\nSource line 22: retained caret and scroll\nSource line 23: retained caret and scroll\nSource line 24: retained caret and scroll\nSource line 25: retained caret and scroll\nSource line 26: retained caret and scroll\nSource line 27: retained caret and scroll\nSource line 28: retained caret and scroll\nSource line 29: retained caret and scroll\nSource line 30: retained caret and scroll\nSource line 31: retained caret and scroll\nSource line 32: retained caret and scroll\nSource line 33: retained caret and scroll\nSource line 34: retained caret and scroll\nSource line 35: retained caret and scroll\nSource line 36: retained caret and scroll\nSource line 37: retained caret and scroll\nSource line 38: retained caret and scroll\nSource line 39: retained caret and scroll\nSource line 40: retained caret and scroll\nSource line 41: retained caret and scroll\nSource line 42: retained caret and scroll\nSource line 43: retained caret and scroll\nSource line 44: retained caret and scroll\nSource line 45: retained caret and scroll\nSource line 46: retained caret and scroll\nSource line 47: retained caret and scroll\nSource line 48: retained caret and scroll\nSource line 49: retained caret and scroll\nSource line 50: retained caret and scroll\nSource line 51: retained caret and scroll\nSource line 52: retained caret and scroll\nSource line 53: retained caret and scroll\nSource line 54: retained caret and scroll\nSource line 55: retained caret and scroll\nSource line 56: retained caret and scroll\nSource line 57: retained caret and scroll\nSource line 58: retained caret and scroll\nSource line 59: retained caret and scroll\nSource line 60: retained caret and scroll\nSource line 61: retained caret and scroll\nSource line 62: retained caret and scroll\nSource line 63: retained caret and scroll\nSource line 64: retained caret and scroll\nSource line 65: retained caret and scroll\nSource line 66: retained caret and scroll\nSource line 67: retained caret and scroll\nSource line 68: retained caret and scroll\nSource line 69: retained caret and scroll\nSource line 70: retained caret and scroll\nSource line 71: retained caret and scroll\nSource line 72: retained caret and scroll\nSource line 73: retained caret and scroll\nSource line 74: retained caret and scroll\nSource line 75: retained caret and scroll\nSource line 76: retained caret and scroll\nSource line 77: retained caret and scroll\nSource line 78: retained caret and scroll\nSource line 79: retained caret and scroll\nSource line 80: retained caret and scroll\nSource line 81: retained caret and scroll\nSource line 82: retained caret and scroll\nSource line 83: retained caret and scroll\nSource line 84: retained caret and scroll\nSource line 85: retained caret and scroll\nSource line 86: retained caret and scroll\nSource line 87: retained caret and scroll\nSource line 88: retained caret and scroll\nSource line 89: retained caret and scroll\nSource line 90: retained caret and scroll\nSource line 91: retained caret and scroll\nSource line 92: retained caret and scroll\nSource line 93: retained caret and scroll\nSource line 94: retained caret and scroll\nSource line 95: retained caret and scroll\nSource line 96: retained caret and scroll\nSource line 97: retained caret and scroll\nSource line 98: retained caret and scroll\nSource line 99: retained caret and scroll",
+          "start": 4147,
+          "end": 4189,
+          "scrollTop": 1634
+        },
+        "after": {
+          "text": "Source line 0: retained caret and scroll\nSource line 1: retained caret and scroll\nSource line 2: retained caret and scroll\nSource line 3: retained caret and scroll\nSource line 4: retained caret and scroll\nSource line 5: retained caret and scroll\nSource line 6: retained caret and scroll\nSource line 7: retained caret and scroll\nSource line 8: retained caret and scroll\nSource line 9: retained caret and scroll\nSource line 10: retained caret and scroll\nSource line 11: retained caret and scroll\nSource line 12: retained caret and scroll\nSource line 13: retained caret and scroll\nSource line 14: retained caret and scroll\nSource line 15: retained caret and scroll\nSource line 16: retained caret and scroll\nSource line 17: retained caret and scroll\nSource line 18: retained caret and scroll\nSource line 19: retained caret and scroll\nSource line 20: retained caret and scroll\nSource line 21: retained caret and scroll\nSource line 22: retained caret and scroll\nSource line 23: retained caret and scroll\nSource line 24: retained caret and scroll\nSource line 25: retained caret and scroll\nSource line 26: retained caret and scroll\nSource line 27: retained caret and scroll\nSource line 28: retained caret and scroll\nSource line 29: retained caret and scroll\nSource line 30: retained caret and scroll\nSource line 31: retained caret and scroll\nSource line 32: retained caret and scroll\nSource line 33: retained caret and scroll\nSource line 34: retained caret and scroll\nSource line 35: retained caret and scroll\nSource line 36: retained caret and scroll\nSource line 37: retained caret and scroll\nSource line 38: retained caret and scroll\nSource line 39: retained caret and scroll\nSource line 40: retained caret and scroll\nSource line 41: retained caret and scroll\nSource line 42: retained caret and scroll\nSource line 43: retained caret and scroll\nSource line 44: retained caret and scroll\nSource line 45: retained caret and scroll\nSource line 46: retained caret and scroll\nSource line 47: retained caret and scroll\nSource line 48: retained caret and scroll\nSource line 49: retained caret and scroll\nSource line 50: retained caret and scroll\nSource line 51: retained caret and scroll\nSource line 52: retained caret and scroll\nSource line 53: retained caret and scroll\nSource line 54: retained caret and scroll\nSource line 55: retained caret and scroll\nSource line 56: retained caret and scroll\nSource line 57: retained caret and scroll\nSource line 58: retained caret and scroll\nSource line 59: retained caret and scroll\nSource line 60: retained caret and scroll\nSource line 61: retained caret and scroll\nSource line 62: retained caret and scroll\nSource line 63: retained caret and scroll\nSource line 64: retained caret and scroll\nSource line 65: retained caret and scroll\nSource line 66: retained caret and scroll\nSource line 67: retained caret and scroll\nSource line 68: retained caret and scroll\nSource line 69: retained caret and scroll\nSource line 70: retained caret and scroll\nSource line 71: retained caret and scroll\nSource line 72: retained caret and scroll\nSource line 73: retained caret and scroll\nSource line 74: retained caret and scroll\nSource line 75: retained caret and scroll\nSource line 76: retained caret and scroll\nSource line 77: retained caret and scroll\nSource line 78: retained caret and scroll\nSource line 79: retained caret and scroll\nSource line 80: retained caret and scroll\nSource line 81: retained caret and scroll\nSource line 82: retained caret and scroll\nSource line 83: retained caret and scroll\nSource line 84: retained caret and scroll\nSource line 85: retained caret and scroll\nSource line 86: retained caret and scroll\nSource line 87: retained caret and scroll\nSource line 88: retained caret and scroll\nSource line 89: retained caret and scroll\nSource line 90: retained caret and scroll\nSource line 91: retained caret and scroll\nSource line 92: retained caret and scroll\nSource line 93: retained caret and scroll\nSource line 94: retained caret and scroll\nSource line 95: retained caret and scroll\nSource line 96: retained caret and scroll\nSource line 97: retained caret and scroll\nSource line 98: retained caret and scroll\nSource line 99: retained caret and scroll",
+          "start": 4147,
+          "end": 4189,
+          "scrollTop": 1634
+        },
+        "activeId": "document-5ff5a10f6a2e081fe2abf04d091c0628-1",
+        "href": "/documents/A?view=edit"
+      },
+      "nativeContainers": [
+        "left",
+        "#60919db3-133d-43ad-a150-b8f254899528",
+        "#206eab53-ef79-43dd-9ff1-25c08d48772d",
+        "#464a092d-ba2d-4730-be11-c07ef69b81e3"
+      ],
+      "rejected": {
+        "status": "rejected:layout-policy",
+        "documents": 5
+      },
+      "focusContract": "Keyboard action preserves textarea focus/caret/selection/scroll; ordinary button clicks preserve the clicked button's focus. No focus-restoration event handlers are supplied by the application."
+    },
+    "compact": {
+      "viewport": {
+        "width": 1366,
+        "height": 768
+      },
+      "keyboardSource": {
+        "before": {
+          "text": "Source line 0: retained caret and scroll\nSource line 1: retained caret and scroll\nSource line 2: retained caret and scroll\nSource line 3: retained caret and scroll\nSource line 4: retained caret and scroll\nSource line 5: retained caret and scroll\nSource line 6: retained caret and scroll\nSource line 7: retained caret and scroll\nSource line 8: retained caret and scroll\nSource line 9: retained caret and scroll\nSource line 10: retained caret and scroll\nSource line 11: retained caret and scroll\nSource line 12: retained caret and scroll\nSource line 13: retained caret and scroll\nSource line 14: retained caret and scroll\nSource line 15: retained caret and scroll\nSource line 16: retained caret and scroll\nSource line 17: retained caret and scroll\nSource line 18: retained caret and scroll\nSource line 19: retained caret and scroll\nSource line 20: retained caret and scroll\nSource line 21: retained caret and scroll\nSource line 22: retained caret and scroll\nSource line 23: retained caret and scroll\nSource line 24: retained caret and scroll\nSource line 25: retained caret and scroll\nSource line 26: retained caret and scroll\nSource line 27: retained caret and scroll\nSource line 28: retained caret and scroll\nSource line 29: retained caret and scroll\nSource line 30: retained caret and scroll\nSource line 31: retained caret and scroll\nSource line 32: retained caret and scroll\nSource line 33: retained caret and scroll\nSource line 34: retained caret and scroll\nSource line 35: retained caret and scroll\nSource line 36: retained caret and scroll\nSource line 37: retained caret and scroll\nSource line 38: retained caret and scroll\nSource line 39: retained caret and scroll\nSource line 40: retained caret and scroll\nSource line 41: retained caret and scroll\nSource line 42: retained caret and scroll\nSource line 43: retained caret and scroll\nSource line 44: retained caret and scroll\nSource line 45: retained caret and scroll\nSource line 46: retained caret and scroll\nSource line 47: retained caret and scroll\nSource line 48: retained caret and scroll\nSource line 49: retained caret and scroll\nSource line 50: retained caret and scroll\nSource line 51: retained caret and scroll\nSource line 52: retained caret and scroll\nSource line 53: retained caret and scroll\nSource line 54: retained caret and scroll\nSource line 55: retained caret and scroll\nSource line 56: retained caret and scroll\nSource line 57: retained caret and scroll\nSource line 58: retained caret and scroll\nSource line 59: retained caret and scroll\nSource line 60: retained caret and scroll\nSource line 61: retained caret and scroll\nSource line 62: retained caret and scroll\nSource line 63: retained caret and scroll\nSource line 64: retained caret and scroll\nSource line 65: retained caret and scroll\nSource line 66: retained caret and scroll\nSource line 67: retained caret and scroll\nSource line 68: retained caret and scroll\nSource line 69: retained caret and scroll\nSource line 70: retained caret and scroll\nSource line 71: retained caret and scroll\nSource line 72: retained caret and scroll\nSource line 73: retained caret and scroll\nSource line 74: retained caret and scroll\nSource line 75: retained caret and scroll\nSource line 76: retained caret and scroll\nSource line 77: retained caret and scroll\nSource line 78: retained caret and scroll\nSource line 79: retained caret and scroll\nSource line 80: retained caret and scroll\nSource line 81: retained caret and scroll\nSource line 82: retained caret and scroll\nSource line 83: retained caret and scroll\nSource line 84: retained caret and scroll\nSource line 85: retained caret and scroll\nSource line 86: retained caret and scroll\nSource line 87: retained caret and scroll\nSource line 88: retained caret and scroll\nSource line 89: retained caret and scroll\nSource line 90: retained caret and scroll\nSource line 91: retained caret and scroll\nSource line 92: retained caret and scroll\nSource line 93: retained caret and scroll\nSource line 94: retained caret and scroll\nSource line 95: retained caret and scroll\nSource line 96: retained caret and scroll\nSource line 97: retained caret and scroll\nSource line 98: retained caret and scroll\nSource line 99: retained caret and scroll",
+          "start": 4147,
+          "end": 4189,
+          "scrollTop": 1634
+        },
+        "after": {
+          "text": "Source line 0: retained caret and scroll\nSource line 1: retained caret and scroll\nSource line 2: retained caret and scroll\nSource line 3: retained caret and scroll\nSource line 4: retained caret and scroll\nSource line 5: retained caret and scroll\nSource line 6: retained caret and scroll\nSource line 7: retained caret and scroll\nSource line 8: retained caret and scroll\nSource line 9: retained caret and scroll\nSource line 10: retained caret and scroll\nSource line 11: retained caret and scroll\nSource line 12: retained caret and scroll\nSource line 13: retained caret and scroll\nSource line 14: retained caret and scroll\nSource line 15: retained caret and scroll\nSource line 16: retained caret and scroll\nSource line 17: retained caret and scroll\nSource line 18: retained caret and scroll\nSource line 19: retained caret and scroll\nSource line 20: retained caret and scroll\nSource line 21: retained caret and scroll\nSource line 22: retained caret and scroll\nSource line 23: retained caret and scroll\nSource line 24: retained caret and scroll\nSource line 25: retained caret and scroll\nSource line 26: retained caret and scroll\nSource line 27: retained caret and scroll\nSource line 28: retained caret and scroll\nSource line 29: retained caret and scroll\nSource line 30: retained caret and scroll\nSource line 31: retained caret and scroll\nSource line 32: retained caret and scroll\nSource line 33: retained caret and scroll\nSource line 34: retained caret and scroll\nSource line 35: retained caret and scroll\nSource line 36: retained caret and scroll\nSource line 37: retained caret and scroll\nSource line 38: retained caret and scroll\nSource line 39: retained caret and scroll\nSource line 40: retained caret and scroll\nSource line 41: retained caret and scroll\nSource line 42: retained caret and scroll\nSource line 43: retained caret and scroll\nSource line 44: retained caret and scroll\nSource line 45: retained caret and scroll\nSource line 46: retained caret and scroll\nSource line 47: retained caret and scroll\nSource line 48: retained caret and scroll\nSource line 49: retained caret and scroll\nSource line 50: retained caret and scroll\nSource line 51: retained caret and scroll\nSource line 52: retained caret and scroll\nSource line 53: retained caret and scroll\nSource line 54: retained caret and scroll\nSource line 55: retained caret and scroll\nSource line 56: retained caret and scroll\nSource line 57: retained caret and scroll\nSource line 58: retained caret and scroll\nSource line 59: retained caret and scroll\nSource line 60: retained caret and scroll\nSource line 61: retained caret and scroll\nSource line 62: retained caret and scroll\nSource line 63: retained caret and scroll\nSource line 64: retained caret and scroll\nSource line 65: retained caret and scroll\nSource line 66: retained caret and scroll\nSource line 67: retained caret and scroll\nSource line 68: retained caret and scroll\nSource line 69: retained caret and scroll\nSource line 70: retained caret and scroll\nSource line 71: retained caret and scroll\nSource line 72: retained caret and scroll\nSource line 73: retained caret and scroll\nSource line 74: retained caret and scroll\nSource line 75: retained caret and scroll\nSource line 76: retained caret and scroll\nSource line 77: retained caret and scroll\nSource line 78: retained caret and scroll\nSource line 79: retained caret and scroll\nSource line 80: retained caret and scroll\nSource line 81: retained caret and scroll\nSource line 82: retained caret and scroll\nSource line 83: retained caret and scroll\nSource line 84: retained caret and scroll\nSource line 85: retained caret and scroll\nSource line 86: retained caret and scroll\nSource line 87: retained caret and scroll\nSource line 88: retained caret and scroll\nSource line 89: retained caret and scroll\nSource line 90: retained caret and scroll\nSource line 91: retained caret and scroll\nSource line 92: retained caret and scroll\nSource line 93: retained caret and scroll\nSource line 94: retained caret and scroll\nSource line 95: retained caret and scroll\nSource line 96: retained caret and scroll\nSource line 97: retained caret and scroll\nSource line 98: retained caret and scroll\nSource line 99: retained caret and scroll",
+          "start": 4147,
+          "end": 4189,
+          "scrollTop": 1634
+        },
+        "activeId": "document-1a04161666ac1e2295defc00d3ca9065-1",
+        "href": "/documents/A?view=edit"
+      },
+      "nativeContainers": [
+        "left",
+        "#ec9aa14c-b6fa-40f8-aabe-89f2481c1689",
+        "#c1c0d405-0433-48e3-ad48-ab73275b6c00",
+        "#050000f1-387b-4707-8f09-8862785b8b6d"
+      ],
+      "rejected": {
+        "status": "rejected:layout-policy",
+        "documents": 5
+      },
+      "focusContract": "Keyboard action preserves textarea focus/caret/selection/scroll; ordinary button clicks preserve the clicked button's focus. No focus-restoration event handlers are supplied by the application."
+    }
+  },
+  "placementFocusRace": {
+    "source": {
+      "id": "document-a9f1a01a3c7868dc03aeb43d9ab772eb-1",
+      "href": "/documents/A?view=edit",
+      "containerId": "left",
+      "title": "Published document",
+      "preview": false,
+      "navigationKey": "documents"
+    },
+    "newer": {
+      "id": "document-a9f1a01a3c7868dc03aeb43d9ab772eb-2",
+      "href": "/documents/B?view=edit",
+      "containerId": "right",
+      "title": "Published document",
+      "preview": false,
+      "navigationKey": "documents"
+    },
+    "committed": {
+      "id": "document-a9f1a01a3c7868dc03aeb43d9ab772eb-3",
+      "href": "/documents/Slow-A?view=edit",
+      "containerId": "left",
+      "title": "Published document",
+      "preview": false,
+      "navigationKey": "documents"
+    }
+  },
+  "emptyHome": {
+    "empty": {
+      "documents": [],
+      "editing": {
+        "activeGroupId": null,
+        "activeTabId": null,
+        "focusedArea": null,
+        "focusedTabId": null,
+        "windowFocused": true
+      },
+      "layout": {
+        "global": {
+          "tabEnableRename": true,
+          "tabEnablePin": true,
+          "tabSetEnableTabGroups": true
+        },
+        "borders": [
+          {
+            "location": "bottom",
+            "type": "border",
+            "selected": 0,
+            "children": [
+              {
+                "type": "tab",
+                "id": "inspector",
+                "name": "Native Inspector title",
+                "component": "worksplit.tool"
+              }
+            ]
+          }
+        ],
+        "layout": {
+          "type": "row",
+          "id": "#07e1367e-e321-406e-87c2-31f9da10a440",
+          "children": [
+            {
+              "type": "tabset",
+              "id": "left",
+              "selected": -1,
+              "name": "Writing",
+              "enableDeleteWhenEmpty": false,
+              "children": []
+            },
+            {
+              "type": "tabset",
+              "id": "right",
+              "selected": -1,
+              "name": "Reference",
+              "enableDeleteWhenEmpty": false,
+              "children": []
+            }
+          ]
+        },
+        "subLayouts": {}
+      },
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "default",
+        "layout": {
+          "global": {
+            "tabEnableRename": true,
+            "tabEnablePin": true,
+            "tabSetEnableTabGroups": true
+          },
+          "borders": [
+            {
+              "location": "bottom",
+              "type": "border",
+              "selected": 0,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "inspector",
+                  "name": "Native Inspector title",
+                  "component": "worksplit.tool"
+                }
+              ]
+            }
+          ],
+          "layout": {
+            "type": "row",
+            "id": "#07e1367e-e321-406e-87c2-31f9da10a440",
+            "children": [
+              {
+                "type": "tabset",
+                "id": "left",
+                "selected": -1,
+                "name": "Writing",
+                "enableDeleteWhenEmpty": false,
+                "children": []
+              },
+              {
+                "type": "tabset",
+                "id": "right",
+                "selected": -1,
+                "name": "Reference",
+                "enableDeleteWhenEmpty": false,
+                "children": []
+              }
+            ]
+          },
+          "subLayouts": {}
+        }
+      },
+      "metrics": {
+        "loads": 0,
+        "saves": 0,
+        "routersCreated": 1,
+        "liveRouters": 1,
+        "editorMounts": 0,
+        "editorUnmounts": 0,
+        "subscriptions": 0,
+        "disposals": 0,
+        "lifecycleDisposals": 0,
+        "startStatus": "empty",
+        "providerMounts": 0,
+        "providerUnmounts": 0,
+        "providers": 0,
+        "pendingSaveId": "",
+        "lastSavedId": "",
+        "lastLeave": ""
+      },
+      "href": "/"
+    },
+    "beforeHome": {
+      "documents": [
+        {
+          "id": "document-e8a90b4e2d99491edbf641ae6de0add9-1",
+          "href": "/documents/A?view=edit",
+          "containerId": "left",
+          "title": "Published document",
+          "preview": false,
+          "navigationKey": "documents"
+        }
+      ],
+      "editing": {
+        "activeGroupId": "left",
+        "activeTabId": "document-e8a90b4e2d99491edbf641ae6de0add9-1",
+        "focusedArea": "document",
+        "focusedTabId": "document-e8a90b4e2d99491edbf641ae6de0add9-1",
+        "windowFocused": true
+      },
+      "layout": {
+        "global": {
+          "tabEnableRename": true,
+          "tabEnablePin": true,
+          "tabSetEnableTabGroups": true
+        },
+        "borders": [
+          {
+            "location": "bottom",
+            "type": "border",
+            "selected": 0,
+            "children": [
+              {
+                "type": "tab",
+                "id": "inspector",
+                "name": "Native Inspector title",
+                "component": "worksplit.tool"
+              }
+            ]
+          }
+        ],
+        "layout": {
+          "type": "row",
+          "id": "#379a9069-1a68-4f76-b180-09347495cd03",
+          "children": [
+            {
+              "type": "tabset",
+              "id": "left",
+              "name": "Writing",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-e8a90b4e2d99491edbf641ae6de0add9-1",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/A?view=edit",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                }
+              ],
+              "active": true
+            },
+            {
+              "type": "tabset",
+              "id": "right",
+              "selected": -1,
+              "name": "Reference",
+              "enableDeleteWhenEmpty": false,
+              "children": []
+            }
+          ]
+        },
+        "subLayouts": {}
+      },
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "default",
+        "layout": {
+          "global": {
+            "tabEnableRename": true,
+            "tabEnablePin": true,
+            "tabSetEnableTabGroups": true
+          },
+          "borders": [
+            {
+              "location": "bottom",
+              "type": "border",
+              "selected": 0,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "inspector",
+                  "name": "Native Inspector title",
+                  "component": "worksplit.tool"
+                }
+              ]
+            }
+          ],
+          "layout": {
+            "type": "row",
+            "id": "#379a9069-1a68-4f76-b180-09347495cd03",
+            "children": [
+              {
+                "type": "tabset",
+                "id": "left",
+                "name": "Writing",
+                "enableDeleteWhenEmpty": false,
+                "children": [
+                  {
+                    "type": "tab",
+                    "id": "document-e8a90b4e2d99491edbf641ae6de0add9-1",
+                    "name": "Published document",
+                    "component": "worksplit.document",
+                    "config": {
+                      "href": "/documents/A?view=edit",
+                      "multi": false
+                    },
+                    "enablePopout": false,
+                    "enableFloat": false
+                  }
+                ],
+                "active": true
+              },
+              {
+                "type": "tabset",
+                "id": "right",
+                "selected": -1,
+                "name": "Reference",
+                "enableDeleteWhenEmpty": false,
+                "children": []
+              }
+            ]
+          },
+          "subLayouts": {}
+        }
+      },
+      "metrics": {
+        "loads": 1,
+        "saves": 0,
+        "routersCreated": 2,
+        "liveRouters": 2,
+        "editorMounts": 1,
+        "editorUnmounts": 0,
+        "subscriptions": 1,
+        "disposals": 0,
+        "lifecycleDisposals": 0,
+        "startStatus": "empty",
+        "providerMounts": 1,
+        "providerUnmounts": 0,
+        "providers": 1,
+        "pendingSaveId": "",
+        "lastSavedId": "",
+        "lastLeave": ""
+      },
+      "href": "/documents/A?view=edit"
+    },
+    "beforeReload": {
+      "version": 1,
+      "workspaceId": "default",
+      "layout": {
+        "global": {
+          "tabEnableRename": true,
+          "tabEnablePin": true,
+          "tabSetEnableTabGroups": true
+        },
+        "borders": [
+          {
+            "location": "bottom",
+            "type": "border",
+            "selected": 0,
+            "children": [
+              {
+                "type": "tab",
+                "id": "inspector",
+                "name": "Native Inspector title",
+                "component": "worksplit.tool"
+              }
+            ]
+          }
+        ],
+        "layout": {
+          "type": "row",
+          "id": "#379a9069-1a68-4f76-b180-09347495cd03",
+          "children": [
+            {
+              "type": "tabset",
+              "id": "left",
+              "name": "Writing",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-e8a90b4e2d99491edbf641ae6de0add9-1",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/A?view=edit",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                },
+                {
+                  "type": "tab",
+                  "id": "document-e8a90b4e2d99491edbf641ae6de0add9-2",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/B?view=edit",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                }
+              ],
+              "active": true
+            },
+            {
+              "type": "tabset",
+              "id": "right",
+              "selected": -1,
+              "name": "Reference",
+              "enableDeleteWhenEmpty": false,
+              "children": []
+            }
+          ]
+        },
+        "subLayouts": {}
+      }
+    },
+    "restored": {
+      "documents": [
+        {
+          "id": "document-e8a90b4e2d99491edbf641ae6de0add9-1",
+          "href": "/documents/A?view=edit",
+          "containerId": "left",
+          "title": "Published document",
+          "preview": false,
+          "navigationKey": "documents"
+        },
+        {
+          "id": "document-e8a90b4e2d99491edbf641ae6de0add9-2",
+          "href": "/documents/B?view=edit",
+          "containerId": "left",
+          "title": "Published document",
+          "preview": false,
+          "navigationKey": null
+        }
+      ],
+      "editing": {
+        "activeGroupId": "left",
+        "activeTabId": "document-e8a90b4e2d99491edbf641ae6de0add9-1",
+        "focusedArea": "document",
+        "focusedTabId": "document-e8a90b4e2d99491edbf641ae6de0add9-1",
+        "windowFocused": true
+      },
+      "layout": {
+        "global": {
+          "tabEnableRename": true,
+          "tabEnablePin": true,
+          "tabSetEnableTabGroups": true
+        },
+        "borders": [
+          {
+            "location": "bottom",
+            "type": "border",
+            "selected": 0,
+            "children": [
+              {
+                "type": "tab",
+                "id": "inspector",
+                "name": "Native Inspector title",
+                "component": "worksplit.tool"
+              }
+            ]
+          }
+        ],
+        "layout": {
+          "type": "row",
+          "id": "#379a9069-1a68-4f76-b180-09347495cd03",
+          "children": [
+            {
+              "type": "tabset",
+              "id": "left",
+              "name": "Writing",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-e8a90b4e2d99491edbf641ae6de0add9-1",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/A?view=edit",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                },
+                {
+                  "type": "tab",
+                  "id": "document-e8a90b4e2d99491edbf641ae6de0add9-2",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/B?view=edit",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                }
+              ],
+              "active": true
+            },
+            {
+              "type": "tabset",
+              "id": "right",
+              "selected": -1,
+              "name": "Reference",
+              "enableDeleteWhenEmpty": false,
+              "children": []
+            }
+          ]
+        },
+        "subLayouts": {}
+      },
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "default",
+        "layout": {
+          "global": {
+            "tabEnableRename": true,
+            "tabEnablePin": true,
+            "tabSetEnableTabGroups": true
+          },
+          "borders": [
+            {
+              "location": "bottom",
+              "type": "border",
+              "selected": 0,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "inspector",
+                  "name": "Native Inspector title",
+                  "component": "worksplit.tool"
+                }
+              ]
+            }
+          ],
+          "layout": {
+            "type": "row",
+            "id": "#379a9069-1a68-4f76-b180-09347495cd03",
+            "children": [
+              {
+                "type": "tabset",
+                "id": "left",
+                "name": "Writing",
+                "enableDeleteWhenEmpty": false,
+                "children": [
+                  {
+                    "type": "tab",
+                    "id": "document-e8a90b4e2d99491edbf641ae6de0add9-1",
+                    "name": "Published document",
+                    "component": "worksplit.document",
+                    "config": {
+                      "href": "/documents/A?view=edit",
+                      "multi": false
+                    },
+                    "enablePopout": false,
+                    "enableFloat": false
+                  },
+                  {
+                    "type": "tab",
+                    "id": "document-e8a90b4e2d99491edbf641ae6de0add9-2",
+                    "name": "Published document",
+                    "component": "worksplit.document",
+                    "config": {
+                      "href": "/documents/B?view=edit",
+                      "multi": false
+                    },
+                    "enablePopout": false,
+                    "enableFloat": false
+                  }
+                ],
+                "active": true
+              },
+              {
+                "type": "tabset",
+                "id": "right",
+                "selected": -1,
+                "name": "Reference",
+                "enableDeleteWhenEmpty": false,
+                "children": []
+              }
+            ]
+          },
+          "subLayouts": {}
+        }
+      },
+      "metrics": {
+        "loads": 1,
+        "saves": 0,
+        "routersCreated": 2,
+        "liveRouters": 2,
+        "editorMounts": 1,
+        "editorUnmounts": 0,
+        "subscriptions": 1,
+        "disposals": 0,
+        "lifecycleDisposals": 0,
+        "startStatus": "committed",
+        "providerMounts": 1,
+        "providerUnmounts": 0,
+        "providers": 1,
+        "pendingSaveId": "",
+        "lastSavedId": "",
+        "lastLeave": ""
+      },
+      "href": "/documents/A?view=edit"
+    }
+  },
+  "strictMode": {
+    "development": true,
+    "distribution": "Freshly installed public tarballs; Vite dev server and development React for actual effect replay",
+    "initial": {
+      "documents": [
+        {
+          "id": "document-082caf1e4dc6df5f9b27c3b9a3b81368-1",
+          "href": "/documents/A?view=edit",
+          "containerId": "left",
+          "title": "Published document",
+          "preview": false,
+          "navigationKey": "documents"
+        },
+        {
+          "id": "document-082caf1e4dc6df5f9b27c3b9a3b81368-2",
+          "href": "/documents/B?view=edit",
+          "containerId": "right",
+          "title": "Published document",
+          "preview": false,
+          "navigationKey": "documents"
+        }
+      ],
+      "editing": {
+        "activeGroupId": "left",
+        "activeTabId": "document-082caf1e4dc6df5f9b27c3b9a3b81368-1",
+        "focusedArea": null,
+        "focusedTabId": null,
+        "windowFocused": true
+      },
+      "layout": {
+        "global": {
+          "tabEnableRename": true,
+          "tabEnablePin": true,
+          "tabSetEnableTabGroups": true
+        },
+        "borders": [
+          {
+            "location": "bottom",
+            "type": "border",
+            "selected": 0,
+            "children": [
+              {
+                "type": "tab",
+                "id": "inspector",
+                "name": "Native Inspector title",
+                "component": "worksplit.tool"
+              }
+            ]
+          }
+        ],
+        "layout": {
+          "type": "row",
+          "id": "#063d6657-e248-4bbc-aa3d-e957a57f8b11",
+          "children": [
+            {
+              "type": "tabset",
+              "id": "left",
+              "name": "Writing",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-082caf1e4dc6df5f9b27c3b9a3b81368-1",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/A?view=edit",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                }
+              ],
+              "active": true
+            },
+            {
+              "type": "tabset",
+              "id": "right",
+              "name": "Reference",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-082caf1e4dc6df5f9b27c3b9a3b81368-2",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/B?view=edit",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                }
+              ]
+            }
+          ]
+        },
+        "subLayouts": {}
+      },
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "default",
+        "layout": {
+          "global": {
+            "tabEnableRename": true,
+            "tabEnablePin": true,
+            "tabSetEnableTabGroups": true
+          },
+          "borders": [
+            {
+              "location": "bottom",
+              "type": "border",
+              "selected": 0,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "inspector",
+                  "name": "Native Inspector title",
+                  "component": "worksplit.tool"
+                }
+              ]
+            }
+          ],
+          "layout": {
+            "type": "row",
+            "id": "#063d6657-e248-4bbc-aa3d-e957a57f8b11",
+            "children": [
+              {
+                "type": "tabset",
+                "id": "left",
+                "name": "Writing",
+                "enableDeleteWhenEmpty": false,
+                "children": [
+                  {
+                    "type": "tab",
+                    "id": "document-082caf1e4dc6df5f9b27c3b9a3b81368-1",
+                    "name": "Published document",
+                    "component": "worksplit.document",
+                    "config": {
+                      "href": "/documents/A?view=edit",
+                      "multi": false
+                    },
+                    "enablePopout": false,
+                    "enableFloat": false
+                  }
+                ],
+                "active": true
+              },
+              {
+                "type": "tabset",
+                "id": "right",
+                "name": "Reference",
+                "enableDeleteWhenEmpty": false,
+                "children": [
+                  {
+                    "type": "tab",
+                    "id": "document-082caf1e4dc6df5f9b27c3b9a3b81368-2",
+                    "name": "Published document",
+                    "component": "worksplit.document",
+                    "config": {
+                      "href": "/documents/B?view=edit",
+                      "multi": false
+                    },
+                    "enablePopout": false,
+                    "enableFloat": false
+                  }
+                ]
+              }
+            ]
+          },
+          "subLayouts": {}
+        }
+      },
+      "metrics": {
+        "loads": 2,
+        "saves": 0,
+        "routersCreated": 3,
+        "liveRouters": 3,
+        "editorMounts": 4,
+        "editorUnmounts": 2,
+        "subscriptions": 2,
+        "disposals": 2,
+        "lifecycleDisposals": 0,
+        "startStatus": "committed",
+        "providerMounts": 4,
+        "providerUnmounts": 2,
+        "providers": 2,
+        "pendingSaveId": "",
+        "lastSavedId": "",
+        "lastLeave": ""
+      },
+      "href": "/documents/A?view=edit"
+    },
+    "closed": {
+      "documents": [
+        {
+          "id": "document-082caf1e4dc6df5f9b27c3b9a3b81368-2",
+          "href": "/documents/B?view=edit",
+          "containerId": "right",
+          "title": "Published document",
+          "preview": false,
+          "navigationKey": "documents"
+        }
+      ],
+      "editing": {
+        "activeGroupId": "right",
+        "activeTabId": "document-082caf1e4dc6df5f9b27c3b9a3b81368-2",
+        "focusedArea": "document",
+        "focusedTabId": "document-082caf1e4dc6df5f9b27c3b9a3b81368-2",
+        "windowFocused": true
+      },
+      "layout": {
+        "global": {
+          "tabEnableRename": true,
+          "tabEnablePin": true,
+          "tabSetEnableTabGroups": true
+        },
+        "borders": [
+          {
+            "location": "bottom",
+            "type": "border",
+            "selected": 0,
+            "children": [
+              {
+                "type": "tab",
+                "id": "inspector",
+                "name": "Native Inspector title",
+                "component": "worksplit.tool"
+              }
+            ]
+          }
+        ],
+        "layout": {
+          "type": "row",
+          "id": "#063d6657-e248-4bbc-aa3d-e957a57f8b11",
+          "children": [
+            {
+              "type": "tabset",
+              "id": "left",
+              "selected": -1,
+              "name": "Writing",
+              "enableDeleteWhenEmpty": false,
+              "children": []
+            },
+            {
+              "type": "tabset",
+              "id": "right",
+              "name": "Reference",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-082caf1e4dc6df5f9b27c3b9a3b81368-2",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/B?view=edit",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                }
+              ],
+              "active": true
+            }
+          ]
+        },
+        "subLayouts": {}
+      },
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "default",
+        "layout": {
+          "global": {
+            "tabEnableRename": true,
+            "tabEnablePin": true,
+            "tabSetEnableTabGroups": true
+          },
+          "borders": [
+            {
+              "location": "bottom",
+              "type": "border",
+              "selected": 0,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "inspector",
+                  "name": "Native Inspector title",
+                  "component": "worksplit.tool"
+                }
+              ]
+            }
+          ],
+          "layout": {
+            "type": "row",
+            "id": "#063d6657-e248-4bbc-aa3d-e957a57f8b11",
+            "children": [
+              {
+                "type": "tabset",
+                "id": "left",
+                "selected": -1,
+                "name": "Writing",
+                "enableDeleteWhenEmpty": false,
+                "children": []
+              },
+              {
+                "type": "tabset",
+                "id": "right",
+                "name": "Reference",
+                "enableDeleteWhenEmpty": false,
+                "children": [
+                  {
+                    "type": "tab",
+                    "id": "document-082caf1e4dc6df5f9b27c3b9a3b81368-2",
+                    "name": "Published document",
+                    "component": "worksplit.document",
+                    "config": {
+                      "href": "/documents/B?view=edit",
+                      "multi": false
+                    },
+                    "enablePopout": false,
+                    "enableFloat": false
+                  }
+                ],
+                "active": true
+              }
+            ]
+          },
+          "subLayouts": {}
+        }
+      },
+      "metrics": {
+        "loads": 2,
+        "saves": 0,
+        "routersCreated": 3,
+        "liveRouters": 2,
+        "editorMounts": 4,
+        "editorUnmounts": 3,
+        "subscriptions": 1,
+        "disposals": 3,
+        "lifecycleDisposals": 1,
+        "startStatus": "committed",
+        "providerMounts": 4,
+        "providerUnmounts": 3,
+        "providers": 1,
+        "pendingSaveId": "",
+        "lastSavedId": "",
+        "lastLeave": "{\"reason\":\"close\",\"id\":\"document-082caf1e4dc6df5f9b27c3b9a3b81368-1\",\"from\":\"/documents/A?view=edit\"}"
+      },
+      "href": "/documents/B?view=edit"
+    },
+    "disposed": {
+      "documents": [],
+      "editing": {
+        "activeGroupId": null,
+        "activeTabId": null,
+        "focusedArea": null,
+        "focusedTabId": null,
+        "windowFocused": true
+      },
+      "layout": {
+        "global": {
+          "tabEnableRename": true,
+          "tabEnablePin": true,
+          "tabSetEnableTabGroups": true
+        },
+        "borders": [
+          {
+            "location": "bottom",
+            "type": "border",
+            "selected": 0,
+            "children": [
+              {
+                "type": "tab",
+                "id": "inspector",
+                "name": "Native Inspector title",
+                "component": "worksplit.tool"
+              }
+            ]
+          }
+        ],
+        "layout": {
+          "type": "row",
+          "id": "#063d6657-e248-4bbc-aa3d-e957a57f8b11",
+          "children": [
+            {
+              "type": "tabset",
+              "id": "left",
+              "selected": -1,
+              "name": "Writing",
+              "enableDeleteWhenEmpty": false,
+              "children": []
+            },
+            {
+              "type": "tabset",
+              "id": "right",
+              "name": "Reference",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-082caf1e4dc6df5f9b27c3b9a3b81368-2",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/B?view=edit",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                }
+              ],
+              "active": true
+            }
+          ]
+        },
+        "subLayouts": {}
+      },
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "default",
+        "layout": {
+          "global": {
+            "tabEnableRename": true,
+            "tabEnablePin": true,
+            "tabSetEnableTabGroups": true
+          },
+          "borders": [
+            {
+              "location": "bottom",
+              "type": "border",
+              "selected": 0,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "inspector",
+                  "name": "Native Inspector title",
+                  "component": "worksplit.tool"
+                }
+              ]
+            }
+          ],
+          "layout": {
+            "type": "row",
+            "id": "#063d6657-e248-4bbc-aa3d-e957a57f8b11",
+            "children": [
+              {
+                "type": "tabset",
+                "id": "left",
+                "selected": -1,
+                "name": "Writing",
+                "enableDeleteWhenEmpty": false,
+                "children": []
+              },
+              {
+                "type": "tabset",
+                "id": "right",
+                "name": "Reference",
+                "enableDeleteWhenEmpty": false,
+                "children": [
+                  {
+                    "type": "tab",
+                    "id": "document-082caf1e4dc6df5f9b27c3b9a3b81368-2",
+                    "name": "Published document",
+                    "component": "worksplit.document",
+                    "config": {
+                      "href": "/documents/B?view=edit",
+                      "multi": false
+                    },
+                    "enablePopout": false,
+                    "enableFloat": false
+                  }
+                ],
+                "active": true
+              }
+            ]
+          },
+          "subLayouts": {}
+        }
+      },
+      "metrics": {
+        "loads": 2,
+        "saves": 0,
+        "routersCreated": 3,
+        "liveRouters": 0,
+        "editorMounts": 4,
+        "editorUnmounts": 4,
+        "subscriptions": 0,
+        "disposals": 4,
+        "lifecycleDisposals": 2,
+        "startStatus": "committed",
+        "providerMounts": 4,
+        "providerUnmounts": 4,
+        "providers": 0,
+        "pendingSaveId": "",
+        "lastSavedId": "",
+        "lastLeave": "{\"reason\":\"close\",\"id\":\"document-082caf1e4dc6df5f9b27c3b9a3b81368-1\",\"from\":\"/documents/A?view=edit\"}"
+      },
+      "href": "/documents/B?view=edit"
+    }
+  },
+  "strictModeServer": {
+    "exit": {
+      "code": 143,
+      "signal": null
+    },
+    "log": "\n  VITE v8.3.3  ready in 158 ms\n\n  ➜  Local:   http://127.0.0.1:36375/\n"
+  },
+  "completedAt": "2026-10-11T10:39:29.631Z",
+  "preview": {
+    "exit": {
+      "code": 143,
+      "signal": null
+    },
+    "log": "  ➜  Local:   http://127.0.0.1:37629/\n"
+  }
+}

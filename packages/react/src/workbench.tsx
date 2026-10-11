@@ -21,10 +21,31 @@ import {
   type WorkbenchState,
 } from "./integration";
 
-const ContentContext = createContext<{
-  id: string;
-  instance: WorkbenchInstance<AnyRouter>;
-} | null>(null);
+interface PendingLifecycle {
+  lifecycle: WorkbenchContentLifecycle;
+  unregister: () => void;
+}
+function createContentContext(id: string, instance: WorkbenchInstance<AnyRouter>) {
+  let pending: PendingLifecycle | undefined;
+  return {
+    id,
+    instance,
+    takePendingLifecycle: () => {
+      const previous = pending;
+      pending = undefined;
+      return previous;
+    },
+    deferLifecycle: (teardown: PendingLifecycle) => {
+      pending = teardown;
+      queueMicrotask(() => {
+        if (pending !== teardown) return;
+        pending = undefined;
+        teardown.unregister();
+      });
+    },
+  };
+}
+const ContentContext = createContext<ReturnType<typeof createContentContext> | null>(null);
 const defaultEmpty = <p>Open a document to begin.</p>;
 const rejectExternalDrag = () => undefined;
 
@@ -81,7 +102,18 @@ export function useWorkbenchContent() {
 }
 export function useWorkbenchContentLifecycle(lifecycle: WorkbenchContentLifecycle) {
   const content = useWorkbenchContent();
-  useEffect(() => content.register(lifecycle), [content, lifecycle]);
+  const context = useContext(ContentContext)!;
+  useEffect(() => {
+    const pending = context.takePendingLifecycle();
+    // Replaying the same effect retains its live resources. A genuinely new owner first
+    // releases the old registration; a second still-mounted owner remains an error.
+    const reconnect = pending?.lifecycle === lifecycle;
+    if (pending && !reconnect) pending.unregister();
+    const unregister = reconnect ? pending.unregister : content.register(lifecycle);
+    return () => {
+      context.deferLifecycle({ lifecycle, unregister });
+    };
+  }, [content, context, lifecycle]);
 }
 
 const Content = memo(function Content({
@@ -94,7 +126,7 @@ const Content = memo(function Content({
   const internal = integrationState(instance);
   const router = useStore(internal.store, () => internal.documents.get(id)?.router);
   const tool = internal.tools.get(id);
-  const context = useMemo(() => ({ id, instance }), [id, instance]);
+  const context = useMemo(() => createContentContext(id, instance), [id, instance]);
   useEffect(() => {
     if (!tool) void internal.loadDocument(id);
   }, [id, internal, tool]);

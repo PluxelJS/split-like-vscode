@@ -26,6 +26,7 @@ export {
   type WorkbenchEditingContext,
   type WorkbenchCommand,
   type NavigationResult,
+  type StartResult,
   type CloseResult,
   type WorkbenchDocument,
   type WorkbenchState,

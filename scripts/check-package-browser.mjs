@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { chromium, expect } from "@playwright/test";
 
 const repository = resolve(import.meta.dirname, "..");
-const acceptance = resolve(repository, "refactor/acceptance/api-driven-placement");
+const acceptance = resolve(repository, "refactor/acceptance/migration-readiness");
 
 /** Drive the built app installed from Worksplit tarballs, using the real public consumer fixture. */
 export async function checkPackageBrowser(consumerDirectory) {
@@ -58,6 +58,8 @@ export async function checkPackageBrowser(consumerDirectory) {
     await checkPagePlacement(page, url, report, report.conditions.desktop, "desktop");
     await checkPagePlacement(page, url, report, report.conditions.compact, "compact");
     await checkPlacementFocusRace(page, url, report);
+    await checkEmptyHome(page, url, report);
+    await checkStrictMode(context, consumerDirectory, report);
     await checkFocusedToolPlacement(page, url, report);
     assert.equal(preview.exit, null, "The packed consumer preview exited during acceptance");
     assert.deepEqual(report.pageErrors, [], "The packed consumer raised an unhandled page error");
@@ -771,6 +773,169 @@ function inputState(input) {
   }));
 }
 
+async function checkEmptyHome(page, url, report) {
+  await page.goto(`${url}/#empty-home`);
+  await expect(page.getByLabel("Startup status", { exact: true })).toHaveText("empty");
+  const empty = await sample(page);
+  assert.equal(empty.documents.length, 0);
+  assert.equal(empty.editing.activeTabId, null);
+  assert.equal(empty.metrics.loads, 0);
+  assert.equal(
+    empty.metrics.routersCreated,
+    1,
+    "Empty home creates only the instance resolver, no document Router",
+  );
+  await expect(
+    page.getByText("Application native empty group", { exact: true }).first(),
+  ).toBeVisible();
+  await expect(page).toHaveURL(`${url}/#empty-home`);
+  await page.getByRole("button", { name: "Open A", exact: true }).click();
+  await expect(page.getByLabel("Draft A", { exact: true })).toBeVisible();
+  const a = await documentNamed(page, "A");
+  await page.locator(`#flexlayout-tabbutton-${a.id} [title=Close]`).click();
+  await expect.poll(async () => (await sample(page)).documents.length).toBe(0);
+  await expect(page).toHaveURL(`${url}/#empty-home`);
+  const afterClose = await sample(page);
+  await page.goBack();
+  await settle(page);
+  await expect(page).toHaveURL(`${url}/#empty-home`);
+  assert.equal((await sample(page)).documents.length, 0);
+  assert.equal((await sample(page)).metrics.routersCreated, afterClose.metrics.routersCreated);
+  await page.goForward();
+  await settle(page);
+  assert.equal((await sample(page)).documents.length, 0);
+  assert.equal((await sample(page)).metrics.loads, afterClose.metrics.loads);
+  await page.reload();
+  await expect(page.getByLabel("Startup status", { exact: true })).toHaveText("empty");
+  assert.equal((await sample(page)).documents.length, 0);
+  report.checks.push(
+    "Empty home start, last close, real browser Back/Forward between empty anchors and reload keep zero documents without document Routers or loaders",
+  );
+
+  await page.goto(`${url}/fixture-owned-home#empty-home`);
+  await expect(page.getByLabel("Startup status", { exact: true })).toHaveText("empty");
+  await page.getByRole("button", { name: "Open A", exact: true }).click();
+  await expect(page.getByLabel("Draft A", { exact: true })).toBeVisible();
+  const retained = await documentNamed(page, "A");
+  const beforeHome = await sample(page);
+  await page.goBack();
+  await expect(page).toHaveURL(`${url}${retained.href}`);
+  await settle(page);
+  assert.equal((await sample(page)).documents.length, 1);
+  assert.equal((await sample(page)).editing.activeTabId, retained.id);
+  assert.equal((await sample(page)).metrics.loads, beforeHome.metrics.loads);
+  assert.equal((await sample(page)).metrics.lifecycleDisposals, 0);
+  await page.goForward();
+  await expect(page).toHaveURL(`${url}${retained.href}`);
+  assert.equal((await sample(page)).documents.length, 1);
+  await page.getByRole("button", { name: "Open B", exact: true }).click();
+  await expect(page.getByLabel("Draft B", { exact: true })).toBeVisible();
+  const b = await documentNamed(page, "B");
+  await page.locator(`#flexlayout-tabbutton-${retained.id}`).click();
+  await page.getByRole("button", { name: "Save reload snapshot", exact: true }).click();
+  const beforeReload = await sample(page);
+  await page.goto(`${url}/#empty-home`);
+  await expect(page.getByLabel("Startup status", { exact: true })).toHaveText("committed");
+  await expect(page.getByLabel("Draft A", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(`${url}${retained.href}`);
+  const restored = await sample(page);
+  assert.deepEqual(
+    restored.documents.map((document) => document.id).toSorted(),
+    [retained.id, b.id].toSorted(),
+  );
+  assert.equal(restored.editing.activeTabId, retained.id);
+  assert.equal(restored.metrics.loads, 1, "Restoring selected A from home leaves hidden B lazy");
+  assert.equal(restored.metrics.lifecycleDisposals, 0);
+  await expect(page.getByLabel("Draft B", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Issues", { exact: true })).toHaveText("No issues");
+  await page.screenshot({ path: resolve(acceptance, "packed-consumer-empty-home-restored.png") });
+  report.screenshots.push("packed-consumer-empty-home-restored.png");
+  report.emptyHome = { empty, beforeHome, beforeReload: beforeReload.snapshot, restored };
+  report.checks.push(
+    "Back to an owned home anchor retains live documents and normalizes its URL; snapshot plus home restores native selected A while hidden B remains lazy",
+  );
+  await page.evaluate(() => sessionStorage.removeItem("packed-empty-home-snapshot"));
+}
+
+async function checkStrictMode(context, directory, report) {
+  // React's production build deliberately omits effect replay. Use the same installed public
+  // tarballs with Vite development serving to test real StrictMode setup/cleanup/setup.
+  const port = await freePort();
+  const url = `http://127.0.0.1:${port}`;
+  const development = startPreview(directory, port, true);
+  const page = await context.newPage();
+  page.on("pageerror", (error) => report.pageErrors.push(String(error)));
+  page.on("console", (message) => {
+    if (message.type() === "error") report.consoleErrors.push(message.text());
+  });
+  try {
+    await waitForPreview(development, url);
+    await page.goto(`${url}/documents/A?view=edit#strict`);
+    await expect(page.getByLabel("Draft A", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Draft B", { exact: true })).toBeVisible();
+    await settle(page);
+    const initial = await sample(page);
+    assert.ok(
+      initial.metrics.editorMounts >= 4,
+      "Two real document effects must have replayed under development StrictMode",
+    );
+    assert.ok(
+      initial.metrics.editorUnmounts >= 2,
+      "The fixture must observe rehearsal effect cleanups",
+    );
+    assert.equal(initial.metrics.subscriptions, 2);
+    assert.equal(initial.metrics.providers, 2);
+    assert.equal(
+      initial.metrics.lifecycleDisposals,
+      0,
+      "Effect rehearsal must not dispose Worksplit content resources",
+    );
+    const a = await documentNamed(page, "A");
+    const b = await documentNamed(page, "B");
+    await page.getByLabel("Draft A", { exact: true }).fill("StrictMode still guards this draft");
+    dismissNext(page, report);
+    await page.locator(`#flexlayout-tabbutton-${a.id} [title=Close]`).click();
+    await settle(page);
+    await expect(page.getByLabel("Draft A", { exact: true })).toHaveValue(
+      "StrictMode still guards this draft",
+    );
+    assert.equal((await sample(page)).metrics.lifecycleDisposals, 0);
+    await page.locator(`#flexlayout-tabbutton-${b.id}`).click();
+    await page.locator(`#flexlayout-tabbutton-${a.id}`).click();
+    assert.equal((await sample(page)).metrics.lifecycleDisposals, 0);
+    acceptNext(page, report);
+    await page.locator(`#flexlayout-tabbutton-${a.id} [title=Close]`).click();
+    await expect(page.getByLabel("Draft A", { exact: true })).toHaveCount(0);
+    await expect.poll(async () => (await sample(page)).metrics.lifecycleDisposals).toBe(1);
+    assert.equal((await sample(page)).metrics.subscriptions, 1);
+    const closed = await sample(page);
+    assert.equal(closed.documents[0].id, b.id);
+    await expect(page.getByLabel("Issues", { exact: true })).toHaveText("No issues");
+    await page.screenshot({ path: resolve(acceptance, "packed-consumer-strict-mode.png") });
+    report.screenshots.push("packed-consumer-strict-mode.png");
+    assert.deepEqual(await page.evaluate(() => window.packedConsumer.workbench.dispose()), []);
+    await expect.poll(async () => (await sample(page)).metrics.lifecycleDisposals).toBe(2);
+    assert.deepEqual(await page.evaluate(() => window.packedConsumer.workbench.dispose()), []);
+    assert.equal((await sample(page)).metrics.lifecycleDisposals, 2);
+    assert.equal((await sample(page)).metrics.subscriptions, 0);
+    report.strictMode = {
+      development: true,
+      distribution:
+        "Freshly installed public tarballs; Vite dev server and development React for actual effect replay",
+      initial,
+      closed,
+      disposed: await sample(page),
+    };
+    report.checks.push(
+      "Real development StrictMode effect replay leaves lifecycle resources live and dirty guards installed; genuine close disposes once, host disposal once, repeat disposal never again",
+    );
+  } finally {
+    await page.close();
+    await stopPreview(development);
+    report.strictModeServer = { exit: development.exit, log: development.log };
+  }
+}
+
 async function documentNamed(page, name) {
   const document = (await sample(page)).documents.find((candidate) =>
     candidate.href.startsWith(`/documents/${name}?`),
@@ -1038,12 +1203,12 @@ async function freePort() {
   }
 }
 
-function startPreview(directory, port) {
+function startPreview(directory, port, development = false) {
   const child = spawn(
     process.execPath,
     [
       resolve(directory, "node_modules/vite/bin/vite.js"),
-      "preview",
+      ...(development ? [] : ["preview"]),
       "--host",
       "127.0.0.1",
       "--port",

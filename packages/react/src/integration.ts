@@ -78,6 +78,8 @@ export type NavigationResult =
     }
   | { status: "superseded" }
   | { status: "failed"; stage: "load" | "navigate"; error: unknown };
+/** Startup can accept a document-free home without manufacturing a route document. */
+export type StartResult = NavigationResult | { status: "empty"; href: string };
 export type CloseResult =
   | { status: "closed"; id: string; cleanupErrors: readonly unknown[] }
   | {
@@ -127,6 +129,8 @@ export interface WorkbenchOptions<TRouter extends AnyRouter> {
   tools?: readonly WorkbenchTool[];
   commands?: readonly WorkbenchCommand[];
   home?: string;
+  /** Empty applies only to start(home) and owned home history anchors; open remains routed. */
+  homeMode?: "route" | "empty";
   workspaceId?: string;
   snapshot?: unknown;
   /** Optional native topology limits, checked before new document admission. */
@@ -763,10 +767,14 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         const session = hint ? this.state.documents.get(hint) : undefined;
         const result = session
           ? await this.navigateSession(session, href, false, current, true)
-          : await this.openHref(href, {}, false, current, true);
+          : this.isEmptyHome(href)
+            ? await this.startHome(current, true)
+            : await this.openHref(href, {}, false, current, true);
         return result.status === "committed"
           ? { id: result.document.id, href: result.document.href }
-          : undefined;
+          : result.status === "empty"
+            ? { href: result.href }
+            : undefined;
       },
       (error, outside) => this.issue(outside ? "history-outside-scope" : "history", error),
     );
@@ -778,8 +786,61 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   }
 
   /** Start from the address bar. Native render-on-demand defaults keep restored background tabs lazy. */
-  start(href: string): Promise<NavigationResult> {
-    return this.openHref(href, {}, true);
+  start(href: string): Promise<StartResult> {
+    return this.isEmptyHome(href) ? this.startHome() : this.openHref(href, {}, true);
+  }
+
+  private isEmptyHome(href: string) {
+    return this.options.homeMode === "empty" && href === (this.options.home ?? "/");
+  }
+
+  private async startHome(
+    current: () => boolean = () => true,
+    fromPop = false,
+  ): Promise<StartResult> {
+    if (this.disposed) return { status: "rejected", reason: "closed" };
+    if (!fromPop && this.browser?.busy) return { status: "rejected", reason: "history-busy" };
+    if (!current()) return { status: "superseded" };
+    const epoch = ++this.openEpoch;
+    this.cancelContentFocus();
+    const focus = this.focusEpoch;
+    const valid = () =>
+      !this.disposed && current() && epoch === this.openEpoch && focus === this.focusEpoch;
+    const { model, documents } = this.state;
+    const activeId = this.state.store.get().activeDocumentId;
+    const selectedId = model.getActiveTabset()?.getSelectedNode()?.getId();
+    let selected = selectedId ? documents.get(selectedId) : undefined;
+    if (!selected)
+      model.visitNodes((node) => {
+        if (!selected && (node instanceof TabSetNode || node instanceof BorderNode)) {
+          const id = node.getSelectedNode()?.getId();
+          if (id) selected = documents.get(id);
+        }
+      });
+    const session =
+      (activeId ? documents.get(activeId) : undefined) ??
+      selected ??
+      this.preferred([...documents.values()]);
+    if (!session) {
+      this.state.store.setState((state) => ({ ...state, activeDocumentId: null }));
+      const href = this.options.home ?? "/";
+      if (!fromPop) this.browser?.publish(href, undefined, true);
+      return { status: "empty", href };
+    }
+    try {
+      await this.loadDocument(session.id);
+      // A visible restored tab may already have started loading through the React binding.
+      // Its Router still owns the final URL; do not normalize a home anchor to a stale href.
+      if (session.router) await this.settle(session.router);
+      if (!valid() || documents.get(session.id) !== session) return { status: "superseded" };
+      this.activate(session.id, { history: false });
+      if (!fromPop) this.browser?.publish(session.href, session.id, true);
+      return { status: "committed", document: this.getDocument(session.id)!, reused: true };
+    } catch (error) {
+      if (!valid()) return { status: "superseded" };
+      this.issue("operation-failed", error, session.id);
+      return { status: "failed", stage: "load", error };
+    }
   }
 
   snapshot(): WorkbenchSnapshot {

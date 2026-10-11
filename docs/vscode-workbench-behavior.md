@@ -48,6 +48,12 @@ leave/unmount the workspace. This release does not integrate an outer applicatio
 invent cross-application history. Hint ids are not recycled after closing restored tabs. An
 unavailable hint opens by URL; closed drafts are not restored.
 
+With opt-in `homeMode: "empty"`, `start(home)` and an owned home traversal without a live
+hint accept an empty workspace when no documents remain. Existing documents instead resume
+active/native-selected/MRU content and normalize that home entry to its URL. Back to home
+never closes all documents. Ordinary document routing and the default `homeMode: "route"`
+are unchanged. `StartResult` includes `empty`; document `NavigationResult` does not.
+
 A new history traversal supersedes earlier pending traversals. New open requests while a
 traversal/rollback is physically pending return history-busy; user activation can cancel the
 traversal and queues its replace until rollback completes. A rejected traversal does not use
@@ -279,3 +285,12 @@ background at the captured container. Preview requests instead become superseded
 restores an old focus or routes into the newly active pane merely because its loader finished later.
 Business-specific adjacency and capacity fallback belong to the application; they use these
 operations and existing native Actions, without a second focus queue or document registry.
+
+## React effect replay
+
+`useWorkbenchContentLifecycle` delays unregister by one microtask, allowing the same content's
+stable lifecycle to survive StrictMode cleanup/setup replay. A different lifecycle ends the
+previous registration before taking ownership; two live owners remain invalid. Explicit
+`content.register` cleanup is immediate. Closing content or disposing the instance still releases
+each acquired registration once. This hook does not make a disposed Workbench reusable: the
+host must separately own its instance, history connection and shared services across React replay.

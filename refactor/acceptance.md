@@ -353,3 +353,10 @@ React Store 和 React Hotkeys 现在也需要宿主显式提供兼容 peer；动
 
 不保留为未迁移 Pluxel 服务的双引擎、旧格式读取器或启动迁移链。实际本地数据需要时做一次性显式转换/重置。
 当前分支是内部消费完成；不能据此认定 Pluxel 已兼容或第二应用的通用需求已验证。
+
+## Migration readiness follow-up (2026-10-11)
+
+[Readiness evidence](acceptance/migration-readiness/README.md) covers opt-in empty home
+startup/history and content lifecycle under real development React StrictMode. Fresh package
+consumption retains native document routing and default demo homepage behavior. Financial
+application migration and HeroUI integration remain separate application acceptance work.

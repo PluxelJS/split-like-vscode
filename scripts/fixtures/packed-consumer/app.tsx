@@ -29,6 +29,7 @@ import {
   type Model,
 } from "flexlayout-react";
 import {
+  StrictMode,
   createContext,
   useContext,
   useEffect,
@@ -54,6 +55,8 @@ const services = {
     editorUnmounts: 0,
     subscriptions: 0,
     disposals: 0,
+    lifecycleDisposals: 0,
+    startStatus: "",
     providerMounts: 0,
     providerUnmounts: 0,
     providers: 0,
@@ -98,6 +101,13 @@ const documentRoute = createRoute({
 });
 const routeTree = rootRoute.addChildren([documentRoute]);
 const boundedScenario = window.location.hash === "#bounded";
+const emptyHomeScenario = window.location.hash === "#empty-home";
+const strictScenario = window.location.hash === "#strict";
+const emptyHome = "/#empty-home";
+const reloadSnapshotKey = "packed-empty-home-snapshot";
+const restoredSnapshot: unknown = emptyHomeScenario
+  ? JSON.parse(sessionStorage.getItem(reloadSnapshotKey) ?? "null")
+  : null;
 const layout: IJsonModel = {
   global: {
     tabEnableFloat: false,
@@ -166,6 +176,8 @@ const createRouterForHistory = (history: RouterHistory) => {
 export const workbench = createWorkbench({
   createRouter: createRouterForHistory,
   layout,
+  ...(emptyHomeScenario ? { home: emptyHome, homeMode: "empty" as const } : {}),
+  ...(restoredSnapshot ? { snapshot: restoredSnapshot } : {}),
   layoutPolicy: createLayoutPolicy({ maxRows: 2, maxColumns: 2, maxTabsets: 4 }),
   tools: [
     { id: "inspector", render: ({ id }) => <Tool id={id} /> },
@@ -306,7 +318,13 @@ function Editor() {
           lastSavedId: content.id,
         }));
       },
-      dispose: () => release.current?.(),
+      dispose: () => {
+        services.metrics.setState((state) => ({
+          ...state,
+          lifecycleDisposals: state.lifecycleDisposals + 1,
+        }));
+        release.current?.();
+      },
     }),
     [content.id],
   );
@@ -697,6 +715,17 @@ function App() {
             <button type="button" onClick={() => setSnapshot(workbench.snapshot())}>
               Capture native snapshot
             </button>
+            {emptyHomeScenario && (
+              <button
+                type="button"
+                onClick={() =>
+                  sessionStorage.setItem(reloadSnapshotKey, JSON.stringify(workbench.snapshot()))
+                }
+              >
+                Save reload snapshot
+              </button>
+            )}
+            <output aria-label="Startup status">{metrics.startStatus}</output>
             <output aria-label="Native Layout ref">
               {ready ? "Native Layout API ready" : "Waiting for native Layout"}
             </output>
@@ -716,17 +745,26 @@ function App() {
 }
 
 const root = createRoot(document.getElementById("root")!);
-root.render(
+const application = (
   <HotkeysProvider defaultOptions={{ hotkey: { preventDefault: true } }}>
     <App />
-  </HotkeysProvider>,
+  </HotkeysProvider>
 );
+root.render(strictScenario ? <StrictMode>{application}</StrictMode> : application);
 const disconnect = workbench.connectBrowser();
 void (async () => {
-  const href = window.location.pathname.startsWith("/documents/")
-    ? window.location.pathname + window.location.search
-    : "/documents/A?view=edit";
+  const href = emptyHomeScenario
+    ? emptyHome
+    : window.location.pathname.startsWith("/documents/")
+      ? window.location.pathname + window.location.search
+      : "/documents/A?view=edit";
   const initial = await workbench.start(href);
+  services.metrics.setState((state) => ({ ...state, startStatus: initial.status }));
+  if (emptyHomeScenario) {
+    if (initial.status !== "empty" && initial.status !== "committed")
+      throw new Error("Home startup failed: " + initial.status);
+    return;
+  }
   if (initial.status !== "committed") throw new Error("Initial document failed: " + initial.status);
   const second = await workbench.open(
     { to: "/documents/$id", params: { id: "B" }, search: { view: "edit" } },

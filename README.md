@@ -169,7 +169,7 @@ root.render(
 );
 const disconnect = workbench.connectBrowser();
 const initial = await workbench.start(location.pathname + location.search + location.hash);
-if (initial.status !== "committed") console.error(initial);
+if (initial.status !== "committed" && initial.status !== "empty") console.error(initial);
 // Call after the host has made its own decision to leave the workspace.
 async function stopWorkspace() {
   disconnect();
@@ -182,6 +182,16 @@ async function stopWorkspace() {
 This example's index route redirects `/` to document A. `start` routes its supplied URL normally;
 `/` is not a reserved empty workspace route. The host defines its homepage in the same native
 route tree, including any welcome content or redirect.
+
+For a shell homepage with no document, set `home: "/", homeMode: "empty"`. `start(home)`
+returns `StartResult`: the usual `NavigationResult`, or `{ status: "empty", href }` when no
+saved/live documents exist. With documents, it resumes the active/native-selected document
+(or the remaining MRU candidate) and replaces the home entry with that document's URL.
+An owned Back/Forward entry at home without a live document hint uses the same rule:
+Back to home does not close existing documents. Closing the last document and refreshing its
+empty snapshot stays empty. Deep links still open normally; `open` and document-local Router
+navigation remain routed even at home. Use the shell entrance for an empty homepage, not a
+business `Link` to `/`. The default `homeMode: "route"` preserves the example's redirect.
 
 `createMemoryHistory` is re-exported by TanStack Router; applications that create standalone
 Routers may use it directly. Worksplit supplies the history for its own document instances.
@@ -355,7 +365,15 @@ the request returns `rejected` with `revision-required` before any decisions. To
 before the batch and checked again after all decisions, so edits to an earlier approved member
 invalidate the whole request while a later dialog waits. A member that becomes dirty also
 invalidates approval. For single close, `beforeLeave` still validates its own editing revision.
-The imperative `useWorkbenchContent().register(lifecycle)` returns the registration cleanup;
+The hook defers effect cleanup by one microtask. React StrictMode's cleanup/setup replay of the
+same content and stable lifecycle cancels that pending cleanup; a replacement lifecycle releases
+the old registration before registering the new one. A genuinely live second owner still throws.
+This protects content registration, not the lifetime of the entire Workbench instance. Keep the
+instance under an explicit project owner, as in the example above. Never permanently `dispose()`
+an instance in a simulated React cleanup and then reuse it; an effect that owns an instance must
+create a fresh one for each setup and dispose that setup's instance on teardown.
+
+The imperative `useWorkbenchContent().register(lifecycle)` returns an immediate registration cleanup;
 it throws for removed/replaced content or a second live owner. Register one stable lifecycle per
 content; compose business editor resources inside that owner instead of overwriting the registration. A rejected registration has not transferred resource
 ownership, so the caller still releases any resources it acquired.

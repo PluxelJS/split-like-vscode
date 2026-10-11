@@ -1,0 +1,56 @@
+$ turbo run typecheck && tsc -p tsconfig.typecheck.json --noEmit
+
+   • turbo 2.11.7
+   • Packages in scope: @worksplit/core, @worksplit/demo, @worksplit/react
+   • Running typecheck in 3 packages
+   • Remote caching disabled, using shared worktree cache
+
+@worksplit/core:build: cache hit, replaying logs 39a4534e9a8605f0
+@worksplit/core:build: $ tsdown
+@worksplit/core:build: ℹ tsdown v0.23.0 powered by rolldown v1.2.12
+@worksplit/core:build: ℹ config file: /home/ahdg/code/shinium/worksplit-flexlayout-tanstack/packages/core/tsdown.config.mts
+@worksplit/core:build: ℹ entry: src/index.ts
+@worksplit/core:build: ℹ target: esnext
+@worksplit/core:build: ℹ tsconfig: tsconfig.json
+@worksplit/core:build: ℹ Build start
+@worksplit/core:build: ℹ Cleaning 4 files
+@worksplit/core:build:
+@worksplit/core:build:  WARN  TypeScript 7.0 does not yet have a stable API and is experimental. Some options will be unavailable.
+@worksplit/core:build:
+@worksplit/core:build: ℹ Emit types with typescript@7.0.2
+@worksplit/core:build: ℹ dist/index.js         3.98 kB │ gzip: 1.56 kB
+@worksplit/core:build: ℹ dist/index.js.map    20.73 kB │ gzip: 5.53 kB
+@worksplit/core:build: ℹ dist/index.d.ts.map   0.58 kB │ gzip: 0.30 kB
+@worksplit/core:build: ℹ dist/index.d.ts       2.12 kB │ gzip: 0.62 kB
+@worksplit/core:build: ℹ 4 files, total: 27.41 kB
+@worksplit/core:build: ✔ Build complete in 105ms
+@worksplit/react:typecheck: cache miss, executing 8803c4ca72295f6f
+@worksplit/react:build: cache hit, replaying logs 24d1b7bf5827430d
+@worksplit/react:build: $ tsdown
+@worksplit/react:build: ℹ tsdown v0.23.0 powered by rolldown v1.2.12
+@worksplit/react:build: ℹ config file: /home/ahdg/code/shinium/worksplit-flexlayout-tanstack/packages/react/tsdown.config.mts
+@worksplit/react:build: ℹ entry: src/index.ts, src/style.css
+@worksplit/react:build: ℹ target: esnext
+@worksplit/react:build: ℹ tsconfig: tsconfig.json
+@worksplit/react:build: ℹ Build start
+@worksplit/react:build: ℹ Cleaning 5 files
+@worksplit/react:build:
+@worksplit/react:build:  WARN  TypeScript 7.0 does not yet have a stable API and is experimental. Some options will be unavailable.
+@worksplit/react:build:
+@worksplit/react:build: ℹ Emit types with typescript@7.0.2
+@worksplit/react:build: ℹ dist/index.js         56.48 kB │ gzip: 17.09 kB
+@worksplit/react:build: ℹ dist/index.js.map    217.75 kB │ gzip: 56.42 kB
+@worksplit/react:build: ℹ dist/index.d.ts.map    2.89 kB │ gzip:  1.21 kB
+@worksplit/react:build: ℹ dist/style.css         1.64 kB │ gzip:  0.58 kB
+@worksplit/react:build: ℹ dist/index.d.ts       15.44 kB │ gzip:  4.93 kB
+@worksplit/react:build: ℹ 5 files, total: 294.20 kB
+@worksplit/react:build: ✔ Build complete in 266ms
+@worksplit/demo:typecheck: cache miss, executing faa94698df1af584
+@worksplit/core:typecheck: cache hit, replaying logs e8ba0ceed9688436
+@worksplit/core:typecheck: $ tsc -p tsconfig.json --noEmit
+@worksplit/demo:typecheck: $ tsc -p tsconfig.json --noEmit
+@worksplit/react:typecheck: $ tsc -p tsconfig.json --noEmit
+
+ Tasks:    5 successful, 5 total
+Cached:    3 cached, 5 total
+  Time:    1.094s

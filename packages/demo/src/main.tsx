@@ -664,6 +664,10 @@ function App() {
     void workbench
       .start(location.pathname + location.search + location.hash)
       .then(async (result) => {
+        if (result.status === "empty") {
+          message("Workspace ready (empty)");
+          return result;
+        }
         report(result);
         if (location.pathname === "/" && initialSnapshot === undefined) {
           await open("A");

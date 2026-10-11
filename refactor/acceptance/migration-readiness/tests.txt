@@ -1,0 +1,107 @@
+$ turbo run test
+
+   • turbo 2.11.7
+   • Packages in scope: @worksplit/core, @worksplit/demo, @worksplit/react
+   • Running test in 3 packages
+   • Remote caching disabled, using shared worktree cache
+
+@worksplit/core:build: cache hit, replaying logs 39a4534e9a8605f0
+@worksplit/core:build: $ tsdown
+@worksplit/core:build: ℹ tsdown v0.23.0 powered by rolldown v1.2.12
+@worksplit/core:build: ℹ config file: /home/ahdg/code/shinium/worksplit-flexlayout-tanstack/packages/core/tsdown.config.mts
+@worksplit/core:build: ℹ entry: src/index.ts
+@worksplit/core:build: ℹ target: esnext
+@worksplit/core:build: ℹ tsconfig: tsconfig.json
+@worksplit/core:build: ℹ Build start
+@worksplit/core:build: ℹ Cleaning 4 files
+@worksplit/core:build:
+@worksplit/core:build:  WARN  TypeScript 7.0 does not yet have a stable API and is experimental. Some options will be unavailable.
+@worksplit/core:build:
+@worksplit/core:build: ℹ Emit types with typescript@7.0.2
+@worksplit/core:build: ℹ dist/index.js         3.98 kB │ gzip: 1.56 kB
+@worksplit/core:build: ℹ dist/index.js.map    20.73 kB │ gzip: 5.53 kB
+@worksplit/core:build: ℹ dist/index.d.ts.map   0.58 kB │ gzip: 0.30 kB
+@worksplit/core:build: ℹ dist/index.d.ts       2.12 kB │ gzip: 0.62 kB
+@worksplit/core:build: ℹ 4 files, total: 27.41 kB
+@worksplit/core:build: ✔ Build complete in 105ms
+@worksplit/react:test: cache miss, executing 6aeb03a9c6b4cb00
+@worksplit/react:build: cache hit, replaying logs 24d1b7bf5827430d
+@worksplit/react:build: $ tsdown
+@worksplit/react:build: ℹ tsdown v0.23.0 powered by rolldown v1.2.12
+@worksplit/react:build: ℹ config file: /home/ahdg/code/shinium/worksplit-flexlayout-tanstack/packages/react/tsdown.config.mts
+@worksplit/react:build: ℹ entry: src/index.ts, src/style.css
+@worksplit/react:build: ℹ target: esnext
+@worksplit/react:build: ℹ tsconfig: tsconfig.json
+@worksplit/react:build: ℹ Build start
+@worksplit/react:build: ℹ Cleaning 5 files
+@worksplit/react:build:
+@worksplit/react:build:  WARN  TypeScript 7.0 does not yet have a stable API and is experimental. Some options will be unavailable.
+@worksplit/react:build:
+@worksplit/react:build: ℹ Emit types with typescript@7.0.2
+@worksplit/react:build: ℹ dist/index.js         56.48 kB │ gzip: 17.09 kB
+@worksplit/react:build: ℹ dist/index.js.map    217.75 kB │ gzip: 56.42 kB
+@worksplit/react:build: ℹ dist/index.d.ts.map    2.89 kB │ gzip:  1.21 kB
+@worksplit/react:build: ℹ dist/style.css         1.64 kB │ gzip:  0.58 kB
+@worksplit/react:build: ℹ dist/index.d.ts       15.44 kB │ gzip:  4.93 kB
+@worksplit/react:build: ℹ 5 files, total: 294.20 kB
+@worksplit/react:build: ✔ Build complete in 266ms
+@worksplit/core:test: cache hit, replaying logs fc1700ef9a44b114
+@worksplit/core:test: $ vitest run
+@worksplit/core:test:
+@worksplit/core:test:  RUN  v5.0.3 /home/ahdg/code/shinium/worksplit-flexlayout-tanstack/packages/core
+@worksplit/core:test:
+@worksplit/core:test:  ✓ src/index.test.ts (5 tests) 12ms
+@worksplit/core:test:
+@worksplit/core:test:  Test Files  1 passed (1)
+@worksplit/core:test:       Tests  5 passed (5)
+@worksplit/core:test:    Start at  16:09:46
+@worksplit/core:test:    Duration  273ms (transform 61%, import 17%, tests 15%, worker 6%)
+@worksplit/core:test:
+@worksplit/react:test: $ vitest run
+@worksplit/react:test:
+@worksplit/react:test:  RUN  v5.0.3 /home/ahdg/code/shinium/worksplit-flexlayout-tanstack/packages/react
+@worksplit/react:test:
+@worksplit/react:test:  ✓ src/layout-policy-integration.test.ts (3 tests) 97ms
+@worksplit/react:test:  ✓ src/document-boundaries.test.ts (8 tests) 159ms
+@worksplit/react:test:  ✓ src/document-placement.test.ts (22 tests) 286ms
+@worksplit/react:test:  ✓ src/workspace-home.test.ts (13 tests) 314ms
+@worksplit/react:test:  ✓ src/integration.test.ts (13 tests) 460ms
+@worksplit/react:test:  ✓ src/focus-lifecycle.test.tsx (9 tests) 647ms
+@worksplit/react:test:    ✓ document focus and lifecycle ownership (9)
+@worksplit/react:test:      ✓ fulfills first-open focus after React mounts and registers the document 525ms
+@worksplit/react:test:  ✓ src/split-view.test.tsx (18 tests) 923ms
+@worksplit/react:test:    ✓ @worksplit/react (18)
+@worksplit/react:test:      ✓ preserves state and DOM through controlled collapse and cleans up on removal 463ms
+@worksplit/react:test:  ✓ src/native-layout.test.ts (83 tests) 1007ms
+@worksplit/react:test:  ✓ src/lifecycle-replay.test.tsx (9 tests) 1106ms
+@worksplit/react:test:    ✓ content lifecycle effect replay (9)
+@worksplit/react:test:      ✓ keeps a stable memoized owner alive through StrictMode replay and disposes once at shutdown 427ms
+@worksplit/react:test:  ✓ src/workbench-native.test.tsx (4 tests) 1234ms
+@worksplit/react:test:    ✓ native React interaction (4)
+@worksplit/react:test:      ✓ leaves a 390 px layout, maximize state, and resize observers under native ownership 850ms
+@worksplit/react:test: stderr | src/workbench-customization.test.tsx > public React customization > uses application Router pending and error components without replacing a sibling provider or Router
+@worksplit/react:test: Warning: Error in route match: /documents/$name/documents/A{"view":"error"}
+@worksplit/react:test:
+@worksplit/react:test:  ✓ src/layout-policy.test.ts (16 tests) 29ms
+@worksplit/react:test: Not implemented: Window's scrollTo() method
+@worksplit/react:test: Not implemented: Window's scrollTo() method
+@worksplit/react:test:  ✓ src/document-operations.test.ts (8 tests) 58ms
+@worksplit/react:test:  ✓ src/router-proof.test.tsx (1 test) 54ms
+@worksplit/react:test:  ✓ src/workbench-customization.test.tsx (8 tests) 1551ms
+@worksplit/react:test:    ✓ public React customization (8)
+@worksplit/react:test:      ✓ inherits native host HotkeysProvider defaults for built-in command bindings and unregisters them 621ms
+@worksplit/react:test:      ✓ uses the host's native Store and hotkey hook for dynamic bindings, captured command targets and cleanup 378ms
+@worksplit/react:test:
+@worksplit/react:test:  Test Files  14 passed (14)
+@worksplit/react:test:       Tests  215 passed (215)
+@worksplit/react:test:    Start at  18:42:19
+@worksplit/react:test:    Duration  3.69s (environment 58%, tests 25%, import 10%, transform 7%)
+@worksplit/react:test:
+@worksplit/react:test: Environment  jsdom was created 14 times · 18.30s total, 58% of tracked time
+@worksplit/react:test:              create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+@worksplit/react:test:              learn more: https://vitest.dev/guide/improving-performance#test-environments
+@worksplit/react:test:
+
+ Tasks:    4 successful, 4 total
+Cached:    3 cached, 4 total
+  Time:    4.56s
