@@ -1915,10 +1915,13 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     const owner = matches.toReversed().find((m) => m.staticData?.worksplit) ?? matches.at(-1);
     if (!owner) throw new Error(`No Router match for ${router.state.location.href}`);
     const fields = owner.staticData?.worksplit?.identitySearch ?? [];
+    // Host metadata uses runtime keys; a registered Router may give each match a
+    // closed search schema without a string index signature.
+    const search = owner.search as Record<string, unknown>;
     return JSON.stringify([
       owner.routeId,
       owner.params,
-      fields.map((name) => [name, owner.search[name]]),
+      fields.map((name) => [name, search[name]]),
     ]);
   }
   private allowMove(drag: Node, target: Node, location: DockLocation) {

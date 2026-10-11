@@ -29,7 +29,7 @@
     "format:check": "oxfmt . --check",
     "lint": "oxlint -c ../../oxlint.config.ts . --deny-warnings",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.registered-consumer.json --noEmit"
   },
   "dependencies": {
     "@worksplit/core": "workspace:*"

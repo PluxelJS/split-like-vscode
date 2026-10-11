@@ -173,6 +173,11 @@ const createRouterForHistory = (history: RouterHistory) => {
     Wrap: ServiceProvider,
   });
 };
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: ReturnType<typeof createRouterForHistory>;
+  }
+}
 export const workbench = createWorkbench({
   createRouter: createRouterForHistory,
   layout,
