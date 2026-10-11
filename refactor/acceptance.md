@@ -1,6 +1,6 @@
 # Worksplit 内部重构验收
 
-验收日期：2026-10-11（补齐原生能力、空区整理、删除强制窄屏控制器，并补齐 demo 右侧 Border 后的完整复验）。范围是 Worksplit 库与自有 demo；Pluxel、第二应用及跨应用兼容性没有接入或验收。
+验收日期：2026-10-11（补齐原生能力、空区整理、删除强制窄屏控制器、demo 右侧 Border，以及公开包的独立安装消费复核）。范围是 Worksplit 库、自有 demo 和一个隔离消费者 fixture；Pluxel、第二应用及跨应用兼容性没有接入或验收。
 
 ## 隔离与交付位置
 
@@ -49,29 +49,78 @@ Store、Hotkeys 在库中使用；Hotkeys、Store 和 Model 没有另造事件�
 空分区修复的 React patch 另见 [发行说明](../.tegami/fix-empty-tabsets.md)。
 本轮原生交互与默认值修正见 [发行说明](../.tegami/preserve-native-interactions.md)。
 删除强制窄屏呈现及桌面偏好覆盖层见 [发行说明](../.tegami/remove-forced-compact-layout.md)。
+原生 ref、宿主定制、工具重开、文档入场清理和声明 map 修正见
+[发行说明](../.tegami/native-external-consumption.md)。
 
 ## 检查结果
 
-| 检查                                    | 结果                                                                                                   |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `pnpm lint`                             | 通过，0 warning / 0 error                                                                              |
-| `pnpm typecheck`                        | core、react、demo、工具配置及新增浏览器 TypeScript 通过；类型化导航的错误调用断言通过                  |
-| `pnpm test`                             | 104 项通过：core 5、SplitView 18、文档协调 9、多 Router 1、原生能力与生命周期 67、原生 React 交互 4    |
-| `pnpm build`                            | 三个包通过；生产 demo 从公开 dist 入口打包                                                             |
-| `pnpm source-declarations:check`        | 通过，构建未在源码中遗留声明文件                                                                       |
-| `pnpm format:check`、`git diff --check` | 通过                                                                                                   |
-| `pnpm test:browser`                     | 42 项 Chromium 测试通过，0 skipped / unexpected / flaky                                                |
-| 公开 dist JS smoke                      | 从 demo 包解析 `@worksplit/react`，双文档、原生分组、实际最大化快照/恢复、受控整分区关闭、dispose 通过 |
-| 删除符号与本地 Markdown 链接检查        | 通过；旧符号仅在迁移说明或设计语义中出现                                                               |
+| 检查                                    | 结果                                                                                                                   |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `pnpm lint`                             | 通过，0 warning / 0 error                                                                                              |
+| `pnpm typecheck`                        | core、react、demo、工具配置及新增浏览器 TypeScript 通过；类型化导航的错误调用断言通过                                  |
+| `pnpm test`                             | 126 项通过：core 5、SplitView 18、文档协调 9、多 Router 1、原生能力与生命周期 83、原生 React 交互 4、公开 React 定制 6 |
+| `pnpm build`                            | 三个包通过；生产 demo 从公开 dist 入口打包                                                                             |
+| `pnpm source-declarations:check`        | 通过，构建未在源码中遗留声明文件                                                                                       |
+| `pnpm format:check`、`git diff --check` | 通过                                                                                                                   |
+| `pnpm test:browser`                     | 42 项 Chromium 测试通过，0 skipped / unexpected / flaky                                                                |
+| `pnpm test:package --browser`           | tarball 独立安装后两种条件的 JS、严格 Bundler 类型检查、Vite 生产构建及 10 项浏览器交互检查通过；页面/控制台错误均为 0 |
+| 公开 dist JS smoke                      | 从 demo 包解析 `@worksplit/react`，双文档、原生分组、实际最大化快照/恢复、受控整分区关闭、dispose 通过                 |
+| 删除符号与本地 Markdown 链接检查        | 通过；旧符号仅在迁移说明或设计语义中出现                                                                               |
 
 可见但未隐藏的提示：tsdown 提示 TypeScript 7 API 尚属 experimental；生产 demo 单个 JS chunk 为
-577.25 kB（gzip 170.11 kB），超过 Vite 默认 500 kB 提示阈值；多 Router 的 jsdom 检查提示未实现
-scrollTo。真实浏览器另外验证了滚动保留。未通过调高阈值或吞掉错误来消除提示。
+579.25 kB（gzip 170.67 kB），超过 Vite 默认 500 kB 提示阈值；多 Router 的 jsdom 检查提示未实现
+scrollTo，主动触发路由错误的测试保留 TanStack 的错误提示。真实浏览器另外验证了滚动保留。
+未通过调高阈值或吞掉错误来消除提示。
 
 原型先完成共享真实 route tree、两个并排文档、一个工具、类型推导和 dirty/redirect/history/race 门槛，
 再删除旧引擎并扩大验收。原生能力复核补齐整组与批量关闭、跨空间批次选择和真实菜单；本轮又补齐
 真实键盘选择、Border 工具/文档 URL、单文档/整组移动选择、原生滚动开关与右侧 Details 工具。
 保留最后完整 42 项浏览器结果文件（原生能力 21、文档协调 21），全部测试在同一次完整执行中通过。
+
+## 外部公开消费与定制证据
+
+新增 [独立消费者](../scripts/fixtures/packed-consumer/app.tsx) 和
+[打包检查](../scripts/check-package-consumer.mjs)：在 workspace 外的临时目录安装两个实际 tarball，
+不使用源码 alias、私有入口或仓库开发条件；另外启用 development 条件再验一遍发布入口。
+实际包的 JS、声明、CSS 以及声明引用的 map 都通过检查。严格类型检查包含错误路径、params 和
+search 的负例；两个条件均通过。React 采用 `Bundler` 模块解析；锁定的 FlexLayout 0.11.1 自身声明
+在严格 `NodeNext` 下因 extensionless imports 失败，裸上游导入也复现，未包装或改写其类型。
+DOM-free core 单独的 NodeNext 检查通过。声明 map 文件有效，不保证 tarball 具备源文件跳转能力。
+
+同一个 fixture 的 Vite 生产构建由
+[浏览器脚本](../scripts/check-package-browser.mjs) 在临时空闲端口启动并验收；完成后停止该 preview。
+最终独立安装目录为 `/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-ZvoQUi`。
+原始结果：[packed-consumer-results.json](acceptance/packed-consumer-results.json)；
+截图：[1440×900](acceptance/packed-consumer-desktop.png)、[390×844](acceptance/packed-consumer-narrow.png)，
+已目视复核。其 JS chunk 为 561.59 kB（gzip 165.86 kB），同样保留默认 chunk 大小提示。
+
+| 可定制能力                 | 公开入口与实际断言                                                                                                                           |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 应用外壳、颜色、DOM 与导航 | `Workbench` 根 HTML props/class/style，省略内置 navigation，应用拥有外部菜单和导航；主题与 DOM 属性实际可见                                  |
+| 标签、分区呈现与交互       | 直接导入 FlexLayout 类型、Actions；原生 leading/icon/header/placeholder、Creation hook、原生 change listener 及卸载清理由公开 React 测试覆盖 |
+| 原生 ref                   | 直接 `Ref<ILayoutApi>`，真实 inline rename/redraw 后保持编辑 DOM 和 provider；没有另造 Worksplit handle                                      |
+| 每文档服务和内容 chrome    | Router `Wrap` 中读取公开内容 context，两份 provider/token 和业务订阅同时存在；root route/Outlet 与普通工具 renderer 可自行呈现               |
+| pending/error 与语言       | 使用应用的 Router pending/error 组件及原生 per-tab 错误/Retry；兄弟文档的 Router、provider 和 DOM 不重建，公开 React 测试覆盖                |
+| 动态工具入树               | 注册只含 id/renderer；原生 JSON 拥有标题、config 与停靠选项，公开 `Actions.addTab` / close / reopen 不抢文档 URL；旧注册不能覆盖新实例       |
+| 路由与移除决策             | 实际 typed open 和 TanStack Link 拒绝/批准，dirty 原生 close 拒绝/批准；A 关闭资源只释放一次，B 保持原 DOM/provider                          |
+| 原生移动、缩小及最大化     | 同一编辑 DOM、输入、provider 与业务订阅保留；390px resize 不改 JSON/snapshot，用户手动最大化跨拓宽保持，Restore 恢复同一兄弟 DOM             |
+
+公开 React 定制有 6 项单元测试；独立生产浏览器记录 10 个完成的检查阶段，不将它们混入 demo 的 42 项计数。
+消费者一开始两份文档共有 3 个 Router（含 URL resolver）、2 次 loader、2 份 provider/订阅；拒绝的
+Workbench view-state open 会运行 1 次 speculative loader，候选 Router 随后释放，两个原内容保留。
+最终 dispose 后存活 Router、provider 和业务订阅均为 0，cleanupErrors 为空。
+这些是 fixture 的资源计数，不是全部内部订阅或内存泄漏证明。
+
+首次浏览器检查发现 fixture 误将后台打开到空 TabSet 视为可见文档：原生保持 `selected: -1`，
+已入场 Router/session 正常，render-on-demand 未挂载内容。修正 fixture 为显式打开 B 后公开 activate A，
+重新独立安装并完整通过；库保留原生后台选择语义。此处两个命名空分区由应用明确设置
+`enableDeleteWhenEmpty: false`，用于来回移动后的同一目标；库与 demo 的默认空区清理未被覆盖。
+390px fixture 保留应用的桌面外壳，是窗口变化回归，不是手机体验或触屏停靠验收。
+
+包装的必要边界是文档 admission、路由/URL/焦点和移除资源；布局状态及算法仍是同一个原生 Model。
+直接 native ref 插入的方法返回 `undefined`，插入/关闭完成回执使用公开 dispatcher；`allowDrop` 下工具
+首次插入、混合关闭/布局和多叶插入批次明确拒绝。浮动、多窗口、Model 替换/undo 与任意组件插入不进入
+这份文档会话契约。宿主定制经过一个独立安装的完整 fixture 验证，仍不能证明 Pluxel 已兼容或第二应用需求已满足。
 
 ## 浏览器交互证据
 
@@ -202,13 +251,13 @@ scrollHeight、clientHeight 读取为 0；拓宽并 Restore 后，同一 A DOM �
 其提交渲染也不计入文档业务渲染计数。
 追加打开时间排除第一个启动文档，包含之后 N−1 个文档及绘制等待；计数包含第一个文档。
 第一个追加文档通过原生 RIGHT split 建立第二个 TabSet，后续根据种子文档读取当前原生容器。
-公开 `getLayout()` 克隆与定位的累计时间包含在追加打开耗时内，2/10/50 文档分别为 0.0/1.5/10.8 ms。
+公开 `getLayout()` 克隆与定位的累计时间包含在追加打开耗时内，2/10/50 文档分别为 0.0/5.1/21.9 ms。
 
 | 文档数 | HTTP/loader | 提交渲染 | 切换额外渲染 | 业务 / history 订阅 | 追加打开 ms | 20 次切换 ms | close 回执 / 含绘制 ms |
 | ------ | ----------- | -------- | ------------ | ------------------- | ----------- | ------------ | ---------------------- |
-| 2      | 2           | 2        | 0            | 2 / 2               | 81.0        | 666.6        | 15.0 / 17.6            |
-| 10     | 10          | 10       | 0            | 10 / 10             | 349.3       | 666.5        | 72.9 / 77.6            |
-| 50     | 50          | 50       | 0            | 50 / 50             | 1847.3      | 733.2        | 511.2 / 551.2          |
+| 2      | 2           | 2        | 0            | 2 / 2               | 120.2       | 666.5        | 25.3 / 27.4            |
+| 10     | 10          | 10       | 0            | 10 / 10             | 518.0       | 699.7        | 165.4 / 187.7          |
+| 50     | 50          | 50       | 0            | 50 / 50             | 3517.6      | 1066.7       | 859.4 / 930.5          |
 
 三个数量下，切换和 resize 均未新增文档 loader、提交渲染或挂载；关闭后业务/history 订阅归零，
 卸载数等于文档数，close cleanupErrors 全部为零。关闭文档后仍有一个无 loader/订阅的 URL builder
@@ -217,8 +266,9 @@ Router，属于实例寿命；实例 dispose 的浏览器测试验证它也被�
 这些是一次最终采样，不是生产环境吞吐、峰值内存、P95 或性能优秀的证明。切换时间包含 RAF 等待，
 不是纯 CPU 时间；渲染计数是业务组件提交 effect，不覆盖 speculative render 或全部 shell 渲染。
 订阅计数覆盖 demo 业务服务与公开 history.subscribers，不穷举 Router/React Store 内部订阅。
-单文档一个 Router 的资源与关闭成本随数量增长；50 个文档的逐个关闭回执约 511.2 ms。
-本轮补齐右侧 Border 后重新采样，不把单样本差异归因为某段代码的性能收益。
+单文档一个 Router 的资源与关闭成本随数量增长；50 个文档的逐个关闭回执约 859.4 ms。
+本轮公开消费修正后重新采样；与上一轮相比耗时更高，未经控制变量重复实验，不将差异归因为某段代码
+的收益或回归，也不选取更快的旧样本作为最终结果。
 
 追加原生工作负载：`pnpm measure:native`，脚本
 [measure-native-layout.mjs](../scripts/measure-native-layout.mjs)，原始结果
@@ -227,16 +277,16 @@ Router，属于实例寿命；实例 dispose 的浏览器测试验证它也被�
 其余标签；20 次双组折叠/展开共 40 批、80 个属性操作；两个组各 CENTER 移到另一分区，再 LEFT/RIGHT
 拆出新分区，共 4 次移动，空来源由原生清理；
 20 次轮流激活；最后一个纯关闭 GROUP 删除两个 TabSet，再独立 dispose。每阶段等待两个 RAF。
-分组时间包含公开 `getLayout()` 克隆与定位自动组 ID 的查询成本（2/10/50 文档分别 0.3/0.3/0.4 ms）。
-移动时查询当前容器的累计时间为 0.7/0.5/1.4 ms；关闭前定位两个实际 TabSet 为 0.2/0.3/0.3 ms。
+分组时间包含公开 `getLayout()` 克隆与定位自动组 ID 的查询成本（2/10/50 文档分别 1.0/0.6/1.1 ms）。
+移动时查询当前容器的累计时间为 2.5/1.2/1.5 ms；关闭前定位两个实际 TabSet 为 0.2/0.4/0.3 ms。
 查询计入对应含绘制阶段总时间，关闭回执单独从 dispatch 开始计时。这次工作负载随空区清理调整，
 不与保留固定空分区的旧样本作直接速度对比。
 
 | 文档数 | 分组含绘制 ms | 40 批折叠/展开回执 / 含绘制 ms | 4 次组移动含绘制 ms | 20 次激活含绘制 ms | 整批关闭回执 / 含绘制 ms |
 | ------ | ------------- | ------------------------------ | ------------------- | ------------------ | ------------------------ |
-| 2      | 33.4          | 360.9 / 1333.2                 | 133.3               | 666.8              | 10.6 / 28.3              |
-| 10     | 49.7          | 520.1 / 1350.0                 | 133.4               | 666.7              | 10.4 / 29.1              |
-| 50     | 99.0          | 850.4 / 1499.1                 | 135.1               | 781.6              | 20.0 / 29.2              |
+| 2      | 33.4          | 606.6 / 1335.5                 | 147.4               | 666.8              | 17.2 / 25.5              |
+| 10     | 82.7          | 955.9 / 1633.1                 | 166.5               | 716.7              | 25.5 / 30.3              |
+| 50     | 101.9         | 1624.1 / 2229.7                | 333.2               | 1033.6             | 35.4 / 39.9              |
 
 这些原生阶段三个数量下都没有新增 loader、业务提交渲染、挂载或业务/history 订阅。批量关闭后订阅归零、
 卸载数等于文档数，cleanupErrors 为零；dispose 后存活 Router 归零。所有内容都是 clean，没有确认等待，
@@ -250,10 +300,11 @@ MRU 候选查找改为局部 Map 与首次命中返回，避免此前全数组�
 
 ## 后续 Pluxel 的破坏性接入点
 
-Workbench 名称保留，但 props 改为 instance/navigation/empty/native；旧 value/layout/view/editor 和 ref
+Workbench 名称保留，但 props 改为 workbench/navigation/empty/native，并支持根 HTML props 与直接原生 layoutRef；旧 value/layout/view/editor 和 ref
 协议、WorkbenchValue/Layout/Handle/View、arrangement/grid 辅助 API、WORKBENCH_PARTS、自研拖放和旧快照被删除。
 后续须迁移 `split/view.tsx` 转换、`WorkbenchDocumentRenderer.tsx` 的手动 pathname 分发、Shell 的独立
 close/address/grid 控制器。插件身份、远程 renderer、RPC、dirty/save 决策和共享业务服务仍属 Pluxel。
+工具注册中的旧 `title` 需移到原生 tab JSON 的 `name`；工具仍由固定 id/renderer 注册，动态入树使用原生 Actions。
 
 不保留为未迁移 Pluxel 服务的双引擎、旧格式读取器或启动迁移链。实际本地数据需要时做一次性显式转换/重置。
 当前分支是内部消费完成；不能据此认定 Pluxel 已兼容或第二应用的通用需求已验证。

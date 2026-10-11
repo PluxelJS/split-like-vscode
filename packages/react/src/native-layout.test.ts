@@ -305,7 +305,7 @@ describe("native FlexLayout ownership", () => {
 
   it("preserves a Border document URL when a native tool selection or collapse leaves central B selected", async () => {
     const { workbench, open } = setup({
-      tools: [{ id: "inspector", title: "Inspector", render: () => null }],
+      tools: [{ id: "inspector", render: () => null }],
       layout: {
         ...withBorder,
         borders: [
@@ -375,7 +375,7 @@ describe("native FlexLayout ownership", () => {
     "cancels a queued public focus restoration after %s",
     async (interaction) => {
       const { workbench, open } = setup({
-        tools: [{ id: "inspector", title: "Inspector", render: () => null }],
+        tools: [{ id: "inspector", render: () => null }],
         layout: {
           ...withBorder,
           borders: [
@@ -408,7 +408,7 @@ describe("native FlexLayout ownership", () => {
 
   it("retains a Border document URL when a native batch selects only a tool and resizes its Border", async () => {
     const { workbench, open } = setup({
-      tools: [{ id: "inspector", title: "Inspector", render: () => null }],
+      tools: [{ id: "inspector", render: () => null }],
       layout: {
         ...withBorder,
         borders: [
@@ -456,7 +456,7 @@ describe("native FlexLayout ownership", () => {
     "follows native selection when a %s moves into an already open Border via %s",
     async (kind, wrapper) => {
       const { workbench, open } = setup({
-        tools: [{ id: "inspector", title: "Inspector", render: () => null }],
+        tools: [{ id: "inspector", render: () => null }],
         layout: {
           ...withBorder,
           borders: [
@@ -546,7 +546,7 @@ describe("native FlexLayout ownership", () => {
     "does not override native Border move visibility (%s)",
     async (mode) => {
       const { workbench, open } = setup({
-        tools: [{ id: "inspector", title: "Inspector", render: () => null }],
+        tools: [{ id: "inspector", render: () => null }],
         layout: {
           ...withBorder,
           borders: [
@@ -1196,6 +1196,643 @@ describe("native FlexLayout ownership", () => {
   });
 });
 
+describe("registered native tool admission", () => {
+  it("preserves native insertion JSON, targets, selection and the original singleton batch", async () => {
+    const { workbench, open, routers } = setup({
+      layout: withBorder,
+      tools: [
+        { id: "outline", render: () => null },
+        { id: "search", render: () => null },
+      ],
+    });
+    workbench.connectBrowser();
+    const a = await open("A", "main");
+    await open("B", "other");
+    workbench.activate(a);
+    const model = integrationState(workbench).model;
+    const observer = vi.fn<(action: Action) => void>();
+    model.addChangeListener(observer);
+    const expected = native(workbench);
+    const outline = Actions.addTab(
+      {
+        id: "outline",
+        name: "Application outline",
+        component: "worksplit.tool",
+        config: { section: "symbols" },
+        minWidth: 123,
+        borderWidth: 245,
+      },
+      "main",
+      DockLocation.CENTER,
+      0,
+      false,
+    );
+    expected.doAction(outline);
+    expect(await workbench.dispatch(outline)).toEqual({ status: "applied" });
+    expect(workbench.getLayout()).toEqual(expected.toJson());
+    expect(observer.mock.calls).toEqual([[outline]]);
+    expect((model.getNodeById("main") as TabSetNode).getSelectedNode()?.getId()).toBe(a);
+
+    const search = Actions.group([
+      Actions.group([
+        Actions.addTab(
+          { id: "search", name: "Search", component: "worksplit.tool", config: { query: "A" } },
+          "border_bottom",
+          DockLocation.CENTER,
+          -1,
+          true,
+        ),
+      ]),
+    ]);
+    expected.doAction(search);
+    expect(await workbench.dispatch(search)).toEqual({ status: "applied" });
+    expect(workbench.getLayout()).toEqual(expected.toJson());
+    expect(observer.mock.calls).toEqual([[outline], [search]]);
+    expect((model.getNodeById("border_bottom") as BorderNode).getSelectedNode()?.getId()).toBe(
+      "search",
+    );
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(window.location.pathname).toBe("/documents/A");
+    expect(liveRouters(routers)).toHaveLength(3);
+    model.removeChangeListener(observer);
+  });
+
+  it("uses native group insertion and edge docking without introducing another layout controller", async () => {
+    const { workbench, open } = setup({
+      layout: withBorder,
+      tools: [
+        { id: "outline", render: () => null },
+        { id: "inspector", render: () => null },
+      ],
+    });
+    workbench.connectBrowser();
+    const a = await open("A", "main");
+    const groupId = await group(workbench, a);
+    await workbench.dispatch(Actions.updateNodeAttributes(groupId, { opened: false }));
+    const expected = native(workbench);
+    const inGroup = Actions.addTab(
+      { id: "outline", name: "Outline", component: "worksplit.tool" },
+      groupId,
+      DockLocation.CENTER,
+      0,
+      false,
+    );
+    expected.doAction(inGroup);
+    expect(await workbench.dispatch(inGroup)).toEqual({ status: "applied" });
+    expect(workbench.getLayout()).toEqual(expected.toJson());
+    expect(tab(workbench, "outline").getParent()?.getId()).toBe(groupId);
+    const containerAttributes = { id: "inspector-panel", name: "Inspector pane" };
+    const creationHook = vi.fn<Parameters<Model["setOnCreateTabSet"]>[0]>(
+      () => containerAttributes,
+    );
+    integrationState(workbench).model.setOnCreateTabSet(creationHook);
+    expected.setOnCreateTabSet(() => containerAttributes);
+    const edge = Actions.addTab(
+      { id: "inspector", name: "Inspector", component: "worksplit.tool", minWidth: 170 },
+      "other",
+      DockLocation.RIGHT,
+      -1,
+      true,
+    );
+    expected.doAction(edge);
+    expect(await workbench.dispatch(edge)).toEqual({ status: "applied" });
+    expect(workbench.getLayout()).toEqual(expected.toJson());
+    expect(container(tab(workbench, "inspector")).getId()).toBe("inspector-panel");
+    expect(creationHook).toHaveBeenCalledTimes(1);
+    expect(creationHook).toHaveBeenCalledWith(
+      integrationState(workbench).model.getNodeById("inspector"),
+    );
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(window.location.pathname).toBe("/documents/A");
+  });
+
+  it("reopens a tool with a new native identity and isolates retained registration and cleanup callbacks", async () => {
+    const tool = { id: "outline", render: () => null };
+    const { workbench, open, routers } = setup({
+      layout: withBorder,
+      tools: [tool],
+    });
+    workbench.connectBrowser();
+    const a = await open("A", "main");
+    const insert = (target: string, name: string) =>
+      Actions.addTab(
+        { id: tool.id, name, component: "worksplit.tool" },
+        target,
+        DockLocation.CENTER,
+        -1,
+        true,
+      );
+    expect(await workbench.dispatch(insert("border_bottom", "Outline"))).toEqual({
+      status: "applied",
+    });
+    const internal = integrationState(workbench);
+    const originalNode = internal.model.getNodeById("outline");
+    const cleanup = vi.fn<() => void>();
+    const decision = vi.fn<() => boolean>(() => false);
+    let dirty = false;
+    const originalLifecycle = { isDirty: () => dirty, beforeLeave: decision, dispose: cleanup };
+    const retainedRegister = (lifecycle: WorkbenchContentLifecycle) =>
+      internal.register("outline", lifecycle, originalNode);
+    const retainedUnregister = retainedRegister(originalLifecycle);
+    expect(await workbench.close("outline")).toEqual({
+      status: "closed",
+      id: "outline",
+      cleanupErrors: [],
+    });
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(() => retainedRegister({})).toThrow("Cannot register closed content");
+
+    expect(await workbench.dispatch(insert("other", "Reopened outline"))).toEqual({
+      status: "applied",
+    });
+    const reopenedNode = internal.model.getNodeById("outline");
+    expect(reopenedNode).toBeInstanceOf(TabNode);
+    expect(reopenedNode).not.toBe(originalNode);
+    expect(() => retainedRegister({})).toThrow("Cannot register closed content");
+    internal.register("outline", originalLifecycle, reopenedNode);
+    dirty = true;
+    retainedUnregister();
+    expect(await workbench.close("outline")).toEqual({ status: "rejected", reason: "decision" });
+    expect(decision).toHaveBeenCalledWith("close");
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(internal.model.getNodeById("outline")).toBe(reopenedNode);
+
+    const nextCleanup = vi.fn<() => void>();
+    internal.register("outline", { dispose: nextCleanup }, reopenedNode);
+    expect(await workbench.close("outline")).toMatchObject({ status: "closed", cleanupErrors: [] });
+    expect(nextCleanup).toHaveBeenCalledTimes(1);
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(window.location.pathname).toBe("/documents/A");
+    expect(liveRouters(routers)).toHaveLength(2);
+  });
+
+  it("keeps a removed tool identity reserved until asynchronous close cleanup finishes", async () => {
+    const { workbench } = setup({
+      layout: withBorder,
+      tools: [{ id: "search", render: () => null }],
+    });
+    const add = Actions.addTab(
+      { id: "search", name: "Search", component: "worksplit.tool" },
+      "border_bottom",
+      DockLocation.CENTER,
+      -1,
+    );
+    expect(await workbench.dispatch(add)).toEqual({ status: "applied" });
+    const cleanup = deferred<void>(undefined);
+    const dispose = vi.fn<() => Promise<void>>(() => cleanup.promise);
+    integrationState(workbench).register("search", { dispose });
+    const closing = workbench.close("search");
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(integrationState(workbench).model.getNodeById("search")).toBeUndefined();
+    expect(await workbench.dispatch(add)).toEqual({ status: "rejected" });
+    cleanup.resolve(undefined);
+    expect(await closing).toMatchObject({ status: "closed" });
+    expect(await workbench.dispatch(add)).toEqual({ status: "applied" });
+    const nextCleanup = vi.fn<() => void>();
+    integrationState(workbench).register("search", { dispose: nextCleanup });
+    expect(await workbench.close("search")).toMatchObject({ status: "closed" });
+    expect(nextCleanup).toHaveBeenCalledTimes(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies native closeability to the same close(id) API for tools", async () => {
+    const { workbench } = setup({
+      layout: withBorder,
+      tools: [{ id: "search", render: () => null }],
+    });
+    expect(
+      await workbench.dispatch(
+        Actions.addTab(
+          { id: "search", name: "Search", component: "worksplit.tool", enableClose: false },
+          "border_bottom",
+          DockLocation.CENTER,
+          -1,
+        ),
+      ),
+    ).toEqual({ status: "applied" });
+    const cleanup = vi.fn<() => void>();
+    integrationState(workbench).register("search", { dispose: cleanup });
+    expect(await workbench.close("search")).toEqual({
+      status: "rejected",
+      reason: "not-closeable",
+    });
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(
+      await workbench.dispatch(Actions.updateNodeAttributes("search", { enableClose: true })),
+    ).toEqual({ status: "applied" });
+    expect(await workbench.close("search")).toMatchObject({ status: "closed" });
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects unknown identities, invalid live targets and new document or window content before native mutation", async () => {
+    const { workbench, open, routers } = setup({
+      layout: withBorder,
+      tools: [{ id: "outline", render: () => null }],
+    });
+    const a = await open("A", "main");
+    const model = integrationState(workbench).model;
+    const observer = vi.fn<(action: Action) => void>();
+    model.addChangeListener(observer);
+    const before = workbench.getLayout();
+    const additions = [
+      { id: "unknown", component: "worksplit.tool" },
+      { component: "worksplit.tool" },
+      { id: "outline", component: "worksplit.document", config: { href: "/documents/B" } },
+      { id: "outline", component: "worksplit.tool", type: "row" },
+      { id: "outline", component: "worksplit.tool", children: [] },
+      { id: "outline", component: "worksplit.tool", subLayoutId: "extra" },
+      { id: "outline", component: "worksplit.tool", enableFloat: true },
+      { id: "outline", component: "worksplit.tool", enablePopout: true },
+    ];
+    for (const json of additions) {
+      // Invalid external JSON deliberately crosses the native TypeScript boundary.
+      const action = Actions.addTab(json as never, "main", DockLocation.CENTER, -1);
+      // eslint-disable-next-line no-await-in-loop -- Verify each refusal before another insertion can mutate the shared Model.
+      expect(await workbench.dispatch(action)).toEqual({ status: "rejected" });
+    }
+    for (const target of ["missing", a]) {
+      expect(
+        // eslint-disable-next-line no-await-in-loop -- These target checks share a Model and must run in mutation order.
+        await workbench.dispatch(
+          Actions.addTab(
+            { id: "outline", component: "worksplit.tool" },
+            target,
+            DockLocation.CENTER,
+            -1,
+          ),
+        ),
+      ).toEqual({ status: "rejected" });
+    }
+    expect(workbench.getLayout()).toEqual(before);
+    expect(observer).not.toHaveBeenCalled();
+    expect(workbench.getDocuments()).toHaveLength(1);
+    expect(liveRouters(routers)).toHaveLength(2);
+    model.removeChangeListener(observer);
+  });
+
+  it("rejects multiple-resource and mixed insertion batches without partially changing layout", async () => {
+    const { workbench, open } = setup({
+      layout: withBorder,
+      tools: [
+        { id: "outline", render: () => null },
+        { id: "search", render: () => null },
+      ],
+    });
+    const a = await open("A", "main");
+    const outline = Actions.addTab(
+      { id: "outline", component: "worksplit.tool" },
+      "main",
+      DockLocation.CENTER,
+      -1,
+    );
+    const search = Actions.addTab(
+      { id: "search", component: "worksplit.tool" },
+      "border_bottom",
+      DockLocation.CENTER,
+      -1,
+    );
+    const before = workbench.getLayout();
+    const observer = vi.fn<(action: Action) => void>();
+    integrationState(workbench).model.addChangeListener(observer);
+    for (const action of [
+      Actions.group([outline, search]),
+      Actions.group([outline, Actions.renameTab(a, "Renamed")]),
+      Actions.group([outline, Actions.deleteTab(a)]),
+    ]) {
+      // eslint-disable-next-line no-await-in-loop -- Check each batch refusal before attempting the next mutation on this Model.
+      expect(await workbench.dispatch(action)).toEqual({ status: "rejected" });
+    }
+    expect(workbench.getLayout()).toEqual(before);
+    expect(observer).not.toHaveBeenCalled();
+    integrationState(workbench).model.removeChangeListener(observer);
+  });
+
+  it("explicitly refuses new tool admission with an application docking policy", async () => {
+    const allowDrop = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["allowDrop"]>>(() => true);
+    const { workbench, open } = setup({
+      layout: withBorder,
+      tools: [{ id: "outline", render: () => null }],
+      allowDrop,
+    });
+    await open("A", "main");
+    allowDrop.mockClear();
+    const before = workbench.getLayout();
+    expect(
+      await workbench.dispatch(
+        Actions.addTab(
+          { id: "outline", component: "worksplit.tool" },
+          "border_bottom",
+          DockLocation.CENTER,
+          -1,
+        ),
+      ),
+    ).toEqual({ status: "rejected" });
+    expect(allowDrop).not.toHaveBeenCalled();
+    expect(workbench.getLayout()).toEqual(before);
+    expect(integrationState(workbench).model.getNodeById("outline")).toBeUndefined();
+  });
+
+  it("keeps the selected document when provisional admission is rejected by policy", async () => {
+    const { workbench, open, routers } = setup({
+      layout: withBorder,
+      allowDrop: (tabs) =>
+        tabs.every(
+          (node) => !(node.getConfig() as { href?: string }).href?.startsWith("/documents/D"),
+        ),
+    });
+    workbench.connectBrowser();
+    const a = await open("A", "main");
+    const b = await open("B", "main");
+    const c = await open("C", "main");
+    expect(await workbench.dispatch(Actions.selectTab(b))).toEqual({ status: "applied" });
+    const target = integrationState(workbench).model.getNodeById("main") as TabSetNode;
+    expect(target.getSelected()).toBe(1);
+    const observer = vi.fn<(action: Action) => void>();
+    integrationState(workbench).model.addChangeListener(observer);
+    const result = await workbench.open(
+      { to: "/documents/$id", params: { id: "D" }, search: { view: "edit" } },
+      { target: "main" },
+    );
+    expect(result).toMatchObject({ status: "failed", stage: "load" });
+    expect(observer.mock.calls.map(([action]) => action.type)).toEqual([
+      Actions.ADD_TAB,
+      Actions.DELETE_TAB,
+    ]);
+    expect(target.getSelectedNode()?.getId()).toBe(b);
+    expect(workbench.getDocuments().map((document) => document.id)).toEqual([a, b, c]);
+    expect(workbench.getActiveDocument()?.id).toBe(b);
+    expect(window.location.pathname).toBe("/documents/B");
+    expect(liveRouters(routers)).toHaveLength(4);
+    integrationState(workbench).model.removeChangeListener(observer);
+  });
+
+  it("preserves the active native container on cross-container refusal and background admission", async () => {
+    const { workbench, open } = setup({
+      layout: withBorder,
+      allowDrop: (tabs) =>
+        tabs.every(
+          (node) => !(node.getConfig() as { href?: string }).href?.startsWith("/documents/D"),
+        ),
+    });
+    workbench.connectBrowser();
+    await open("A", "main");
+    const b = await open("B", "main");
+    const c = await open("C", "other");
+    await workbench.dispatch(Actions.selectTab(b));
+    const model = integrationState(workbench).model;
+    const focus = vi.fn<() => void>();
+    integrationState(workbench).register(b, { focus });
+    const before = workbench.getLayout();
+    const refusal = await workbench.open(
+      { to: "/documents/$id", params: { id: "D" }, search: { view: "edit" } },
+      { target: "other" },
+    );
+    expect(refusal).toMatchObject({ status: "failed", stage: "load" });
+    expect(workbench.getLayout()).toEqual(before);
+    expect(model.getActiveTabset()?.getId()).toBe("main");
+    expect(workbench.getActiveDocument()?.id).toBe(b);
+    expect(window.location.pathname).toBe("/documents/B");
+
+    const background = await workbench.open(
+      { to: "/documents/$id", params: { id: "E" }, search: { view: "edit" } },
+      { target: "other", background: true },
+    );
+    expect(background).toMatchObject({ status: "committed" });
+    expect(model.getActiveTabset()?.getId()).toBe("main");
+    expect((model.getNodeById("main") as TabSetNode).getSelectedNode()?.getId()).toBe(b);
+    expect((model.getNodeById("other") as TabSetNode).getSelectedNode()?.getId()).toBe(c);
+    expect(workbench.getActiveDocument()?.id).toBe(b);
+    expect(window.location.pathname).toBe("/documents/B");
+    expect(focus).not.toHaveBeenCalled();
+
+    const foreground = await workbench.open(
+      { to: "/documents/$id", params: { id: "F" }, search: { view: "edit" } },
+      { target: "other" },
+    );
+    if (foreground.status !== "committed") throw new Error("Foreground admission failed");
+    expect(model.getActiveTabset()?.getId()).toBe("other");
+    expect((model.getNodeById("other") as TabSetNode).getSelectedNode()?.getId()).toBe(
+      foreground.document.id,
+    );
+    expect(workbench.getActiveDocument()?.id).toBe(foreground.document.id);
+    expect(window.location.pathname).toBe("/documents/F");
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it("cleans provisional nodes and Router resources when the docking policy throws", async () => {
+    const policyError = new Error("Docking policy failed");
+    const onIssue = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["onIssue"]>>();
+    const { workbench, open, routers } = setup({
+      layout: withBorder,
+      onIssue,
+      allowDrop: (tabs) => {
+        if (
+          tabs.some((node) =>
+            (node.getConfig() as { href?: string }).href?.startsWith("/documents/D"),
+          )
+        )
+          throw policyError;
+        return true;
+      },
+    });
+    workbench.connectBrowser();
+    const a = await open("A", "main");
+    const before = workbench.getLayout();
+    const result = await workbench.open(
+      { to: "/documents/$id", params: { id: "D" }, search: { view: "edit" } },
+      { target: "other" },
+    );
+    expect(result).toEqual({ status: "failed", stage: "load", error: policyError });
+    expect(onIssue).toHaveBeenCalledWith({ code: "operation-failed", error: policyError });
+    expect(workbench.getLayout()).toEqual(before);
+    expect(workbench.getDocuments().map((document) => document.id)).toEqual([a]);
+    expect(integrationState(workbench).model.getActiveTabset()?.getId()).toBe("main");
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(window.location.pathname).toBe("/documents/A");
+    expect(vi.mocked(routers.at(-1)!.history.destroy)).toHaveBeenCalledTimes(1);
+    expect(liveRouters(routers)).toHaveLength(2);
+  });
+
+  it("reports a retained provisional node when native cleanup is prevented by a trusted observer", async () => {
+    const policyError = new Error("Docking policy failed");
+    const cleanupError = new Error("Native deletion was prevented");
+    const { workbench, open, routers } = setup({
+      layout: withBorder,
+      allowDrop: (tabs) => {
+        if (
+          tabs.some((node) =>
+            (node.getConfig() as { href?: string }).href?.startsWith("/documents/D"),
+          )
+        )
+          throw policyError;
+        return true;
+      },
+    });
+    await open("A", "main");
+    const model = integrationState(workbench).model;
+    const observer = {
+      onBeforeAction: (action: Action) => {
+        if (action.type === Actions.DELETE_TAB) throw cleanupError;
+      },
+    };
+    model.addChangeListener(observer);
+    const result = await workbench.open(
+      { to: "/documents/$id", params: { id: "D" }, search: { view: "edit" } },
+      { target: "other" },
+    );
+    model.removeChangeListener(observer);
+    expect(result).toMatchObject({
+      status: "failed",
+      stage: "load",
+      error: expect.any(AggregateError),
+    });
+    if (result.status !== "failed" || !(result.error instanceof AggregateError))
+      throw new Error("Expected observable cleanup failure");
+    expect(result.error.errors).toEqual([
+      policyError,
+      cleanupError,
+      expect.objectContaining({ message: expect.stringContaining("remains in the native layout") }),
+    ]);
+    const nativeTabs: TabNode[] = [];
+    model.visitNodes((node) => {
+      if (node instanceof TabNode) nativeTabs.push(node);
+    });
+    expect(nativeTabs).toHaveLength(2);
+    const provisional = nativeTabs.find((node) =>
+      (node.getConfig() as { href: string }).href.startsWith("/documents/D"),
+    );
+    expect(provisional).toBeInstanceOf(TabNode);
+    expect(workbench.getDocument(provisional!.getId())).toBeNull();
+    expect(vi.mocked(routers.at(-1)!.history.destroy)).toHaveBeenCalledTimes(1);
+    model.doAction(Actions.deleteTab(provisional!.getId()));
+  });
+
+  it("refuses native idMap entries for already-pruned target containers", async () => {
+    const { workbench } = setup({
+      tools: [{ id: "outline", render: () => null }],
+      layout: {
+        layout: {
+          children: [
+            { type: "tabset", id: "ghost", children: [] },
+            {
+              type: "tabset",
+              id: "main",
+              children: [
+                {
+                  id: "original",
+                  component: "worksplit.document",
+                  config: { href: "/documents/A" },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    const model = integrationState(workbench).model;
+    expect(model.getNodeById("ghost")).toBeInstanceOf(TabSetNode);
+    expect(tabsets(workbench).map((node) => node.getId())).not.toContain("ghost");
+    const observer = vi.fn<(action: Action) => void>();
+    model.addChangeListener(observer);
+    const before = workbench.getLayout();
+    expect(
+      await workbench.dispatch(
+        Actions.addTab(
+          { id: "outline", component: "worksplit.tool" },
+          "ghost",
+          DockLocation.CENTER,
+          -1,
+        ),
+      ),
+    ).toEqual({ status: "rejected" });
+    expect(observer).not.toHaveBeenCalled();
+    expect(workbench.getLayout()).toEqual(before);
+    model.removeChangeListener(observer);
+  });
+
+  it("reports rejection when upstream returns a detached pinned tool for a group insertion", async () => {
+    const { workbench, open } = setup({
+      layout: withBorder,
+      tools: [{ id: "outline", render: () => null }],
+    });
+    workbench.connectBrowser();
+    const a = await open("A", "main");
+    const groupId = await group(workbench, a);
+    const before = workbench.getLayout();
+    const action = Actions.addTab(
+      { id: "outline", component: "worksplit.tool", pinned: true },
+      groupId,
+      DockLocation.CENTER,
+      -1,
+    );
+    const upstream = Model.fromJson(before);
+    expect(upstream.doAction(action)).toBeInstanceOf(TabNode);
+    expect(upstream.getNodeById("outline")).toBeUndefined();
+    expect(upstream.toJson()).toEqual(before);
+    const observer = vi.fn<(action: Action) => void>();
+    integrationState(workbench).model.addChangeListener(observer);
+    expect(await workbench.dispatch(action)).toEqual({ status: "rejected" });
+    expect(observer.mock.calls).toEqual([[action]]);
+    expect(integrationState(workbench).model.getNodeById("outline")).toBeUndefined();
+    expect(workbench.getLayout()).toEqual(before);
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expect(window.location.pathname).toBe("/documents/A");
+    integrationState(workbench).model.removeChangeListener(observer);
+  });
+
+  it("rejects document identities reserved by a tool before creating any Router", () => {
+    const { makeRouter } = setup();
+    const factory = vi.fn<typeof makeRouter>(makeRouter);
+    expect(() =>
+      createWorkbench({
+        createRouter: factory,
+        tools: [{ id: "outline", render: () => null }],
+        layout: {
+          layout: {
+            children: [
+              {
+                type: "tabset",
+                children: [
+                  {
+                    id: "outline",
+                    component: "worksplit.document",
+                    config: { href: "/documents/A" },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      }),
+    ).toThrow(/tool id outline conflicts with a document identity/);
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("skips tool identities reserved outside the native tree when generating document ids", async () => {
+    const originalRandom = crypto.getRandomValues.bind(crypto);
+    const random = vi.spyOn(crypto, "getRandomValues").mockImplementation((value) => {
+      if (value instanceof Uint32Array && value.length === 4) {
+        value.fill(0);
+        return value;
+      }
+      return originalRandom(value);
+    });
+    try {
+      const prefix = "00000000".repeat(4);
+      const reserved = `document-${prefix}-1`;
+      const { workbench, open } = setup({ tools: [{ id: reserved, render: () => null }] });
+      expect(integrationState(workbench).model.getNodeById(reserved)).toBeUndefined();
+      const a = await open("A");
+      expect(a).toBe(`document-${prefix}-2`);
+      expect(workbench.getDocument(reserved)).toBeNull();
+      expect(workbench.getDocument(a)?.href).toContain("/documents/A");
+    } finally {
+      random.mockRestore();
+    }
+  });
+});
+
 describe("native close coordination", () => {
   it("finishes resource cleanup after a native after-action observer throws following deletion", async () => {
     const { workbench, open } = setup();
@@ -1255,7 +1892,7 @@ describe("native close coordination", () => {
   });
 
   it("rejects a retained lifecycle registration callback after the native tool closes", async () => {
-    const tool = { id: "search", title: "Search", render: () => null };
+    const tool = { id: "search", render: () => null };
     const { workbench } = setup({
       tools: [tool],
       layout: {
@@ -1269,7 +1906,7 @@ describe("native close coordination", () => {
                 type: "tab",
                 id: tool.id,
                 component: "worksplit.tool",
-                name: tool.title,
+                name: "Search",
               },
             ],
           },

@@ -11,10 +11,10 @@
   "results": [
     {
       "count": 2,
-      "openMs": 81,
+      "openMs": 120.20000000298023,
       "openTargetLookupMs": 0,
       "switchCount": 20,
-      "switchMs": 666.6000000014901,
+      "switchMs": 666.5,
       "opened": {
         "requests": 2,
         "renders": 2,
@@ -48,8 +48,8 @@
         "disposed": 0,
         "historySubscriptions": 2
       },
-      "closeReceiptMs": 15,
-      "closeWithFramesMs": 17.600000001490116,
+      "closeReceiptMs": 25.299999997019768,
+      "closeWithFramesMs": 27.399999991059303,
       "closed": {
         "requests": 2,
         "renders": 2,
@@ -73,15 +73,15 @@
         }
       ],
       "httpRequests": 2,
-      "heapBeforeBytes": 11100432,
-      "heapAfterCloseBytes": 14547188
+      "heapBeforeBytes": 11107752,
+      "heapAfterCloseBytes": 14608160
     },
     {
       "count": 10,
-      "openMs": 349.29999999701977,
-      "openTargetLookupMs": 1.4999999925494194,
+      "openMs": 518,
+      "openTargetLookupMs": 5.100000008940697,
       "switchCount": 20,
-      "switchMs": 666.5,
+      "switchMs": 699.6999999880791,
       "opened": {
         "requests": 10,
         "renders": 10,
@@ -115,8 +115,8 @@
         "disposed": 0,
         "historySubscriptions": 10
       },
-      "closeReceiptMs": 72.89999999850988,
-      "closeWithFramesMs": 77.60000000149012,
+      "closeReceiptMs": 165.40000000596046,
+      "closeWithFramesMs": 187.70000000298023,
       "closed": {
         "requests": 10,
         "renders": 10,
@@ -172,15 +172,15 @@
         }
       ],
       "httpRequests": 10,
-      "heapBeforeBytes": 11157704,
-      "heapAfterCloseBytes": 17725936
+      "heapBeforeBytes": 11111732,
+      "heapAfterCloseBytes": 22015388
     },
     {
       "count": 50,
-      "openMs": 1847.2999999970198,
-      "openTargetLookupMs": 10.80000002682209,
+      "openMs": 3517.5999999940395,
+      "openTargetLookupMs": 21.900000035762787,
       "switchCount": 20,
-      "switchMs": 733.1999999955297,
+      "switchMs": 1066.7000000029802,
       "opened": {
         "requests": 50,
         "renders": 50,
@@ -214,8 +214,8 @@
         "disposed": 0,
         "historySubscriptions": 50
       },
-      "closeReceiptMs": 511.19999999552965,
-      "closeWithFramesMs": 551.1999999955297,
+      "closeReceiptMs": 859.3999999910593,
+      "closeWithFramesMs": 930.5,
       "closed": {
         "requests": 50,
         "renders": 50,
@@ -431,8 +431,8 @@
         }
       ],
       "httpRequests": 50,
-      "heapBeforeBytes": 11097224,
-      "heapAfterCloseBytes": 37156636
+      "heapBeforeBytes": 11120508,
+      "heapAfterCloseBytes": 41877268
     }
   ]
 }

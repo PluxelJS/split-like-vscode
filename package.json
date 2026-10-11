@@ -18,6 +18,7 @@
     "catalog:migrate": "pncat migrate --yes",
     "catalog:clean": "pncat clean --yes",
     "test:browser": "playwright test",
+    "test:package": "node scripts/check-package-consumer.mjs",
     "measure": "node scripts/measure-workbench.mjs",
     "measure:native": "node scripts/measure-native-layout.mjs"
   },

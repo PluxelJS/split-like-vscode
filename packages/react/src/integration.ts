@@ -11,6 +11,7 @@ import {
   BorderNode,
   DockLocation,
   Model,
+  RowNode,
   TabGroupNode,
   TabNode,
   TabSetNode,
@@ -82,7 +83,6 @@ export interface WorkbenchContentLifecycle {
 }
 export interface WorkbenchTool {
   id: string;
-  title: string;
   render: (context: { id: string }) => ReactNode;
 }
 export interface WorkbenchCommand {
@@ -138,7 +138,7 @@ type Internal = {
   tools: Map<string, WorkbenchTool>;
   commands: readonly WorkbenchCommand[];
   loadDocument: (id: string) => Promise<void>;
-  register: (id: string, lifecycle: WorkbenchContentLifecycle) => () => void;
+  register: (id: string, lifecycle: WorkbenchContentLifecycle, expectedNode?: Node) => () => void;
   focus: (id: string | null, area: WorkbenchState["focusedArea"]) => void;
   setWindowFocus: (focused: boolean) => void;
   modelAction: (action: Action) => undefined;
@@ -221,7 +221,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         windowFocused: typeof document !== "undefined" && document.hasFocus(),
       }),
       loadDocument: (id) => this.loadDocument(id),
-      register: (id, lifecycle) => this.register(id, lifecycle),
+      register: (id, lifecycle, expectedNode) => this.register(id, lifecycle, expectedNode),
       focus: (id, area) => this.observeFocus(id, area),
       setWindowFocus: (windowFocused) =>
         this.state.store.setState((s) => ({
@@ -241,6 +241,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       if (node.isEnableFloat() || node.isEnablePopout())
         throw new Error(`Disable unsupported popouts at ${node.getId()}`);
       if (node.getComponent() === DOCUMENT_COMPONENT) {
+        if (tools.has(node.getId()))
+          throw new Error(`Worksplit tool id ${node.getId()} conflicts with a document identity`);
         const config: unknown = node.getConfig();
         if (
           !config ||
@@ -392,7 +394,12 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   }
 
   async close(id: string): Promise<CloseResult> {
-    if (!this.state.documents.has(id)) return { status: "superseded" };
+    if (
+      this.disposed ||
+      !(this.state.model.getNodeById(id) instanceof TabNode) ||
+      (!this.state.documents.has(id) && !this.state.tools.has(id))
+    )
+      return { status: "superseded" };
     return this.closeAction(Actions.deleteTab(id)) as Promise<CloseResult>;
   }
 
@@ -404,6 +411,10 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     );
     if (removals.length > 0)
       return removals.length === actions.length ? this.closeAction(action) : { status: "rejected" };
+    // Tool admission is a single native insertion. Do not partially admit resources while
+    // guessing later batch targets, identities or policies.
+    if (actions.length !== 1 && actions.some((a) => a.type === Actions.ADD_TAB))
+      return { status: "rejected" };
     // Policy callbacks can depend on the current Model. Do not simulate a second layout to
     // predict multi-step docking batches, or partially apply them before rejecting a later step.
     if (
@@ -420,14 +431,62 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     )
       return { status: "rejected" };
     if (!actions.every((a) => this.allowLayoutAction(a))) return { status: "rejected" };
-    this.applyLayoutAction(action, actions);
-    return { status: "applied" };
+    return { status: this.applyLayoutAction(action, actions) ? "applied" : "rejected" };
+  }
+
+  private allowToolAdmission(action: Action): boolean {
+    const model = this.state.model;
+    const json = action.data.json as Record<string, unknown>;
+    // A new TabNode for the current Model cannot be constructed through upstream public APIs
+    // before insertion. Refuse policy-bound admission rather than changing layout then undoing it.
+    if (
+      this.options.allowDrop ||
+      !json ||
+      typeof json !== "object" ||
+      Array.isArray(json) ||
+      typeof json.id !== "string" ||
+      !json.id ||
+      !this.state.tools.has(json.id) ||
+      this.state.documents.has(json.id) ||
+      model.getNodeById(json.id) ||
+      this.closing.has(json.id) ||
+      (json.type !== undefined && json.type !== TabNode.TYPE) ||
+      json.component !== TOOL_COMPONENT ||
+      json.children !== undefined ||
+      json.subLayoutId !== undefined ||
+      ["enableFloat", "enablePopout"].some((key) => json[key] !== undefined && json[key] !== false)
+    )
+      return false;
+    const target = model.getNodeById(action.data.toNode as string);
+    if (
+      !(
+        target instanceof TabSetNode ||
+        target instanceof BorderNode ||
+        target instanceof TabGroupNode ||
+        target instanceof RowNode
+      ) ||
+      ![
+        DockLocation.CENTER,
+        DockLocation.LEFT,
+        DockLocation.RIGHT,
+        DockLocation.TOP,
+        DockLocation.BOTTOM,
+      ].some((location) => location.getName() === action.data.location)
+    )
+      return false;
+    let live = false;
+    model.visitNodes((node) => {
+      if (node === target) live = true;
+    });
+    return live;
   }
 
   private allowLayoutAction(action: Action): boolean {
     const model = this.state.model;
     const data = action.data;
     switch (action.type) {
+      case Actions.ADD_TAB:
+        return this.allowToolAdmission(action);
       case Actions.MOVE_NODE: {
         const from = model.getNodeById(data.fromNode as string);
         const to = model.getNodeById(data.toNode as string);
@@ -493,7 +552,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       this.activate(selected.getId(), { focus: false });
   }
 
-  private applyLayoutAction(action: Action, actions: readonly Action[]) {
+  private applyLayoutAction(action: Action, actions: readonly Action[]): boolean {
     const model = this.state.model;
     // A batch with one leaf has the same selection/move meaning as that native Action.
     // Execute the original batch so native notifications and observers retain its identity.
@@ -523,7 +582,14 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     } finally {
       this.selecting = selecting;
     }
-    if (selecting) return;
+    // Native ADD_TAB can return a detached node when a destination ignores insertion (e.g.
+    // a pinned tab into a TabGroup). updateIdMap has now rebuilt from the actual native tree.
+    if (
+      operation.type === Actions.ADD_TAB &&
+      !(model.getNodeById((operation.data.json as { id: string }).id) instanceof TabNode)
+    )
+      return false;
+    if (selecting) return true;
     // Native selection cancels pending foreground work, including queued content focus.
     if (
       actions.some(
@@ -542,11 +608,11 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         if (this.state.documents.has(selected.getId()))
           this.activate(selected.getId(), { focus: false });
       }
-      return;
+      return true;
     }
     // Moving an active document that stays selected changes its placement, not its identity
     // or URL. Native source selection repair is not another foreground navigation request.
-    if (movesActive && current instanceof TabNode && current.isSelected()) return;
+    if (movesActive && current instanceof TabNode && current.isSelected()) return true;
     // Native batches notify only once. Derive their final central selection without replaying
     // the pipeline. A Border/tool-only selection must not activate an unrelated central tab.
     const explicit = actions.some(
@@ -568,6 +634,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     ) {
       this.activateSelected(container);
     }
+    return true;
   }
 
   async executeCommand(id: string, options: { contentId?: string } = {}) {
@@ -789,28 +856,91 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         release: [],
       };
       const title = this.routeMetadata(router)?.title ?? session.href;
-      const node = this.state.model.doAction(
-        Actions.addTab(
-          {
-            type: "tab",
-            id,
-            name: title,
-            component: DOCUMENT_COMPONENT,
-            config: { href: session.href, multi: session.multi },
-            enableFloat: false,
-            enablePopout: false,
-          },
-          target,
-          DockLocation.CENTER,
-          -1,
-          !options.background && focus === this.focusEpoch,
-        ),
-      ) as TabNode | undefined;
-      if (!node || this.state.model.getNodeById(id) !== node)
-        throw new Error(`Cannot add document to ${target}`);
-      if (!this.allowMove(node, node.getParent()!, DockLocation.CENTER)) {
-        this.state.model.doAction(Actions.deleteTab(id));
-        throw new Error(`Docking policy rejected document in ${target}`);
+      const model = this.state.model;
+      const previousActive = model.getActiveTabset();
+      const destination = model.getNodeById(target) as TabSetNode | BorderNode;
+      const previousSelected = destination.getSelectedNode();
+      const restoreSelection = () => {
+        const actions: Action[] = [];
+        let liveSelected = false;
+        let liveActive = false;
+        model.visitNodes((node) => {
+          if (node === previousSelected) liveSelected = true;
+          if (node === previousActive) liveActive = true;
+        });
+        if (
+          previousSelected instanceof TabNode &&
+          liveSelected &&
+          tabContainer(previousSelected) === destination &&
+          !previousSelected.isSelected()
+        )
+          actions.push(Actions.selectTab(previousSelected.getId()));
+        if (
+          previousActive &&
+          liveActive &&
+          (model.getActiveTabset() !== previousActive || actions.length > 0)
+        )
+          actions.push(Actions.setActiveTabset(previousActive.getId()));
+        if (actions.length === 0) return;
+        const selecting = this.selecting;
+        this.selecting = true;
+        try {
+          model.doAction(actions.length === 1 ? actions[0]! : Actions.group(actions));
+        } finally {
+          this.selecting = selecting;
+        }
+      };
+      try {
+        const node = model.doAction(
+          Actions.addTab(
+            {
+              type: "tab",
+              id,
+              name: title,
+              component: DOCUMENT_COMPONENT,
+              config: { href: session.href, multi: session.multi },
+              enableFloat: false,
+              enablePopout: false,
+            },
+            target,
+            DockLocation.CENTER,
+            -1,
+            false,
+          ),
+        ) as TabNode | undefined;
+        if (!node || model.getNodeById(id) !== node)
+          throw new Error(`Cannot add document to ${target}`);
+        // Admission is provisional until policy approval. Foreground selection belongs to
+        // activate below; native ADD may still change the active Tabset even with select:false.
+        if (!this.allowMove(node, node.getParent()!, DockLocation.CENTER))
+          throw new Error(`Docking policy rejected document in ${target}`);
+        if (options.background || focus !== this.focusEpoch) restoreSelection();
+      } catch (error) {
+        const errors = [error];
+        const retained = () => {
+          let live = false;
+          model.visitNodes((node) => {
+            if (node instanceof TabNode && node.getId() === id) live = true;
+          });
+          return live;
+        };
+        if (retained()) {
+          try {
+            model.doAction(Actions.deleteTab(id));
+          } catch (cleanupError) {
+            errors.push(cleanupError);
+          }
+        }
+        if (retained())
+          errors.push(new Error(`Provisional document ${id} remains in the native layout`));
+        try {
+          restoreSelection();
+        } catch (restoreError) {
+          errors.push(restoreError);
+        }
+        throw errors.length === 1
+          ? error
+          : new AggregateError(errors, `Failed to discard provisional document ${id}`);
       }
       this.state.documents.set(id, session);
       this.pending.delete(router);
@@ -1233,13 +1363,20 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     });
     return task;
   }
-  private register(id: string, lifecycle: WorkbenchContentLifecycle) {
+  private register(id: string, lifecycle: WorkbenchContentLifecycle, expectedNode?: Node) {
+    const node = this.state.model.getNodeById(id);
+    if (
+      this.disposed ||
+      !(node instanceof TabNode) ||
+      (expectedNode !== undefined && expectedNode !== node)
+    )
+      throw new Error(`Cannot register closed content ${id}`);
     const session = this.state.documents.get(id);
     if (session) session.lifecycle = lifecycle;
-    else if (this.state.tools.has(id) && this.state.model.getNodeById(id) instanceof TabNode)
-      this.toolLifecycles.set(id, lifecycle);
+    else if (this.state.tools.has(id)) this.toolLifecycles.set(id, lifecycle);
     else throw new Error(`Cannot register closed content ${id}`);
     return () => {
+      if (this.state.model.getNodeById(id) !== node) return;
       if (session?.lifecycle !== lifecycle && this.toolLifecycles.get(id) !== lifecycle) return;
       if (session?.lifecycle === lifecycle) session.lifecycle = undefined;
       if (this.toolLifecycles.get(id) === lifecycle) this.toolLifecycles.delete(id);
@@ -1323,7 +1460,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     let id: string;
     do {
       id = `document-${this.instancePrefix}-${++this.nextId}`;
-    } while (this.state.model.getNodeById(id));
+    } while (this.state.model.getNodeById(id) || this.state.tools.has(id));
     return id;
   }
   private routeMetadata(router: AnyRouter): WorkbenchRouteMetadata | undefined {

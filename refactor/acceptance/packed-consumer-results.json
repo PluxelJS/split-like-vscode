@@ -1,0 +1,317 @@
+{
+  "startedAt": "2026-10-11T07:03:07.966Z",
+  "status": "passed",
+  "consumerDirectory": "/home/ahdg/.var/app/io.github.trumank.CodeStudio/tmp/worksplit-packed-consumer-ZvoQUi",
+  "url": "http://127.0.0.1:34643",
+  "conditions": {
+    "distribution": "Packed public JS, declarations and CSS; Vite production build and preview",
+    "browser": "Headless Chromium installed by this repository's Playwright",
+    "desktop": {
+      "width": 1440,
+      "height": 900
+    },
+    "narrow": {
+      "width": 390,
+      "height": 844
+    },
+    "limitations": [
+      "One independent tarball consumer fixture; this does not prove Pluxel compatibility or cross-application generality.",
+      "Application counters and DOM/provider identity describe this fixture's resources, not heap leak detection or performance.",
+      "This application explicitly retains its named native empty TabSets with enableDeleteWhenEmpty:false.",
+      "The small window uses unchanged native docking behavior; touch or phone usability is not asserted."
+    ]
+  },
+  "checks": [
+    "Custom shell, root HTML props/style/theme, and visible native render slots",
+    "Two concurrent public document Routers, application providers and subscriptions",
+    "Direct upstream Layout ref inline rename and redraw preserve the provider and editor",
+    "Both live application subscriptions receive real save receipts after host rerender",
+    "Native movement between application-configured TabSets retains uncontrolled input DOM, providers and resources without loaders",
+    "Typed Workbench open refusal and real TanStack Link dirty navigation refusal/approval coordinate the document URL",
+    "Registered native tool insertion, close and reopen keep the document URL and sessions",
+    "Narrow resize keeps native JSON/context/resources; manual maximize persists across widening and restores original DOM",
+    "Actual native dirty close refusal and approval preserve the sibling and release A's resources once",
+    "Public instance disposal releases the fixture's remaining Routers and subscriptions"
+  ],
+  "dialogs": [
+    {
+      "message": "Discard this unsaved draft?",
+      "accepted": false
+    },
+    {
+      "message": "Discard this unsaved draft?",
+      "accepted": false
+    },
+    {
+      "message": "Discard this unsaved draft?",
+      "accepted": true
+    },
+    {
+      "message": "Discard this unsaved draft?",
+      "accepted": false
+    },
+    {
+      "message": "Discard this unsaved draft?",
+      "accepted": true
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": [],
+  "chromiumVersion": "156.0.8078.4",
+  "initial": {
+    "documents": [
+      {
+        "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-1",
+        "href": "/documents/A?view=edit",
+        "title": "Published document",
+        "navigationKey": "documents"
+      },
+      {
+        "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-2",
+        "href": "/documents/B?view=edit",
+        "title": "Published document",
+        "navigationKey": "documents"
+      }
+    ],
+    "metrics": {
+      "loads": 2,
+      "saves": 0,
+      "routersCreated": 3,
+      "liveRouters": 3,
+      "editorMounts": 2,
+      "editorUnmounts": 0,
+      "subscriptions": 2,
+      "disposals": 0,
+      "providerMounts": 2,
+      "providerUnmounts": 0,
+      "providers": 2
+    }
+  },
+  "rejectedWorkbenchNavigation": {
+    "metrics": {
+      "loads": 3,
+      "saves": 1,
+      "routersCreated": 4,
+      "liveRouters": 3,
+      "editorMounts": 2,
+      "editorUnmounts": 0,
+      "subscriptions": 2,
+      "disposals": 0,
+      "providerMounts": 2,
+      "providerUnmounts": 0,
+      "providers": 2
+    }
+  },
+  "nativeSnapshots": {
+    "beforeResize": {
+      "version": 1,
+      "workspaceId": "default",
+      "layout": {
+        "global": {
+          "tabEnableRename": true,
+          "tabEnablePin": true,
+          "tabSetEnableTabGroups": true
+        },
+        "borders": [
+          {
+            "location": "bottom",
+            "type": "border",
+            "selected": 0,
+            "children": [
+              {
+                "type": "tab",
+                "id": "inspector",
+                "name": "Native Inspector title",
+                "component": "worksplit.tool"
+              }
+            ]
+          }
+        ],
+        "layout": {
+          "type": "row",
+          "id": "#7ef39c15-4f1c-4d52-aa64-421105901a53",
+          "children": [
+            {
+              "type": "tabset",
+              "id": "left",
+              "name": "Writing",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-1",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/A?view=preview",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                },
+                {
+                  "type": "tab",
+                  "id": "outline",
+                  "name": "Native Outline title",
+                  "component": "worksplit.tool"
+                }
+              ],
+              "active": true
+            },
+            {
+              "type": "tabset",
+              "id": "right",
+              "name": "Reference",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-2",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/B?view=edit",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                }
+              ]
+            }
+          ]
+        },
+        "subLayouts": {}
+      }
+    },
+    "manuallyMaximized": {
+      "version": 1,
+      "workspaceId": "default",
+      "layout": {
+        "global": {
+          "tabEnableRename": true,
+          "tabEnablePin": true,
+          "tabSetEnableTabGroups": true
+        },
+        "borders": [
+          {
+            "location": "bottom",
+            "type": "border",
+            "selected": 0,
+            "children": [
+              {
+                "type": "tab",
+                "id": "inspector",
+                "name": "Native Inspector title",
+                "component": "worksplit.tool"
+              }
+            ]
+          }
+        ],
+        "layout": {
+          "type": "row",
+          "id": "#7ef39c15-4f1c-4d52-aa64-421105901a53",
+          "children": [
+            {
+              "type": "tabset",
+              "id": "left",
+              "name": "Writing",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-1",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/A?view=preview",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                },
+                {
+                  "type": "tab",
+                  "id": "outline",
+                  "name": "Native Outline title",
+                  "component": "worksplit.tool"
+                }
+              ],
+              "active": true,
+              "maximized": true
+            },
+            {
+              "type": "tabset",
+              "id": "right",
+              "name": "Reference",
+              "enableDeleteWhenEmpty": false,
+              "children": [
+                {
+                  "type": "tab",
+                  "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-2",
+                  "name": "Published document",
+                  "component": "worksplit.document",
+                  "config": {
+                    "href": "/documents/B?view=edit",
+                    "multi": false
+                  },
+                  "enablePopout": false,
+                  "enableFloat": false
+                }
+              ]
+            }
+          ]
+        },
+        "subLayouts": {}
+      }
+    }
+  },
+  "beforeDispose": {
+    "documents": [
+      {
+        "id": "document-17e983cf8fc6b4f0ce00c7086b22ebfd-2",
+        "href": "/documents/B?view=edit",
+        "title": "Published document",
+        "navigationKey": "documents"
+      }
+    ],
+    "metrics": {
+      "loads": 3,
+      "saves": 1,
+      "routersCreated": 4,
+      "liveRouters": 2,
+      "editorMounts": 2,
+      "editorUnmounts": 1,
+      "subscriptions": 1,
+      "disposals": 1,
+      "providerMounts": 2,
+      "providerUnmounts": 1,
+      "providers": 1
+    }
+  },
+  "disposed": {
+    "documentCount": 0,
+    "metrics": {
+      "loads": 3,
+      "saves": 1,
+      "routersCreated": 4,
+      "liveRouters": 0,
+      "editorMounts": 2,
+      "editorUnmounts": 2,
+      "subscriptions": 0,
+      "disposals": 2,
+      "providerMounts": 2,
+      "providerUnmounts": 2,
+      "providers": 0
+    },
+    "cleanup": []
+  },
+  "screenshots": ["packed-consumer-desktop.png", "packed-consumer-narrow.png"],
+  "completedAt": "2026-10-11T07:03:09.896Z",
+  "preview": {
+    "exit": {
+      "code": 143,
+      "signal": null
+    },
+    "log": "  ➜  Local:   http://127.0.0.1:34643/\n"
+  }
+}

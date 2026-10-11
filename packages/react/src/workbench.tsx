@@ -1,8 +1,18 @@
 import { useHotkeys } from "@tanstack/react-hotkeys";
 import { RouterProvider, type AnyRouter } from "@tanstack/react-router";
 import { useStore } from "@tanstack/react-store";
-import { Layout, type ILayoutProps, type TabNode } from "flexlayout-react";
-import { createContext, memo, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { Layout, type ILayoutApi, type ILayoutProps, type TabNode } from "flexlayout-react";
+import {
+  createContext,
+  memo,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  type HTMLAttributes,
+  type ReactNode,
+  type Ref,
+} from "react";
 
 import {
   integrationState,
@@ -19,11 +29,16 @@ const ContentContext = createContext<{ id: string; instance: RenderInstance } | 
 const defaultEmpty = <p>Open a document to begin.</p>;
 const rejectExternalDrag = () => undefined;
 
-export interface WorkbenchProps {
+export interface WorkbenchProps extends Omit<
+  HTMLAttributes<HTMLDivElement>,
+  "children" | "dangerouslySetInnerHTML"
+> {
   workbench: RenderInstance;
   navigation?: ReactNode;
   empty?: ReactNode;
-  /** Native Layout props. Callbacks borrow trusted nodes/Model; submit mutations through dispatch. */
+  /** Native Layout ref. Mutations are intercepted; use dispatch for insertion/close receipts. */
+  layoutRef?: Ref<ILayoutApi>;
+  /** Native Layout props. Borrow nodes/Model for presentation/defaults/observers; dispatch mutations. */
   native?: Omit<
     ILayoutProps,
     | "model"
@@ -52,16 +67,17 @@ export function useWorkbenchState<T>(
 export function useWorkbenchContent() {
   const context = useContext(ContentContext);
   if (!context) throw new Error("Content must render inside a Worksplit document or tool");
-  return useMemo(
-    () => ({
+  const internal = integrationState(context.instance);
+  return useMemo(() => {
+    const node = internal.model.getNodeById(context.id);
+    return {
       id: context.id,
       register: (lifecycle: WorkbenchContentLifecycle) =>
-        integrationState(context.instance).register(context.id, lifecycle),
+        internal.register(context.id, lifecycle, node),
       executeCommand: (id: string) =>
         context.instance.executeCommand(id, { contentId: context.id }),
-    }),
-    [context],
-  );
+    };
+  }, [context, internal]);
 }
 export function useWorkbenchContentLifecycle(lifecycle: WorkbenchContentLifecycle) {
   const content = useWorkbenchContent();
@@ -95,7 +111,15 @@ const Content = memo(function Content({ id, instance }: { id: string; instance: 
   );
 });
 
-export function Workbench({ workbench, navigation, empty = defaultEmpty, native }: WorkbenchProps) {
+export function Workbench({
+  workbench,
+  navigation,
+  empty = defaultEmpty,
+  native,
+  layoutRef,
+  className,
+  ...rootProps
+}: WorkbenchProps) {
   const internal = integrationState(workbench);
   const root = useRef<HTMLDivElement>(null);
   const factory = useMemo(
@@ -170,28 +194,28 @@ export function Workbench({ workbench, navigation, empty = defaultEmpty, native 
   }, [internal]);
   return (
     <div
+      {...rootProps}
       ref={root}
-      className={`worksplit-workbench${navigation ? " worksplit-with-navigation" : ""}`}
+      className={`worksplit-workbench${navigation ? " worksplit-with-navigation" : ""}${className ? ` ${className}` : ""}`}
     >
       {navigation && (
         <nav className="worksplit-navigation" aria-label="Workspace">
           {navigation}
         </nav>
       )}
-      <div className="worksplit-layout">
-        <div className="worksplit-native-layout">
-          <Layout
-            {...native}
-            model={internal.model}
-            factory={factory}
-            onAction={internal.modelAction}
-            onModelChange={observeModel}
-            onExternalDrag={rejectExternalDrag}
-            supportsPopout={false}
-            invalidateTabContentOnParentRender={native?.invalidateTabContentOnParentRender ?? false}
-            onTabSetPlaceHolder={native?.onTabSetPlaceHolder ?? placeholder}
-          />
-        </div>
+      <div className="worksplit-native-layout">
+        <Layout
+          {...native}
+          ref={layoutRef}
+          model={internal.model}
+          factory={factory}
+          onAction={internal.modelAction}
+          onModelChange={observeModel}
+          onExternalDrag={rejectExternalDrag}
+          supportsPopout={false}
+          invalidateTabContentOnParentRender={native?.invalidateTabContentOnParentRender ?? false}
+          onTabSetPlaceHolder={native?.onTabSetPlaceHolder ?? placeholder}
+        />
       </div>
     </div>
   );

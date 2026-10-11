@@ -1,0 +1,77 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  color: #dbe5ee;
+  background: #101820;
+  font-family: system-ui, sans-serif;
+}
+header {
+  height: 88px;
+  padding: 16px 24px;
+  background: #20364a;
+}
+h1 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+header p {
+  margin: 0;
+  color: #aac7dd;
+}
+.packed-workspace .worksplit-navigation {
+  padding: 16px;
+  background: #172635;
+  overflow: auto;
+}
+.packed-workspace .worksplit-navigation button {
+  display: block;
+  width: 100%;
+  margin: 0 0 10px;
+}
+.packed-workspace .worksplit-navigation output {
+  display: block;
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.packed-workspace .worksplit-native-layout {
+  border: 1px solid #63829a;
+}
+.packed-workspace .consumer-icon {
+  color: #72d3c9;
+  padding-right: 4px;
+}
+.packed-workspace .consumer-header {
+  color: #72d3c9;
+  font-size: 12px;
+}
+.editor,
+.tool {
+  height: 100%;
+  padding: 20px;
+  overflow: auto;
+}
+.editor textarea,
+.tool textarea {
+  width: 100%;
+  min-height: 180px;
+  color: inherit;
+  background: #162c3b;
+  border: 1px solid #63829a;
+  padding: 12px;
+}
+button {
+  color: #e6f2ff;
+  background: #28475f;
+  border: 1px solid #63829a;
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+pre {
+  max-height: 120px;
+  overflow: auto;
+  font-size: 11px;
+}

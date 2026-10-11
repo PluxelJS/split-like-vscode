@@ -274,7 +274,7 @@ describe("native React interaction", () => {
       return <button type="button">Tool recovered</button>;
     }
     const { workbench, open, routers } = fixture({
-      tools: [{ id: "inspector", title: "Inspector", render: () => <RecoveringTool /> }],
+      tools: [{ id: "inspector", render: () => <RecoveringTool /> }],
       layout: {
         borders: [
           {

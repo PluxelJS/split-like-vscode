@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": false,
+    "noEmit": true,
+    "types": ["react", "react-dom", "vite/client"],
+    "verbatimModuleSyntax": true
+  },
+  "include": ["app.tsx", "types.ts"]
+}

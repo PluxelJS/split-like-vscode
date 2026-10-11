@@ -460,8 +460,8 @@ function buildWorkbench(): WorkbenchInstance<DemoRouter> {
     createRouter: makeRouter,
     layout,
     tools: [
-      { id: "inspector", title: "Inspector", render: () => <Inspector /> },
-      { id: "details", title: "Details", render: () => <Details /> },
+      { id: "inspector", render: () => <Inspector /> },
+      { id: "details", render: () => <Details /> },
     ],
     workspaceId: "demo",
     ...(initialSnapshot === undefined ? {} : { snapshot: initialSnapshot }),

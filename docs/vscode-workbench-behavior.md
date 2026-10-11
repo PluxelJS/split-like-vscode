@@ -95,9 +95,18 @@ after newer native selection or observed focus.
 
 Ordinary node/model attributes and pure layout `Actions.group` batches are supported. Node ids,
 document components/config and lifetime admission remain protected. Opening routed documents uses
-`open`; arbitrary insertion, Model replacement/undo, floating/popouts and sublayouts are rejected.
+`open`; a single native `ADD_TAB` may admit an absent, already registered tool without a custom
+insertion API. Its native JSON owns title/config/display, and it never becomes a document URL
+owner. `close(id)` covers both content roles. Reopening creates a fresh native node and lifecycle;
+retained callbacks from the removed node cannot register against its replacement. Tool IDs are
+reserved even while absent, so they cannot collide with authored or generated document IDs.
+With `allowDrop`, tool admission is rejected before mutation because the upstream public API
+cannot construct a provisional TabNode for policy evaluation. Arbitrary insertion, multi-leaf
+insertion batches, Model replacement/undo, floating/popouts and sublayouts are rejected.
 Native presentation and interaction slots expose native objects as trusted application extensions;
-they must dispatch Actions through Worksplit and observe rather than mutate its Model. There is
+they must dispatch Actions through Worksplit. Native container-creation defaults and read-only
+observers can be installed directly on the borrowed Model; they do not replace its owned drop
+policy or bypass guarded content mutations. There is
 no second menu, layout tree or equivalent Action API.
 
 Native JSON defaults remain available for omitted container children, contextual root/Border types,
@@ -110,7 +119,13 @@ them through `onIssue`, without undoing the native Action. Other native Model/No
 trusted upstream code. Worksplit does not sandbox their mutations or roll back callback failures.
 
 The same native-node `allowDrop` policy checks each member for preview/moves and validates
-admission/restoration. With that policy, multi-step movement/grouping batches are rejected before
+document admission/restoration. Document admission creates a provisional native tab without
+selecting it; policy refusal or a thrown callback removes it and restores retained selection and
+the previous active TabSet. Background approval preserves that active container too. Model
+observers can still see insertion/deletion/restoration Actions, and native tidy can remove an empty
+target. This is not a native atomic admission transaction or a second layout simulation. Cleanup
+failures report a retained provisional id rather than claiming successful refusal/rollback.
+With that policy, multi-step movement/grouping batches are rejected before
 mutation. The installed Model only invokes its drop hook for previews; it has no per-step Action
 veto inside a native batch. Worksplit neither simulates a second layout nor guesses whether later
 steps will still satisfy a state-dependent policy. Submit those operations individually.
@@ -164,9 +179,13 @@ native adjusting-resize behavior.
 
 ## Breaking changes for later Pluxel migration
 
-The old Workbench component name remains, but its props are now `{ workbench, navigation?, empty?,
-native? }`, with an instance from createWorkbench. Its prior value/layout/editor/view props and
-imperative ref contract are removed. Editing context now records document/tool/shell focus
+The old Workbench component name remains, with an instance from createWorkbench, optional
+navigation/empty content, native Layout props, native `layoutRef` and standard root DOM props.
+Its prior value/layout/editor/view props and Worksplit imperative ref contract are removed.
+Tool registrations contain only `id` and `render`; native JSON `name` supplies their titles.
+Use native providers, presentation slots and the upstream `ILayoutApi` as documented in
+[host customization](../README.md#customize-the-host-with-native-apis), including its intercepted
+insertion-return limitation. Editing context now records document/tool/shell focus
 separately from active document/group and window focus.
 
 Removed public contracts include WorkbenchValue, WorkbenchLayout, WorkbenchHandle, WorkbenchView,

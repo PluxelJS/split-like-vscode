@@ -11,7 +11,7 @@ const config: ReturnType<typeof defineConfig> = defineConfig({
   platform: "neutral",
   target: "esnext",
   clean: true,
-  dts: true,
+  dts: { sourcemap: true },
   sourcemap: true,
   shims: false,
   css: {
