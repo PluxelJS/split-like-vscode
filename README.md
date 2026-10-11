@@ -191,14 +191,20 @@ replace and browser-link behavior. Global document entrances use `workbench.open
 
 ## Document operations and completion
 
-`open(navigation, { target?, newInstance?, background?, reuse?, preview? })` uses TanStack `NavigateOptions` types.
-`target` is a native Tabset or Border id, not a Worksplit region. Omission uses the active/first
-central Tabset. Invalid targets or policies return a load-stage failure; no document is retained.
+`open(navigation, options)` uses TanStack `NavigateOptions` types. Placement uses native
+`target` (TabSet/Border id) and `location` (`DockLocation.CENTER` by default; edges require a
+TabSet). Omission captures the active/first central TabSet when the call starts; an implicit preview
+placement can use the existing preview container. Reuse takes priority over placement and never
+moves an existing identity. Use `newInstance: true` or `duplicate` for an independent comparison.
+A topology refusal returns `{ status: "rejected", reason: "layout-policy" }`; an impossible
+preserve-focus request returns `reason: "focus-conflict"`. Invalid targets or a custom policy
+failure return a load-stage failure; no document is retained.
 Container ids belong to the live native layout: empty TabSets can disappear after moving or closing
 their last tab, so a previously observed target is not a permanent region id.
-The native-node docking policy runs after provisional document insertion with `select: false`.
-Refusal or a thrown policy removes that provisional node and restores retained selection/active
-container; approval then activates a foreground document. A background admission preserves the
+The optional topology policy checks the native ADD Action before insertion. The native-node
+`allowDrop` callback runs after provisional insertion with `select: false`. Refusal or a thrown
+policy removes that provisional node and restores retained selection/active container and weights;
+approval then activates a foreground document. A background admission preserves the
 existing active container. Model observers can see `ADD_TAB` / `DELETE_TAB` and selection-restoring
 Actions; this is not an atomic native transaction. Native tidy can still remove an emptied target.
 If a trusted native observer also prevents cleanup, the failure reports the retained provisional id.
@@ -228,7 +234,7 @@ Existing identities are reused first, leaving any different preview alone. Dirty
 or already-closing previews are kept as ordinary documents. `keep(id)` keeps a comparison document
 without native pinning, so it remains normally closeable. Explicit native pinning also keeps it.
 `getDocument(id).preview` and snapshot config expose the state; do not mirror it in a host catalog.
-`newInstance: true` always creates an ordinary document. `duplicate(id, { target?, background? })`
+`newInstance: true` always creates an ordinary document. `duplicate(id, { target?, location?, background?, preserveFocus? })`
 copies an existing document's committed location into a new ordinary lifetime, without copying drafts. Background preview requests are invalid.
 A preview request that loses foreground qualification while loading is superseded rather than
 retiring content behind the user's current focus. Retirement cleanup errors are reported separately
@@ -252,6 +258,63 @@ The memory-history blocker adapter observes public blocker decisions, because th
 TanStack memory history can leave native `navigate()` promises pending on refusal. Worksplit's
 receipt settles on that refusal. Native navigation promises retain upstream semantics.
 `ignoreBlocker` is a native trusted escape hatch; do not use it to bypass content decisions.
+
+## Open a document beside its originating page
+
+Read the source from `useWorkbenchContent().id`, not from whichever tab happens to be active after
+an asynchronous handler finishes. `getDocument(id).containerId` projects its current native
+TabSet/Border; it does not introduce a second layout registry. For example, using the route tree above:
+
+```tsx
+import { DockLocation } from "flexlayout-react";
+
+// In a document component, with the application's typed workbench in scope:
+const content = useWorkbenchContent();
+async function showRelated(id: string) {
+  const source = workbench.getDocument(content.id);
+  if (!source) return;
+  const result = await workbench.open(
+    { to: "/documents/$id", params: { id } },
+    { target: source.containerId, location: DockLocation.RIGHT, preserveFocus: true },
+  );
+  if (result.status !== "committed") console.error(result);
+}
+```
+
+The route loads before one native ADD places the new document. A failed routing operation or
+refused topology check leaves no extra document or split. Router-accepted error pages still follow
+the ordinary committed-document contract. The captured target is checked again before admission; a removed
+target fails instead of silently choosing a different pane. The same options work with `duplicate`.
+`location` remains native FlexLayout geometry, not a Worksplit left/right region abstraction.
+
+Choose the foreground behavior explicitly:
+
+| Open option           | Result                                                                                                            |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Default               | Select/reveal the target, activate it, publish its URL, request its registered content focus.                     |
+| `preserveFocus: true` | Select/reveal the target in another container while keeping the source active document, URL and actual DOM focus. |
+| `background: true`    | Admit without selecting or activating; the target need not become visible.                                        |
+
+`preserveFocus` and `background` are mutually exclusive. Preserving focus requires an existing
+active source and a separately visible target: replacing the source's selection in its own container
+fails, as does navigating that source to a different URL. Replacing another currently focused
+content (including a tool) in its own container also conflicts with preserving real DOM focus. `reuse: "preserve"` can reveal an existing
+identity without changing its URL. A preserved source preview becomes ordinary retained content
+when a new preview opens. Maximization exits when needed to show both panes. If the user changes
+focus while a normal open is loading, it loses foreground eligibility; the library does not restore
+old focus or override the user's new selection. A preview request is superseded instead.
+
+Preservation means the DOM focus at invocation. Clicking a normal button focuses that button;
+Worksplit does not invent a previous input caret. An editor's own toolbar or local keyboard command
+can retain its input using ordinary React/browser behavior. HeroUI menus, popovers and modal focus
+scopes keep their component-owned focus rules; document coordination does not replace them.
+
+The application chooses preferred neighbors, whether an existing detail pane should be reused,
+and what to do when its configured split limit is reached. Handle `reason: "layout-policy"` before trying an alternative existing container; loader errors
+or refused dirty decisions are not capacity failures. `canDispatch` checks native Actions, not a future routed document;
+a MOVE of the last source tab is not a valid capacity prediction for adding a new document.
+Avoid opening then moving a new document merely to implement a side-open button. Layout changes to
+existing content still use ordinary native Actions through `dispatch`.
 
 ## Content decisions, commands and resources
 

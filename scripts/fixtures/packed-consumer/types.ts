@@ -15,7 +15,7 @@ import {
   type WorkbenchEditingContext,
   type WorkbenchProps,
 } from "@worksplit/react";
-import { Model, type IJsonModel } from "flexlayout-react";
+import { DockLocation, Model, type IJsonModel } from "flexlayout-react";
 
 import { workbench } from "./app.js";
 
@@ -43,6 +43,11 @@ export async function routeAndReceiptTypes() {
   void fakeProps;
   const previewOptions: OpenDocumentOptions = { preview: true, reuse: "preserve" };
   void previewOptions;
+  const besideOptions: OpenDocumentOptions = {
+    location: DockLocation.RIGHT,
+    preserveFocus: true,
+  };
+  void besideOptions;
   const options: OpenDocumentOptions = { newInstance: true, background: true };
   const navigation: NavigationResult = await workbench.open(
     { to: "/documents/$id", params: { id: "Typed" }, search: { view: "edit" } },
@@ -58,9 +63,12 @@ export async function routeAndReceiptTypes() {
   await workbench.open({ to: "/undeclared" });
   if (navigation.status === "committed") {
     const document: WorkbenchDocument = navigation.document;
+    const containerId: string | null = document.containerId;
+    void containerId;
     const preview: boolean = document.preview;
     void preview;
     workbench.keep(document.id);
+    await workbench.duplicate(document.id, { location: DockLocation.RIGHT, preserveFocus: true });
     const closed: CloseResult = await workbench.close(document.id);
     if (closed.status === "closed") {
       const cleanupErrors: readonly unknown[] = closed.cleanupErrors;

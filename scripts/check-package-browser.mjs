@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { chromium, expect } from "@playwright/test";
 
 const repository = resolve(import.meta.dirname, "..");
-const acceptance = resolve(repository, "refactor/acceptance/financial-first-consumer");
+const acceptance = resolve(repository, "refactor/acceptance/api-driven-placement");
 
 /** Drive the built app installed from Worksplit tarballs, using the real public consumer fixture. */
 export async function checkPackageBrowser(consumerDirectory) {
@@ -55,6 +55,10 @@ export async function checkPackageBrowser(consumerDirectory) {
     await checkDocumentOperations(page, url, report);
     await checkBoundedWorkspace(page, url, report, report.conditions.desktop, "desktop");
     await checkBoundedWorkspace(page, url, report, report.conditions.compact, "compact");
+    await checkPagePlacement(page, url, report, report.conditions.desktop, "desktop");
+    await checkPagePlacement(page, url, report, report.conditions.compact, "compact");
+    await checkPlacementFocusRace(page, url, report);
+    await checkFocusedToolPlacement(page, url, report);
     assert.equal(preview.exit, null, "The packed consumer preview exited during acceptance");
     assert.deepEqual(report.pageErrors, [], "The packed consumer raised an unhandled page error");
     assert.deepEqual(report.consoleErrors, [], "The packed consumer logged a console error");
@@ -538,6 +542,233 @@ async function checkBoundedWorkspace(page, url, report, viewport, label) {
   report.screenshots.push(`packed-consumer-bounded-${label}.png`);
   (report.bounded ??= {})[label] = { viewport, boxes, snapshot: (await sample(page)).snapshot };
   await expect(page.getByLabel("Issues", { exact: true })).toHaveText("No issues");
+}
+
+async function checkPagePlacement(page, url, report, viewport, label) {
+  await page.setViewportSize(viewport);
+  await page.goto(`${url}/fixture-page-placement-${label}#bounded`);
+  await expect.poll(async () => (await sample(page)).documents.length).toBe(2);
+  const a = await documentNamed(page, "A");
+  const source = page.locator(`article.editor[data-document-id="${a.id}"]`);
+  const input = source.getByLabel("Draft A", { exact: true });
+  await input.fill(
+    Array.from(
+      { length: 100 },
+      (_, index) => `Source line ${index}: retained caret and scroll`,
+    ).join("\n"),
+  );
+  await input.click();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.press("Shift+ArrowUp");
+  const inputBefore = await inputState(input);
+  assert.ok(inputBefore.scrollTop > 0 && inputBefore.end > inputBefore.start);
+  const before = await sample(page);
+  await page.keyboard.press("Alt+Shift+ArrowRight");
+  await expect(source.getByLabel("Detail placement A", { exact: true })).toHaveText("committed");
+  await expect(page.getByLabel("Draft A-detail-1", { exact: true })).toBeVisible();
+  await expect(input).toBeFocused();
+  const inputAfter = await inputState(input);
+  assert.deepEqual(
+    inputAfter,
+    inputBefore,
+    "The real input shortcut retains caret, selection, text and inner scroll",
+  );
+  const shown = await sample(page);
+  const right = await documentNamed(page, "A-detail-1");
+  assert.equal(shown.editing.activeTabId, a.id);
+  assert.equal(shown.href, before.href);
+  assert.notEqual(right.containerId, a.containerId);
+  assert.equal(right.containerId, await currentContainer(page, right.id));
+  assert.equal(nativeTabsets(shown.layout).length, 2);
+  await page
+    .locator(`article.editor[data-document-id="${right.id}"]`)
+    .getByRole("button", { name: "Keep this document", exact: true })
+    .click();
+  await page.locator(`#flexlayout-tabbutton-${a.id}`).click();
+  const sourceGroup = page
+    .locator(".flexlayout__tabset")
+    .filter({ has: page.locator(`#flexlayout-tabbutton-${a.id}`) });
+  await sourceGroup.getByRole("button", { name: "Maximize tabset", exact: true }).click();
+  await expect(page.getByLabel("Draft A-detail-1", { exact: true })).toBeHidden();
+  const showBelow = source.getByRole("button", { name: "Show detail below", exact: true });
+  await showBelow.click();
+  await expect(source.getByLabel("Detail placement A", { exact: true })).toHaveText("committed");
+  await expect(page.getByLabel("Draft A-detail-2", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Draft A-detail-1", { exact: true })).toBeVisible();
+  await expect(input).toBeVisible();
+  await expect(showBelow).toBeFocused();
+  const fromMaximized = await sample(page);
+  assert.equal(fromMaximized.editing.activeTabId, a.id);
+  assert.equal(fromMaximized.href, before.href);
+  assert.equal(nativeTabsets(fromMaximized.layout).length, 3);
+  const lowerLeft = await documentNamed(page, "A-detail-2");
+  await page
+    .locator(`article.editor[data-document-id="${lowerLeft.id}"]`)
+    .getByRole("button", { name: "Keep this document", exact: true })
+    .click();
+  await page.locator(`#flexlayout-tabbutton-${right.id}`).click();
+  const rightSource = page.locator(`article.editor[data-document-id="${right.id}"]`);
+  await rightSource.getByRole("button", { name: "Focus detail below", exact: true }).click();
+  await expect(page.getByLabel("Draft A-detail-1-detail-1", { exact: true })).toBeFocused();
+  const focused = await documentNamed(page, "A-detail-1-detail-1");
+  assert.equal((await sample(page)).editing.activeTabId, focused.id);
+  assert.equal((await sample(page)).href, focused.href);
+  assert.equal(nativeTabsets((await sample(page)).layout).length, 4);
+  await page.locator(`#flexlayout-tabbutton-${a.id}`).click();
+  const showRight = source.getByRole("button", { name: "Show detail right", exact: true });
+  // Capture after the actual source activation; a refused operation must not mutate its topology.
+  const atLimit = await sample(page);
+  await showRight.click();
+  await expect(source.getByLabel("Detail placement A", { exact: true })).toHaveText(
+    "rejected:layout-policy",
+  );
+  await expect(showRight).toBeFocused();
+  const denied = await sample(page);
+  assert.deepEqual(denied.layout, atLimit.layout);
+  assert.deepEqual(denied.documents, atLimit.documents);
+  assert.equal(denied.href, atLimit.href);
+  assert.equal(denied.editing.activeTabId, a.id);
+  await page.screenshot({
+    path: resolve(acceptance, `packed-consumer-page-placement-${label}.png`),
+  });
+  report.screenshots.push(`packed-consumer-page-placement-${label}.png`);
+  (report.pagePlacement ??= {})[label] = {
+    viewport,
+    keyboardSource: {
+      before: inputBefore,
+      after: inputAfter,
+      activeId: shown.editing.activeTabId,
+      href: shown.href,
+    },
+    nativeContainers: [
+      a.containerId,
+      right.containerId,
+      lowerLeft.containerId,
+      focused.containerId,
+    ],
+    rejected: {
+      status: await source.getByLabel("Detail placement A", { exact: true }).textContent(),
+      documents: denied.documents.length,
+    },
+    focusContract:
+      "Keyboard action preserves textarea focus/caret/selection/scroll; ordinary button clicks preserve the clicked button's focus. No focus-restoration event handlers are supplied by the application.",
+  };
+  report.checks.push(
+    `${viewport.width}×${viewport.height}: in-document public open uses source container plus native DockLocation; keyboard retains input selection/scroll and source URL; maximized button opens visibly without stealing button focus; ordinary beside open focuses target; full 2×2 refuses without changing documents/layout`,
+  );
+
+  await page.goto(`${url}/fixture-preview-source-${label}#bounded`);
+  await expect.poll(async () => (await sample(page)).documents.length).toBe(2);
+  await page.getByText("Document and layout actions", { exact: true }).click();
+  await page.getByRole("button", { name: "Preview C", exact: true }).click();
+  const cInput = page.getByLabel("Draft C", { exact: true });
+  await expect(cInput).toBeFocused();
+  const c = await documentNamed(page, "C");
+  assert.equal(c.preview, true);
+  const previewSource = await sample(page);
+  await page.keyboard.press("Alt+Shift+ArrowRight");
+  await expect(page.getByLabel("Draft C-detail-1", { exact: true })).toBeVisible();
+  await expect(cInput).toBeFocused();
+  assert.equal((await documentNamed(page, "C")).preview, false);
+  assert.equal((await documentNamed(page, "C-detail-1")).preview, true);
+  assert.equal((await sample(page)).editing.activeTabId, c.id);
+  assert.equal((await sample(page)).href, previewSource.href);
+  report.checks.push(
+    `${viewport.width}×${viewport.height}: a source preview is kept before preserving-focus detail admission, retaining the original source DOM and browser URL`,
+  );
+}
+
+async function checkPlacementFocusRace(page, url, report) {
+  await page.setViewportSize(report.conditions.desktop);
+  await page.goto(`${url}/documents/A?view=edit#bounded`);
+  await expect.poll(async () => (await sample(page)).documents.length).toBe(2);
+  await page
+    .getByRole("group", { name: "Document A actions", exact: true })
+    .getByRole("button", { name: "Focus detail right", exact: true })
+    .click();
+  await expect(page.getByLabel("Draft A-detail-1", { exact: true })).toBeFocused();
+  const ordinary = await documentNamed(page, "A-detail-1");
+  assert.equal((await sample(page)).editing.activeTabId, ordinary.id);
+  assert.equal((await sample(page)).href, ordinary.href);
+  report.checks.push(
+    "An ordinary in-document right-side open selects the new detail, publishes its URL and focuses its first mounted input",
+  );
+  await page.goto(`${url}/documents/A?view=edit`);
+  await expect(page.getByLabel("Draft A", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Draft B", { exact: true })).toBeVisible();
+  const a = await documentNamed(page, "A");
+  const b = await documentNamed(page, "B");
+  await page.locator(`#flexlayout-tabbutton-${a.id}`).click();
+  await page
+    .locator(`article.editor[data-document-id="${a.id}"]`)
+    .getByRole("button", { name: "Open delayed detail", exact: true })
+    .click();
+  await page.locator(`#flexlayout-tabbutton-${b.id}`).click();
+  const bInput = page.getByLabel("Draft B", { exact: true });
+  await bInput.click();
+  const newer = await sample(page);
+  await expect(page.getByLabel("Detail placement A", { exact: true })).toHaveText("committed");
+  const slow = await documentNamed(page, "Slow-A");
+  assert.equal(
+    slow.containerId,
+    a.containerId,
+    "The default placement target is captured at call time",
+  );
+  await expect(bInput).toBeFocused();
+  assert.equal((await sample(page)).editing.activeTabId, b.id);
+  assert.equal((await sample(page)).href, newer.href);
+  report.checks.push(
+    "A page action's delayed load keeps its call-time native destination while a newer real tab/input focus preserves the active document and URL",
+  );
+  report.placementFocusRace = { source: a, newer: b, committed: slow };
+}
+
+async function checkFocusedToolPlacement(page, url, report) {
+  await page.goto(`${url}/documents/ToolPlacement?view=edit`);
+  await expect.poll(async () => (await sample(page)).documents.length).toBe(2);
+  const note = page.getByLabel("inspector note", { exact: true });
+  await note.click();
+  const before = await sample(page);
+  const border = before.layout.borders.find((candidate) =>
+    candidate.children.some((tab) => tab.id === "inspector"),
+  );
+  assert.ok(border?.location, "Focused Inspector has a native Border container");
+  // Native Border ids are derived from location; the JSON does not persist a separate id.
+  const borderId = "border_" + border.location;
+  const request = (target) =>
+    page.evaluate(
+      (container) =>
+        window.packedConsumer.workbench.open(
+          { to: "/documents/$id", params: { id: "ToolDetail" }, search: { view: "edit" } },
+          { target: container, preserveFocus: true },
+        ),
+      target,
+    );
+  assert.deepEqual(await request(borderId), { status: "rejected", reason: "focus-conflict" });
+  await expect(note).toBeFocused();
+  assert.deepEqual((await sample(page)).layout, before.layout);
+  assert.deepEqual((await sample(page)).documents, before.documents);
+  const source = before.documents.find((doc) => doc.id === before.editing.activeTabId);
+  const other = before.documents.find((doc) => doc.containerId !== source.containerId);
+  assert.ok(other, "Fixture has another selected central pane");
+  assert.equal((await request(other.containerId)).status, "committed");
+  await expect(note).toBeFocused();
+  await expect(page.getByLabel("Draft ToolDetail", { exact: true })).toBeVisible();
+  const after = await sample(page);
+  assert.equal(after.editing.activeTabId, source.id);
+  assert.equal(after.href, before.href);
+  report.checks.push(
+    "A genuinely focused tool cannot be hidden by preserve-focus CENTER admission; a separate pane reveals the detail while retaining the tool input, active document and URL",
+  );
+}
+
+function inputState(input) {
+  return input.evaluate((node) => ({
+    text: node.value,
+    start: node.selectionStart,
+    end: node.selectionEnd,
+    scrollTop: node.scrollTop,
+  }));
 }
 
 async function documentNamed(page, name) {

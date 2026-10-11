@@ -1,6 +1,7 @@
 # Worksplit 内部重构验收
 
 后续 2026-10-11 的财务消费者设计精进（preserve/preview/duplicate、拓扑政策、焦点与 lifecycle）见[独立记录](acceptance/financial-first-consumer/README.md)。下文保留本次精进前的验证范围及计数。
+页面内旁开文档的后续精进（原生 location、来源容器、preserveFocus、结构化放置拒绝）见[程序打开验收](acceptance/api-driven-placement/README.md)，保留前轮证据。
 
 验收日期：2026-10-11（补齐原生能力、空区整理、删除强制窄屏控制器、demo 右侧 Border、公开包独立安装、宿主 Store 和动态快捷键，并完成架构与清理失败复核）。范围是 Worksplit 库、自有 demo 和一个隔离消费者 fixture；Pluxel、第二应用及跨应用兼容性没有接入或验收。
 

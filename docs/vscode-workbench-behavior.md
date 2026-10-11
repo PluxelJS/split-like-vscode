@@ -36,7 +36,7 @@ fails without retaining a document; admission checks the live tree, including th
 | Activate an existing document / focus another visible document | Replace                                                               |
 | Same canonical location                                        | No push                                                               |
 | Tool focus, size, pin, Border switching                        | None (new document activation follows activation rules)               |
-| Background navigation                                          | None until activation                                                 |
+| Background or preserve-focus open                              | None until activation                                                 |
 | Close active document                                          | Same-group MRU, then other MRU; replace successor/home URL            |
 | Back/forward                                                   | Consume owned indexed entry; never push again                         |
 | Refused traversal                                              | Native history.go back to accepted position; preserve forward entries |
@@ -250,3 +250,32 @@ the caller keeps its rejected resources. Navigation decisions receive `{ id, fro
 close supplies id and an optional document location. This permits business owners to distinguish
 view changes from resource replacement without bypassing guarded closing. Explicit first-open
 focus waits for registration and is cancelled when real user interaction or disposal supersedes it.
+
+## Programmatic document placement
+
+`open` and `duplicate` accept native `target` and `location`. A new document is routed, deduplicated
+and admitted with one native ADD at that location. Existing identities keep their current placement.
+The default container is captured at invocation and checked for live node identity before admission;
+a removed target fails, while a successful identity reuse does not depend on that old placement.
+`WorkbenchDocument.containerId` is a read-only projection of the current TabSet/Border, including
+when its tab is nested inside a native TabGroup. Edge insertion requires a central TabSet.
+
+The topology policy preflights ADD before live insertion; a refused candidate returns
+`rejected/layout-policy`. An impossible preserve-focus request returns `rejected/focus-conflict`. A subsequent native-node policy refusal
+removes the provisional content and restores surviving container weights and selection. Observers
+still see native actions; callbacks which mutate or throw during cleanup are trusted host code,
+not a general transaction boundary. The library does not maintain a replacement Model for rollback.
+
+`preserveFocus` reveals a separately visible document without transferring the source's active
+document, browser URL or DOM focus. It excludes `background`, which does not request visibility.
+An absent source, a different target in the source container, or a request to change the source's
+own URL is a conflict, not permission to hide it or silently activate something else. The same
+visibility check protects currently focused tools/content from replacement in their own container. Reusing the
+same source unchanged is harmless. Maximization is removed when necessary to display both panes,
+and a source preview is kept rather than retired by the newly admitted preview.
+
+Normal open loses its foreground rights after intervening focus changes and may admit in the
+background at the captured container. Preview requests instead become superseded. Neither case
+restores an old focus or routes into the newly active pane merely because its loader finished later.
+Business-specific adjacency and capacity fallback belong to the application; they use these
+operations and existing native Actions, without a second focus queue or document registry.

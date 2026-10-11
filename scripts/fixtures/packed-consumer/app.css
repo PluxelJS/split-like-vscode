@@ -102,3 +102,18 @@ pre {
   cursor: pointer;
   margin-bottom: 8px;
 }
+
+.document-placement {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.document-placement button {
+  font-size: 11px;
+  padding: 4px 6px;
+}
+.document-placement output {
+  width: 100%;
+  font-size: 11px;
+}

@@ -53,7 +53,7 @@ FlexLayout 0.11.1 整 TabSet 删除 TabGroup 的兼容处理仅转换为获准�
 应用借出登录态、服务和缓存；Router 的 Wrap/InnerWrap 提供每文档 provider，root route 组织可见内容 chrome。
 工具使用普通 React renderer，既不创建 Router，也不参与文档 URL 所有权。
 
-`open` 是跨文档入口，负责最终身份去重；文档内 Link/navigate 沿用其 Router 的行为。
+`open` 是跨文档入口，负责最终身份去重；新接纳位置直接使用原生 `target`/`DockLocation`，目标在调用时捕获、接纳时复核。`containerId` 是来源文档的原生容器投影，`preserveFocus` 协调可见旁开而保留来源活动文档/URL/DOM焦点。它们不形成另一套区域或业务布局工作流。文档内 Link/navigate 沿用其 Router 的行为。
 原生导航的最终身份冲突保留两个文档实例并报告，不合并或删除实例，也不回滚 Router 已接受的导航。
 这是从最初全入口去重目标收敛后的实际边界，避免复制 Router 导航流水线；完整语义见 [文档操作](../README.md#document-operations-and-completion)。
 

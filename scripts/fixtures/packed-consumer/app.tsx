@@ -83,7 +83,8 @@ const documentRoute = createRoute({
   validateSearch: (search: Record<string, unknown>) => ({
     view: typeof search.view === "string" ? search.view : "edit",
   }),
-  loader: ({ context, params }) => {
+  loader: async ({ context, params }) => {
+    if (params.id.startsWith("Slow-")) await new Promise((done) => setTimeout(done, 300));
     context.services.metrics.setState((state) => ({ ...state, loads: state.loads + 1 }));
     return { id: params.id, text: "Draft for document " + params.id };
   },
@@ -233,6 +234,32 @@ function Editor() {
   const release = useRef<(() => void) | null>(null);
   const [saveReceipt, setSaveReceipt] = useState(services.metrics.get().saves);
   const [navigation, setNavigation] = useState("");
+  const [placement, setPlacement] = useState("");
+  const detailSequence = useRef(0);
+  const openDetail = (location: typeof DockLocation.RIGHT, preserveFocus: boolean) => {
+    const source = workbench.getDocument(content.id);
+    if (!source?.containerId) throw new Error("The originating document has no native container");
+    setPlacement("opening");
+    void workbench
+      .open(
+        {
+          to: "/documents/$id",
+          params: { id: `${data.id}-detail-${++detailSequence.current}` },
+          search: { view: "edit" },
+        },
+        { target: source.containerId, location, preserveFocus, preview: true },
+      )
+      .then((result) =>
+        setPlacement(
+          result.status === "rejected" ? `${result.status}:${result.reason}` : result.status,
+        ),
+      )
+      .catch((error: unknown) => setPlacement(String(error)));
+  };
+  useHotkey("Alt+Shift+ArrowRight", () => openDetail(DockLocation.RIGHT, true), {
+    target: input,
+    ignoreInputs: false,
+  });
   useEffect(() => {
     const subscription = services.metrics.subscribe((state) => setSaveReceipt(state.saves));
     services.metrics.setState((state) => ({
@@ -287,6 +314,39 @@ function Editor() {
   return (
     <article className="editor" data-document-id={content.id}>
       <h2>Document {data.id}</h2>
+      <div className="document-placement" role="group" aria-label={`Document ${data.id} actions`}>
+        <button type="button" onClick={() => workbench.keep(content.id)}>
+          Keep this document
+        </button>
+        <button type="button" onClick={() => openDetail(DockLocation.RIGHT, true)}>
+          Show detail right
+        </button>
+        <button type="button" onClick={() => openDetail(DockLocation.BOTTOM, true)}>
+          Show detail below
+        </button>
+        <button type="button" onClick={() => openDetail(DockLocation.RIGHT, false)}>
+          Focus detail right
+        </button>
+        <button type="button" onClick={() => openDetail(DockLocation.BOTTOM, false)}>
+          Focus detail below
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setPlacement("opening");
+            void workbench
+              .open({
+                to: "/documents/$id",
+                params: { id: `Slow-${data.id}` },
+                search: { view: "edit" },
+              })
+              .then((result) => setPlacement(result.status));
+          }}
+        >
+          Open delayed detail
+        </button>
+        <output aria-label={`Detail placement ${data.id}`}>{placement}</output>
+      </div>
       <p data-router-wrap data-document-id={content.id} data-provider-token={inherited.token}>
         {inherited.services.name}
       </p>

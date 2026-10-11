@@ -1,0 +1,24 @@
+$ turbo run lint && oxlint -c oxlint.config.ts oxlint.config.ts --deny-warnings
+
+   • turbo 2.11.7
+   • Packages in scope: @worksplit/core, @worksplit/demo, @worksplit/react
+   • Running lint in 3 packages
+   • Remote caching disabled, using shared worktree cache
+
+@worksplit/react:lint: cache miss, executing f74583b25ce8c066
+@worksplit/core:lint: cache hit, replaying logs 3a9bbccb43104754
+@worksplit/core:lint: $ oxlint -c ../../oxlint.config.ts . --deny-warnings
+@worksplit/core:lint: Found 0 warnings and 0 errors.
+@worksplit/core:lint: Finished in 585ms on 4 files with 247 rules using 12 threads.
+@worksplit/demo:lint: cache hit, replaying logs acef54ca380c037c
+@worksplit/demo:lint: $ oxlint -c ../../oxlint.config.ts . --deny-warnings
+@worksplit/demo:lint: Found 0 warnings and 0 errors.
+@worksplit/demo:lint: Finished in 283ms on 5 files with 247 rules using 12 threads.
+@worksplit/react:lint: $ oxlint -c ../../oxlint.config.ts . --deny-warnings
+@worksplit/react:lint: Found 0 warnings and 0 errors.
+@worksplit/react:lint: Finished in 556ms on 23 files with 247 rules using 12 threads.
+
+ Tasks:    3 successful, 3 total
+Cached:    2 cached, 3 total
+  Time:    1.738s 
+
