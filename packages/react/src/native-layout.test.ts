@@ -21,17 +21,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createWorkbench, type WorkbenchContentLifecycle, type WorkbenchOptions } from "./index";
 import { integrationState } from "./integration";
-import { connectResponsiveLayout } from "./responsive-layout";
-import { installTestResizeObserver } from "./test-resize-observer";
 
 const disposals: (() => Promise<unknown>)[] = [];
 const pendingGates: (() => void)[] = [];
-const originalResizeObserver = globalThis.ResizeObserver;
 afterEach(async () => {
   pendingGates.splice(0).forEach((finish) => finish());
   await Promise.all(disposals.splice(0).map((dispose) => dispose()));
   window.history.replaceState(null, "", "/");
-  globalThis.ResizeObserver = originalResizeObserver;
   vi.unstubAllGlobals();
 });
 
@@ -840,130 +836,6 @@ describe("native FlexLayout ownership", () => {
       ),
     ).toBe(true);
     expect(factory).not.toHaveBeenCalled();
-  });
-
-  it("maximizes the native container on narrow screens and restores the desktop choice", async () => {
-    const { workbench, open } = setup({ layout: withBorder });
-    const a = await open("A", "main");
-    const b = await open("B", "main");
-    const groupId = await group(workbench, a);
-    await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
-    await workbench.dispatch(Actions.maximizeToggle("other"));
-    workbench.activate(a);
-    const element = document.createElement("div");
-    Object.defineProperty(element, "clientWidth", { configurable: true, value: 390 });
-    installTestResizeObserver({ width: 390, height: 844 });
-    const model = integrationState(workbench).model;
-    const maximized: (string | undefined)[] = [];
-    const observe = (action: import("flexlayout-react").Action) => {
-      if (action.type === Actions.MAXIMIZE_TOGGLE)
-        maximized.push(model.getMaximizedTabset()?.getId());
-    };
-    model.addChangeListener(observe);
-    const narrow = vi.fn<(value: boolean) => void>();
-    const disconnect = connectResponsiveLayout(integrationState(workbench), element, narrow);
-    expect(narrow).toHaveBeenLastCalledWith(true);
-    expect(native(workbench).getMaximizedTabset()?.getId()).toBe("main");
-    expect(Model.fromJson(workbench.snapshot().layout).getMaximizedTabset()?.getId()).toBe("other");
-    expect(maximized).toEqual(["main"]);
-    disconnect();
-    model.removeChangeListener(observe);
-    expect(maximized).toEqual(["main", "other"]);
-    expect(native(workbench).getMaximizedTabset()?.getId()).toBe("other");
-    expect(tab(workbench, a).getParent()).toBeInstanceOf(TabGroupNode);
-  });
-
-  it("maximizes the new native container when an active group splits without changing the document id", async () => {
-    const { workbench, open } = setup();
-    const a = await open("A");
-    const b = await open("B");
-    const initialContainer = container(tab(workbench, a)).getId();
-    const groupId = await group(workbench, a);
-    await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
-    workbench.activate(a);
-    const router = integrationState(workbench).documents.get(a)?.router;
-    const element = document.createElement("div");
-    Object.defineProperty(element, "clientWidth", { configurable: true, value: 390 });
-    installTestResizeObserver({ width: 390, height: 844 });
-    const disconnect = connectResponsiveLayout(
-      integrationState(workbench),
-      element,
-      () => undefined,
-    );
-    expect(native(workbench).getMaximizedTabset()?.getId()).toBe(initialContainer);
-    expect(workbench.getActiveDocument()?.id).toBe(a);
-    expect(
-      await workbench.dispatch(Actions.moveNode(groupId, initialContainer, DockLocation.RIGHT, -1)),
-    ).toEqual({ status: "applied" });
-    const newContainer = container(tab(workbench, a)).getId();
-    expect(newContainer).not.toBe(initialContainer);
-    expect(native(workbench).getMaximizedTabset()?.getId()).toBe(newContainer);
-    expect(workbench.getEditingContext()).toMatchObject({
-      activeTabId: a,
-      activeGroupId: newContainer,
-    });
-    expect(integrationState(workbench).documents.get(a)?.router).toBe(router);
-    expect(tab(workbench, a).getParent()?.getId()).toBe(groupId);
-    expect(Model.fromJson(workbench.snapshot().layout).getMaximizedTabset()).toBeUndefined();
-    disconnect();
-    expect(native(workbench).getMaximizedTabset()).toBeUndefined();
-  });
-
-  it("projects a narrow batch's final native owner before maximizing its latest active document", async () => {
-    const { workbench, open } = setup({ layout: withBorder });
-    const a = await open("A", "main");
-    const c = await open("C", "main");
-    await open("B", "other");
-    workbench.activate(a);
-    const element = document.createElement("div");
-    Object.defineProperty(element, "clientWidth", { configurable: true, value: 390 });
-    installTestResizeObserver({ width: 390, height: 844 });
-    const disconnect = connectResponsiveLayout(
-      integrationState(workbench),
-      element,
-      () => undefined,
-    );
-    try {
-      const expected = native(workbench);
-      const action = Actions.group([
-        Actions.moveNode(a, "other", DockLocation.CENTER, -1),
-        Actions.setActiveTabset("main"),
-      ]);
-      expected.doAction(action);
-      expect(expected.getActiveTabset()?.getId()).toBe("main");
-      expect(expected.getActiveTabset()?.getSelectedNode()?.getId()).toBe(c);
-      expect(await workbench.dispatch(action)).toEqual({ status: "applied" });
-      await Promise.resolve();
-      expect(workbench.getActiveDocument()?.id).toBe(c);
-      expect(workbench.getLayout()).toEqual(expected.toJson());
-      expect(native(workbench).getMaximizedTabset()?.getId()).toBe("main");
-    } finally {
-      disconnect();
-    }
-  });
-
-  it("cancels a queued narrow update when disconnect restores the desktop maximize preference", async () => {
-    const { workbench, open } = setup({ layout: withBorder });
-    const a = await open("A", "main");
-    const c = await open("C", "main");
-    await open("B", "other");
-    await workbench.dispatch(Actions.maximizeToggle("other"));
-    workbench.activate(a);
-    const element = document.createElement("div");
-    Object.defineProperty(element, "clientWidth", { configurable: true, value: 390 });
-    installTestResizeObserver({ width: 390, height: 844 });
-    const disconnect = connectResponsiveLayout(
-      integrationState(workbench),
-      element,
-      () => undefined,
-    );
-    expect(native(workbench).getMaximizedTabset()?.getId()).toBe("main");
-    workbench.activate(c);
-    disconnect();
-    expect(native(workbench).getMaximizedTabset()?.getId()).toBe("other");
-    await Promise.resolve();
-    expect(native(workbench).getMaximizedTabset()?.getId()).toBe("other");
-    expect(Model.fromJson(workbench.snapshot().layout).getMaximizedTabset()?.getId()).toBe("other");
   });
 
   it("passes group members and actual native targets through the docking policy", async () => {

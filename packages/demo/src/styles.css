@@ -242,6 +242,9 @@ h2 {
   border: 1px solid #394c64;
 }
 @media (max-width: 640px) {
+  .app .worksplit-with-navigation {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
   .topbar {
     font-size: 9px;
     padding: 0 8px;

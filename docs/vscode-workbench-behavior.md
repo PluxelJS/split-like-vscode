@@ -150,18 +150,17 @@ cleanup errors after removal. Ending a registration disposes its resources once;
 wait for relevant in-flight cleanup. A node is never recreated to pretend failed cleanup did not
 happen. Shared application services outlive individual document Routers.
 
-Narrow mode temporarily maximizes the active central native group and adds a document selector.
-Widening restores the desktop maximize choice; snapshots preserve that choice, not narrow mode.
-It does not introduce separate mobile layout preferences. Native Border collapse/dimensions remain.
-Switching the maximized group is one native toggle, without an intermediate unmaximized state.
-Store-triggered narrow presentation is coalesced after synchronous document selection coordination;
-it reads the latest owner instead of changing a native batch's final selection using the old owner.
-Disconnect cancels queued presentation before restoring the desktop preference.
+Docking targets desktop workspaces. FlexLayout owns container resize, weights, overflow and native
+maximize. Worksplit does not introduce a viewport breakpoint, document selector or automatic
+maximize. Resize and binding mount/unmount preserve the actual native layout; snapshot records its
+actual maximize choice. User controls and explicit native Actions select presentation changes.
+Applications own navigation CSS and any alternative small-screen interface. Demo small-window
+acceptance checks layout/resource retention and explicit native controls, not phone or touch docking.
 
 The content wrapper leaves scrolling to FlexLayout and its native enableScrollbars attributes.
 FlexLayout isolates non-Router render failures per tab and provides Retry; TanStack handles route
 failures. Desktop Workbench does not subscribe to the catalogue revision for rendering, preserving
-native adjusting-resize behavior. The narrow document selector owns its catalogue subscription.
+native adjusting-resize behavior.
 
 ## Breaking changes for later Pluxel migration
 

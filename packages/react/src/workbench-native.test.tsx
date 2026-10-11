@@ -19,16 +19,23 @@ import {
 } from "./index";
 
 const disposals: (() => Promise<unknown>)[] = [];
+const resizeObservers: { callback: ResizeObserverCallback; observer: ResizeObserver }[] = [];
+let measuredWidth = 800;
 beforeEach(() => {
+  measuredWidth = 800;
+  resizeObservers.length = 0;
   // jsdom has no layout. Give the native measuring pass nonempty geometry so real portals mount.
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-    () => new DOMRect(0, 0, 800, 600),
+    () => new DOMRect(0, 0, measuredWidth, 600),
   );
-  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => measuredWidth);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
   vi.stubGlobal(
     "ResizeObserver",
-    class {
+    class implements ResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resizeObservers.push({ callback, observer: this });
+      }
       observe = vi.fn<(target: Element) => void>();
       unobserve = vi.fn<(target: Element) => void>();
       disconnect = vi.fn<() => void>();
@@ -115,6 +122,77 @@ async function splitFixture() {
 }
 
 describe("native React interaction", () => {
+  it("leaves a 390 px layout, maximize state, and resize observers under native ownership", async () => {
+    measuredWidth = 390;
+    vi.stubGlobal("innerWidth", 390);
+    const { workbench, a, b, c } = await splitFixture();
+    await workbench.dispatch(Actions.addTabToNewGroup(a, "Research", "#3366cc"));
+    const groupId = Model.fromJson(workbench.getLayout()).getNodeById(a)?.getParent()?.getId();
+    if (!groupId) throw new Error("Document has no native group");
+    await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
+    const grouped = Model.fromJson(workbench.getLayout());
+    const left = grouped.getNodeById(groupId)?.getParent()?.getId();
+    const right = grouped.getNodeById(c)?.getParent()?.getId();
+    if (!left || !right) throw new Error("Documents have no native tabsets");
+    await workbench.dispatch(Actions.maximizeToggle(left));
+    workbench.activate(c);
+    const initial = workbench.getLayout();
+    const expected = Model.fromJson(initial);
+    expect(expected.getActiveTabset()?.getId()).toBe(right);
+    expect(expected.getMaximizedTabset()?.getId()).toBe(left);
+    const observed = vi.fn<NonNullable<ILayoutProps["onModelChange"]>>();
+    const view = render(<Workbench workbench={workbench} native={{ onModelChange: observed }} />);
+    await screen.findByTestId(`editor-${b}`);
+    await act(async () => undefined);
+    const integratedObservers = resizeObservers.length;
+    const expectNativeLayout = () => {
+      expect(workbench.getLayout()).toEqual(expected.toJson());
+      expect(Model.fromJson(workbench.snapshot().layout).getMaximizedTabset()?.getId()).toBe(
+        expected.getMaximizedTabset()?.getId(),
+      );
+    };
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expectNativeLayout();
+
+    expected.doAction(Actions.selectTab(a));
+    await act(async () => workbench.activate(a));
+    expect(workbench.getActiveDocument()?.id).toBe(a);
+    expectNativeLayout();
+
+    await act(async () => {
+      measuredWidth = 800;
+      vi.stubGlobal("innerWidth", 800);
+      fireEvent(window, new Event("resize"));
+      for (const { callback, observer } of resizeObservers) callback([], observer);
+    });
+    expectNativeLayout();
+    const move = Actions.moveNode(groupId, right, DockLocation.CENTER, -1);
+    expected.doAction(move);
+    await act(async () => {
+      expect(await workbench.dispatch(move)).toEqual({ status: "applied" });
+    });
+    expectNativeLayout();
+    expect(
+      observed.mock.calls.filter(([, action]) => action.type === Actions.MAXIMIZE_TOGGLE),
+    ).toHaveLength(0);
+
+    view.unmount();
+    measuredWidth = 390;
+    vi.stubGlobal("innerWidth", 390);
+    const beforeBare = resizeObservers.length;
+    render(
+      <Layout
+        model={Model.fromJson(initial)}
+        factory={(node) => <input aria-label={node.getId()} />}
+        invalidateTabContentOnParentRender={false}
+      />,
+    );
+    await act(async () => undefined);
+    const nativeObservers = resizeObservers.length - beforeBare;
+    expect(nativeObservers).toBeGreaterThan(0);
+    expect(integratedObservers).toBe(nativeObservers);
+  });
+
   it("keeps native Enter and tabset navigation focus on the strip until native activation enters content", async () => {
     const { workbench, a, b, c } = await splitFixture();
     render(

@@ -2,16 +2,7 @@ import { useHotkeys } from "@tanstack/react-hotkeys";
 import { RouterProvider, type AnyRouter } from "@tanstack/react-router";
 import { useStore } from "@tanstack/react-store";
 import { Layout, type ILayoutProps, type TabNode } from "flexlayout-react";
-import {
-  createContext,
-  memo,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 
 import {
   integrationState,
@@ -19,7 +10,6 @@ import {
   type WorkbenchInstance,
   type WorkbenchState,
 } from "./integration";
-import { connectResponsiveLayout } from "./responsive-layout";
 
 type RenderInstance = Pick<
   WorkbenchInstance<AnyRouter>,
@@ -105,28 +95,6 @@ const Content = memo(function Content({ id, instance }: { id: string; instance: 
   );
 });
 
-function DocumentSwitcher({ workbench }: { workbench: RenderInstance }) {
-  const internal = integrationState(workbench);
-  useStore(internal.store, (state) => `${state.revision}:${state.activeDocumentId}`);
-  return (
-    <select
-      className="worksplit-document-switcher"
-      aria-label="Open document"
-      value={internal.store.get().activeDocumentId ?? ""}
-      onChange={(event) => workbench.activate(event.target.value)}
-    >
-      <option value="" disabled>
-        Open document
-      </option>
-      {[...internal.documents.keys()].map((id) => (
-        <option key={id} value={id}>
-          {workbench.getDocument(id)?.href}
-        </option>
-      ))}
-    </select>
-  );
-}
-
 export function Workbench({ workbench, navigation, empty = defaultEmpty, native }: WorkbenchProps) {
   const internal = integrationState(workbench);
   const root = useRef<HTMLDivElement>(null);
@@ -135,7 +103,6 @@ export function Workbench({ workbench, navigation, empty = defaultEmpty, native 
     [workbench],
   );
   const placeholder = useMemo(() => () => <div className="worksplit-empty">{empty}</div>, [empty]);
-  const [narrow, setNarrow] = useState(false);
   const modelObserver = native?.onModelChange;
   const observeModel = useMemo<NonNullable<ILayoutProps["onModelChange"]>>(
     () => (model, action) => {
@@ -147,11 +114,6 @@ export function Workbench({ workbench, navigation, empty = defaultEmpty, native 
     },
     [internal, modelObserver],
   );
-  useEffect(() => {
-    const element = root.current;
-    if (!element) return;
-    return connectResponsiveLayout(internal, element, setNarrow);
-  }, [internal]);
   useHotkeys(
     internal.commands.flatMap((command) =>
       command.hotkey
@@ -217,7 +179,6 @@ export function Workbench({ workbench, navigation, empty = defaultEmpty, native 
         </nav>
       )}
       <div className="worksplit-layout">
-        {narrow && <DocumentSwitcher workbench={workbench} />}
         <div className="worksplit-native-layout">
           <Layout
             {...native}

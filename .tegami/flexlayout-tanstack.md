@@ -10,7 +10,8 @@ editor drag engine and their snapshots. Keep independent pane sizing and SplitVi
 
 The React package now provides createWorkbench, real per-document TanStack Routers, guarded
 close/navigation, indexed workspace browser history, native FlexLayout Actions and tools, focus,
-Hotkeys commands, explicit snapshots and narrow document switching. The demo consumes public
+Hotkeys commands and explicit snapshots. Native docking responds to its container size; viewport
+resize preserves layout and maximize selection. The demo consumes public
 exports. Deduplication applies to workbench.open; native redirect conflicts are reported and both
 instances retained.
 

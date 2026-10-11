@@ -133,7 +133,6 @@ type DocumentSession = {
 };
 type Internal = {
   model: Model;
-  desktopMaximized?: string | null | undefined;
   documents: Map<string, DocumentSession>;
   store: ReturnType<typeof createStore<WorkbenchState>>;
   tools: Map<string, WorkbenchTool>;
@@ -616,7 +615,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     };
   }
 
-  /** Start from the address bar. Restored background tabs remain lazy. */
+  /** Start from the address bar. Native render-on-demand defaults keep restored background tabs lazy. */
   start(href: string): Promise<NavigationResult> {
     return this.openHref(href, {}, true);
   }
@@ -628,12 +627,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       id?: string | undefined;
       children?: unknown[] | undefined;
       config?: unknown;
-      maximized?: boolean;
     }) => {
-      if (node.type === "tabset" && this.state.desktopMaximized !== undefined) {
-        delete node.maximized;
-        if (node.id === this.state.desktopMaximized) node.maximized = true;
-      }
       if (node.type === "tab" && node.id && this.state.documents.has(node.id)) {
         const session = this.state.documents.get(node.id)!;
         node.config = { href: session.href, multi: session.multi };

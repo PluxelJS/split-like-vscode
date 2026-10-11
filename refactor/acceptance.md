@@ -1,6 +1,6 @@
 # Worksplit 内部重构验收
 
-验收日期：2026-10-11（补齐原生能力、空区整理，并减少对原生交互干预后的完整复验）。范围是 Worksplit 库与自有 demo；Pluxel、第二应用及跨应用兼容性没有接入或验收。
+验收日期：2026-10-11（补齐原生能力、空区整理，并删除强制窄屏控制器后的完整复验）。范围是 Worksplit 库与自有 demo；Pluxel、第二应用及跨应用兼容性没有接入或验收。
 
 ## 隔离与交付位置
 
@@ -48,23 +48,24 @@ Store、Hotkeys 在库中使用；Hotkeys、Store 和 Model 没有另造事件�
 [发行说明](../.tegami/flexlayout-tanstack.md) 标明 core/react 的 major bump；未手改版本或 publish-lock。
 空分区修复的 React patch 另见 [发行说明](../.tegami/fix-empty-tabsets.md)。
 本轮原生交互与默认值修正见 [发行说明](../.tegami/preserve-native-interactions.md)。
+删除强制窄屏呈现及桌面偏好覆盖层见 [发行说明](../.tegami/remove-forced-compact-layout.md)。
 
 ## 检查结果
 
-| 检查                                    | 结果                                                                                                |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `pnpm lint`                             | 通过，0 warning / 0 error                                                                           |
-| `pnpm typecheck`                        | core、react、demo、工具配置及新增浏览器 TypeScript 通过；类型化导航的错误调用断言通过               |
-| `pnpm test`                             | 107 项通过：core 5、SplitView 18、文档协调 9、多 Router 1、原生能力与生命周期 71、原生 React 交互 3 |
-| `pnpm build`                            | 三个包通过；生产 demo 从公开 dist 入口打包                                                          |
-| `pnpm source-declarations:check`        | 通过，构建未在源码中遗留声明文件                                                                    |
-| `pnpm format:check`、`git diff --check` | 通过                                                                                                |
-| `pnpm test:browser`                     | 40 项 Chromium 测试通过，0 skipped / unexpected / flaky                                             |
-| 公开 dist JS smoke                      | 从 demo 包解析 `@worksplit/react`，双文档、原生分组、受控整分区关闭、dispose 通过                   |
-| 删除符号与本地 Markdown 链接检查        | 通过；旧符号仅在迁移说明或设计语义中出现                                                            |
+| 检查                                    | 结果                                                                                                   |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `pnpm lint`                             | 通过，0 warning / 0 error                                                                              |
+| `pnpm typecheck`                        | core、react、demo、工具配置及新增浏览器 TypeScript 通过；类型化导航的错误调用断言通过                  |
+| `pnpm test`                             | 104 项通过：core 5、SplitView 18、文档协调 9、多 Router 1、原生能力与生命周期 67、原生 React 交互 4    |
+| `pnpm build`                            | 三个包通过；生产 demo 从公开 dist 入口打包                                                             |
+| `pnpm source-declarations:check`        | 通过，构建未在源码中遗留声明文件                                                                       |
+| `pnpm format:check`、`git diff --check` | 通过                                                                                                   |
+| `pnpm test:browser`                     | 40 项 Chromium 测试通过，0 skipped / unexpected / flaky                                                |
+| 公开 dist JS smoke                      | 从 demo 包解析 `@worksplit/react`，双文档、原生分组、实际最大化快照/恢复、受控整分区关闭、dispose 通过 |
+| 删除符号与本地 Markdown 链接检查        | 通过；旧符号仅在迁移说明或设计语义中出现                                                               |
 
 可见但未隐藏的提示：tsdown 提示 TypeScript 7 API 尚属 experimental；生产 demo 单个 JS chunk 为
-578.04 kB（gzip 170.40 kB），超过 Vite 默认 500 kB 提示阈值；多 Router 的 jsdom 检查提示未实现
+576.43 kB（gzip 169.96 kB），超过 Vite 默认 500 kB 提示阈值；多 Router 的 jsdom 检查提示未实现
 scrollTo。真实浏览器另外验证了滚动保留。未通过调高阈值或吞掉错误来消除提示。
 
 原型先完成共享真实 route tree、两个并排文档、一个工具、类型推导和 dirty/redirect/history/race 门槛，
@@ -77,9 +78,10 @@ scrollTo。真实浏览器另外验证了滚动保留。未通过调高阈值或
 测试：[workbench.spec.mjs](../packages/demo/tests/workbench.spec.mjs)、
 [native-layout.spec.ts](../packages/demo/tests/native-layout.spec.ts)。
 完整结果：[browser-results.json](acceptance/browser-results.json)。
-截图：[桌面 1440×900](acceptance/desktop.png)、[窄屏 390×844](acceptance/narrow.png)。
+截图：[桌面 1440×900](acceptance/desktop.png)、[缩小窗口 390×844](acceptance/narrow.png)。
 原生分组截图：[桌面 1440×900](acceptance/native-groups-desktop.png)、
-[窄屏 390×844](acceptance/native-groups-narrow.png)。截图来自实际测试过程，并经过目视复核。
+[缩小窗口 390×844](acceptance/native-groups-narrow.png)。截图来自实际测试过程，并经过目视复核。
+390×844 是窗口缩放回归条件，不是手机或触屏停靠兼容声明。
 拖动分屏问题：[修复前](acceptance/split-empty-before.png)、
 [修复后桌面](acceptance/split-empty-after-desktop.png)、
 [修复后窄屏](acceptance/split-empty-after-narrow.png)。
@@ -109,9 +111,9 @@ scrollTo。真实浏览器另外验证了滚动保留。未通过调高阈值或
 | 原生 redirect 身份冲突     | 明确报告 native-identity-conflict，两个实例继续存活，没有静默合并/关闭                                                                                    |
 | 错误隔离                   | loader 和 renderer 失败只影响各自实例，另一可见文档继续工作                                                                                               |
 | 可选快照                   | 刷新以地址栏激活，拒绝不兼容数据并提供明确 reset；恢复关闭后不复用旧 history hint                                                                         |
-| 窄屏                       | 切换 A/B、保留 draft 与挂载；恢复原桌面 maximize 偏好，底部动作可滚动到达                                                                                 |
-| 窄屏同文档拆分             | 活动 ID 不变时，原生组移到 RIGHT 新 TabSet 后最大化跟随新容器，保持相同 DOM、输入、scrollTop=360 与资源                                                   |
-| 窄屏多操作最终选择         | A/C 同组 active A、B 另组；GROUP 将 A 移到 B 组再选择原组，最终 C 拥有 URL/selector 与原组最大化；A 的输入、DOM、Router 及资源保留                        |
+| 缩小窗口与明确最大化       | resize 前后原生 JSON/snapshot 相同、无文档下拉框；真实 Restore/Maximize 控件保留 draft 与挂载，手动选择经存储、刷新、拓宽后保持                           |
+| 缩小窗口同文档拆分         | 活动 ID 不变时，原生组移到 RIGHT 新 TabSet 后维持两个可见分区、不自动最大化；保持相同 DOM、输入、scrollTop=360 与资源                                     |
+| 缩小窗口多操作最终选择     | A/C 同组 active A、B 另组；GROUP 将 A 移到 B 组再选择原组，最终 C 拥有 URL 和原生最终选择；布局不被窄屏策略改写，A 的输入、DOM、Router 及资源保留         |
 | 销毁                       | 业务订阅与 document history subscriptions 归零；整个实例 dispose 后存活 Router 归零                                                                       |
 
 纯策略的 admission、程序单 tab/整组移动、完整组聚合恢复策略、快照拒绝、跨空间批次最终选择，以及
@@ -133,7 +135,9 @@ scrollTo。真实浏览器另外验证了滚动保留。未通过调高阈值或
    返回 history-busy。外部历史项报告 history-outside-scope，宿主必须处理退出/卸载。
 5. **原生呈现槽属于可信扩展。** 上游 Node.getModel 可达可变 Model，不能用 readonly 假称隔离。
    普通内容只取得窄能力；可信槽不得绕过协调改 Model。
-6. **窄屏使用临时 native maximize。** 不引入移动端布局树；snapshot 与拓宽恢复桌面选择。
+6. **窗口呈现策略归应用。** 本轮删除此前低于 640px 自动最大化的控制器、文档切换器和桌面偏好覆盖层。
+   原生 Layout 自己观察尺寸；缩小或拓宽窗口保持实际布局和最大化选择，snapshot 直接保存原生状态。
+   应用与用户可用原生 Actions/控件明确最大化；demo 的导航折叠 CSS 归 demo，不强制手机或触屏停靠兼容。
 7. **整分区关闭只做必要适配。** 锁定的 FlexLayout 0.11.1 会对 TabGroup 调用不存在的 `delete()`。
    批准后用原生 Actions 删除可关闭直接子项的叶子，再发 `deleteTabset`；分区整理、空组与 root placeholder
    仍由 FlexLayout 完成。含非 closeable 成员的直接 TabGroup 整体保留，遵循原生 TabSet close 的筛选语义。
@@ -163,12 +167,11 @@ scrollTo。真实浏览器另外验证了滚动保留。未通过调高阈值或
     字段在 exactOptionalPropertyTypes 下不接纳显式 undefined，测试仅为运行时重置做类型断言，库不复制这些类型。
     删除内容 overflow:hidden 和重复错误边界后，滚动由原生管理，tool renderer 可直接用原生 Retry 恢复；
     React 回归验证 sibling 文档保持同一 DOM、draft 和 Router。路由错误仍由 TanStack 隔离。
-14. **保留原生尺寸更新路径。** Workbench 桌面组件不再订阅整个 catalogue revision；窄屏切换器局部订阅。
+14. **保留原生尺寸更新路径。** Workbench binding 不再订阅整个 catalogue revision，也不增加响应式 ResizeObserver。
     同一双 TabSet 快照、同一 adjusting=true 权重 Action 的 React 回归中，Worksplit 与裸 Layout 的
     onRenderTabSet 额外调用数都为 0，布局 JSON 相同；这只验证该上游命令路径，不是整应用 FPS/CPU 基准。
-    切换窄屏最大化目标使用一次原生 toggle，没有先取消最大化的中间状态。
-    窄屏 Store 呈现更新合并到 microtask，在原生操作的文档投影后读取最新 owner；断开会取消排队呈现。
-    裸 Model 对照回归覆盖 A 移到 B 的分区后批次又选择原分区 C，不允许旧 A 的容器最大化改写该最终选择。
+    390px 下的 React 对照验证未插入切换器、未自动提交 MAXIMIZE，观察者数量与裸 Layout 一致。
+    native GROUP 将 A 移到 B 分区后又选择原分区 C，最终选择保持原生结果，不再由宽度控制器改写。
 
 这些取舍已同步到用法、行为契约、设计状态、测试及 demo。pending loader 可能继续；会话/操作检查
 只保证晚到结果不获准提交给已关闭实例，不宣称实现了真正取消。
@@ -176,7 +179,10 @@ scrollTo。真实浏览器另外验证了滚动保留。未通过调高阈值或
 连续桌面 edge split 的生产 CSS 下，A 宽度从 572→449→397 px，Chromium 的默认 scroll anchoring
 会随段落换行将 scrollTop 从 420 调整到 746，以保留阅读锚点；DOM、输入、会话和订阅没有重建。
 新增 edge 回归仅在测试中设置 `overflow-anchor: none`，隔离宽度重排后断言 scrollTop=420。
-既有整组/Border 和窄屏保留测试仍使用真实样式；不承诺任意 resize 后像素 scrollTop 恒定。
+既有整组/Border 和缩小窗口保留测试仍使用真实样式；不承诺任意 resize 后像素 scrollTop 恒定。
+手动最大化 B 后，A 的原生祖先是 display:none，仍连接的隐藏节点没有可用布局几何，scrollTop、
+scrollHeight、clientHeight 读取为 0；拓宽并 Restore 后，同一 A DOM 回到 scrollTop=460，输入、
+挂载与业务订阅保留。因此隐藏保留断言比较隐藏前与恢复可见后的状态，不以隐藏时几何读数判断丢失。
 显式应用配置和已保存快照中的保留空区设置仍按原生契约生效，不暗中改写；旧 demo 快照可取消
 “Restore on refresh” 后刷新以使用新默认配置。
 
@@ -190,13 +196,13 @@ scrollTo。真实浏览器另外验证了滚动保留。未通过调高阈值或
 20 次切换，每次 open/switch 等待两个 RAF；随后 resize 到 1280×800，最后逐个 await close。
 追加打开时间排除第一个启动文档，包含之后 N−1 个文档及绘制等待；计数包含第一个文档。
 第一个追加文档通过原生 RIGHT split 建立第二个 TabSet，后续根据种子文档读取当前原生容器。
-公开 `getLayout()` 克隆与定位的累计时间包含在追加打开耗时内，2/10/50 文档分别为 0.0/3.8/16.6 ms。
+公开 `getLayout()` 克隆与定位的累计时间包含在追加打开耗时内，2/10/50 文档分别为 0.0/1.6/10.2 ms。
 
 | 文档数 | HTTP/loader | 提交渲染 | 切换额外渲染 | 业务 / history 订阅 | 追加打开 ms | 20 次切换 ms | close 回执 / 含绘制 ms |
 | ------ | ----------- | -------- | ------------ | ------------------- | ----------- | ------------ | ---------------------- |
-| 2      | 2           | 2        | 0            | 2 / 2               | 108.3       | 666.6        | 23.7 / 26.8            |
-| 10     | 10          | 10       | 0            | 10 / 10             | 476.3       | 666.1        | 98.1 / 105.9           |
-| 50     | 50          | 50       | 0            | 50 / 50             | 3018.9      | 849.8        | 636.2 / 693.5          |
+| 2      | 2           | 2        | 0            | 2 / 2               | 71.9        | 666.6        | 14.1 / 15.6            |
+| 10     | 10          | 10       | 0            | 10 / 10             | 337.5       | 666.5        | 63.1 / 67.7            |
+| 50     | 50          | 50       | 0            | 50 / 50             | 1762.3      | 700.0        | 428.1 / 462.0          |
 
 三个数量下，切换和 resize 均未新增文档 loader、提交渲染或挂载；关闭后业务/history 订阅归零，
 卸载数等于文档数，close cleanupErrors 全部为零。关闭文档后仍有一个无 loader/订阅的 URL builder
@@ -205,7 +211,8 @@ Router，属于实例寿命；实例 dispose 的浏览器测试验证它也被�
 这些是一次最终采样，不是生产环境吞吐、峰值内存、P95 或性能优秀的证明。切换时间包含 RAF 等待，
 不是纯 CPU 时间；渲染计数是业务组件提交 effect，不覆盖 speculative render 或全部 shell 渲染。
 订阅计数覆盖 demo 业务服务与公开 history.subscribers，不穷举 Router/React Store 内部订阅。
-单文档一个 Router 的资源与关闭成本随数量增长；50 个文档的逐个关闭回执约 636.2 ms。
+单文档一个 Router 的资源与关闭成本随数量增长；50 个文档的逐个关闭回执约 428.1 ms。
+本轮删除响应式控制器后重新采样，不把单样本差异归因为该代码删除的性能收益。
 
 追加原生工作负载：`pnpm measure:native`，脚本
 [measure-native-layout.mjs](../scripts/measure-native-layout.mjs)，原始结果
@@ -214,16 +221,16 @@ Router，属于实例寿命；实例 dispose 的浏览器测试验证它也被�
 其余标签；20 次双组折叠/展开共 40 批、80 个属性操作；两个组各 CENTER 移到另一分区，再 LEFT/RIGHT
 拆出新分区，共 4 次移动，空来源由原生清理；
 20 次轮流激活；最后一个纯关闭 GROUP 删除两个 TabSet，再独立 dispose。每阶段等待两个 RAF。
-分组时间包含公开 `getLayout()` 克隆与定位自动组 ID 的查询成本（2/10/50 文档分别 0.7/0.4/0.7 ms）。
-移动时查询当前容器的累计时间为 0.6/0.6/1.8 ms；关闭前定位两个实际 TabSet 为 0.4/0.2/0.3 ms。
+分组时间包含公开 `getLayout()` 克隆与定位自动组 ID 的查询成本（2/10/50 文档分别 0.4/0.3/0.3 ms）。
+移动时查询当前容器的累计时间为 0.8/0.5/1.0 ms；关闭前定位两个实际 TabSet 为 0.2/0.2/0.3 ms。
 查询计入对应含绘制阶段总时间，关闭回执单独从 dispatch 开始计时。这次工作负载随空区清理调整，
 不与保留固定空分区的旧样本作直接速度对比。
 
 | 文档数 | 分组含绘制 ms | 40 批折叠/展开回执 / 含绘制 ms | 4 次组移动含绘制 ms | 20 次激活含绘制 ms | 整批关闭回执 / 含绘制 ms |
 | ------ | ------------- | ------------------------------ | ------------------- | ------------------ | ------------------------ |
-| 2      | 33.0          | 505.2 / 1333.3                 | 133.3               | 666.7              | 16.7 / 24.3              |
-| 10     | 83.1          | 869.8 / 1483.3                 | 150.8               | 715.8              | 21.1 / 28.8              |
-| 50     | 91.2          | 1378.6 / 1991.5                | 234.2               | 902.0              | 38.6 / 40.9              |
+| 2      | 33.3          | 323.7 / 1333.3                 | 133.3               | 666.5              | 10.4 / 28.6              |
+| 10     | 49.8          | 471.3 / 1333.5                 | 133.1               | 666.6              | 12.2 / 29.3              |
+| 50     | 67.5          | 864.2 / 1482.3                 | 133.3               | 716.7              | 18.1 / 29.4              |
 
 这些原生阶段三个数量下都没有新增 loader、业务提交渲染、挂载或业务/history 订阅。批量关闭后订阅归零、
 卸载数等于文档数，cleanupErrors 为零；dispose 后存活 Router 归零。所有内容都是 clean，没有确认等待，

@@ -302,13 +302,18 @@ callback, unless a newer activation, selection or observed focus supersedes it.
 Content uses FlexLayout's scroll container and `enableScrollbars` attributes; its wrapper adds no
 overflow clipping. Non-Router render failures use FlexLayout's per-tab error boundary and Retry;
 route failures keep TanStack's error boundary. Desktop layout rendering follows native Model
-updates, including its imperative adjusting-resize path. Only the narrow document selector
-subscribes to the document catalogue for rendering.
+updates, including its imperative adjusting-resize path. The Layout binding does not subscribe
+to catalogue revisions for rendering.
 
-Below 640 px the React binding offers a document selector and temporarily maximizes the active
-native central Tabset after document selection settles. On wider screens it restores the prior
-desktop maximize preference;
-snapshots omit that temporary adjustment. Border size and collapse choices stay native.
+Workbench is a desktop docking workspace. Available viewport space, content and open pane count
+matter more than physical screen inches. FlexLayout responds to its container size; resizing
+preserves the native layout, selection and maximize choice. Applications and users explicitly
+maximize a TabSet with `dispatch(Actions.maximizeToggle(tabSetId))`, or use its native control.
+Snapshots retain that actual native choice.
+
+Applications own small-window navigation and presentation. The demo compacts its sidebar with
+application CSS while retaining native docking. Phone layouts and touch docking are outside the
+current acceptance scope; they do not add a mobile mode or another layout policy to Worksplit.
 
 Persistence is optional and explicit: save `snapshot()` through application storage and pass the
 parsed candidate as `snapshot` to `createWorkbench`, with the same `workspaceId`. Restore then

@@ -297,54 +297,96 @@ test("snapshot refresh uses the deep link, validates unknown data and offers exp
   await expect(page.getByLabel("Draft A")).toBeVisible();
 });
 
-test("narrow document switching retains content and desktop layout preferences", async ({
+test("narrow resizing preserves native layout and manual maximize persists without desktop overrides", async ({
   page,
 }) => {
   await start(page);
   await openB(page);
   await page.getByLabel("Draft A").fill("desktop draft");
+  await page.evaluate(() => {
+    window.retainedDraft = document.querySelector('[aria-label="Draft A"]');
+  });
+  await page.getByTestId("scroll-A").evaluate((element) => {
+    // Isolate pixel retention from Chromium's text anchoring during width changes.
+    element.style.overflowAnchor = "none";
+    element.scrollTop = 460;
+  });
+  expect(await page.getByTestId("scroll-A").evaluate((element) => element.scrollTop)).toBe(460);
   await page.getByRole("button", { name: "Maximize tabset", exact: true }).first().click();
   await expect(page.getByLabel("Draft B")).toBeHidden();
+  await page.getByLabel("Restore on refresh").check();
   const before = await page.evaluate(() => ({
     snapshot: window.worksplitDemo.workbench.snapshot(),
+    layout: window.worksplitDemo.workbench.getLayout(),
     metrics: { ...window.worksplitDemo.metrics },
   }));
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("combobox", { name: "Open document" })).toBeVisible();
-  const documents = await ids(page);
-  await page
-    .getByRole("combobox", { name: "Open document" })
-    .selectOption(documents.find((d) => d.href.includes("/documents/B")).id);
-  await expect(page.getByLabel("Draft B")).toBeVisible();
-  await page
-    .getByRole("combobox", { name: "Open document" })
-    .selectOption(documents.find((d) => d.href.includes("/documents/A")).id);
-  await expect(page.getByLabel("Draft A")).toHaveValue("desktop draft");
-  await page
-    .getByTestId("document-A")
-    .getByRole("link", { name: "Fast view", exact: true })
-    .scrollIntoViewIfNeeded();
-  await expect(
-    page.getByTestId("document-A").getByRole("link", { name: "Fast view", exact: true }),
-  ).toBeInViewport();
-  await page.getByTestId("document-A").evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  await page.screenshot({ path: "refactor/acceptance/narrow.png" });
-  expect(
-    await page.evaluate(() =>
-      window.worksplitDemo.workbench.snapshot().layout.layout.children.some((n) => n.maximized),
-    ),
-  ).toBe(true);
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
   await expect(page.getByRole("combobox", { name: "Open document" })).toHaveCount(0);
+  expect(await page.evaluate(() => window.worksplitDemo.workbench.getLayout())).toEqual(
+    before.layout,
+  );
+  expect(await page.evaluate(() => window.worksplitDemo.workbench.snapshot())).toEqual(
+    before.snapshot,
+  );
+  await expect(page.getByLabel("Draft A")).toBeVisible();
   await expect(page.getByLabel("Draft B")).toBeHidden();
   await page.getByRole("button", { name: "Restore tabset", exact: true }).click();
   await expect(page.getByLabel("Draft B")).toBeVisible();
-  const after = await page.evaluate(() => window.worksplitDemo.metrics);
-  expect(after.mounts).toBe(before.metrics.mounts);
-  expect(after.requests).toBe(before.metrics.requests);
+  expect(await page.getByTestId("scroll-A").evaluate((element) => element.scrollTop)).toBe(460);
+  const documents = await ids(page);
+  const b = documents.find((document) => document.href.includes("/documents/B"));
+  await page
+    .locator(".flexlayout__tabset")
+    .filter({ has: page.locator(`#flexlayout-tabbutton-${b.id}`) })
+    .getByRole("button", { name: "Maximize tabset", exact: true })
+    .click();
+  await expect(page.getByLabel("Draft B")).toBeVisible();
+  await expect(page.getByLabel("Draft A")).toBeHidden();
+  await expect(page).toHaveURL(/\/documents\/B\?/);
+  await expect(page.getByLabel("Draft A")).toHaveValue("desktop draft");
+  const manuallyMaximized = await page.evaluate(() => window.worksplitDemo.workbench.snapshot());
+  await page.getByRole("button", { name: "Save layout", exact: true }).click();
+  expect(
+    await page.evaluate(() => JSON.parse(localStorage.getItem("worksplit.demo.layout"))),
+  ).toEqual(manuallyMaximized);
+  await page.screenshot({ path: "refactor/acceptance/narrow.png" });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  await expect(page.getByRole("combobox", { name: "Open document" })).toHaveCount(0);
+  expect(await page.evaluate(() => window.worksplitDemo.workbench.snapshot())).toEqual(
+    manuallyMaximized,
+  );
+  await expect(page.getByLabel("Draft B")).toBeVisible();
+  await expect(page.getByLabel("Draft A")).toBeHidden();
+  await page.getByRole("button", { name: "Restore tabset", exact: true }).click();
+  await expect(page.getByLabel("Draft A")).toBeVisible();
+  await expect(page.getByLabel("Draft B")).toBeVisible();
+  // A hidden native TabSet has no layout metrics; check its retained offset once restored.
+  expect(await page.getByTestId("scroll-A").evaluate((element) => element.scrollTop)).toBe(460);
+  expect(
+    await page.evaluate(
+      () => window.retainedDraft === document.querySelector('[aria-label="Draft A"]'),
+    ),
+  ).toBe(true);
+  expect(await page.evaluate(() => window.worksplitDemo.metrics)).toMatchObject({
+    requests: before.metrics.requests,
+    mounts: before.metrics.mounts,
+    subscriptions: before.metrics.subscriptions,
+    unmounts: before.metrics.unmounts,
+    disposed: before.metrics.disposed,
+  });
   await page.screenshot({ path: "refactor/acceptance/desktop.png" });
+  await page.reload();
+  await expect(page.getByLabel("Draft B")).toBeVisible();
+  await expect(page.getByLabel("Draft A")).toBeHidden();
+  expect(await page.evaluate(() => window.worksplitDemo.workbench.snapshot())).toEqual(
+    manuallyMaximized,
+  );
 });
 
 test("commands save one captured active document; tool input keeps the document URL", async ({

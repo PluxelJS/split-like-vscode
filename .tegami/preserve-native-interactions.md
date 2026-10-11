@@ -13,10 +13,9 @@ native Model execution and observer notifications retain the original batch.
 
 Accept native omitted JSON fields, generated document ids and runtime attribute resets. Remove
 content overflow clipping and the duplicate error boundary, retaining native scrollbars and Retry.
-Keep catalogue rendering subscriptions in the narrow document selector so native adjusting resize
-does not trigger extra desktop Workbench renders. Narrow maximize switching uses one native Action.
-Queued narrow presentation follows the settled document owner and is cancelled on disconnect,
-so it cannot overwrite a native batch's final selection or the restored desktop preference.
+Remove catalogue rendering subscriptions from the Layout binding so native adjusting resize
+does not trigger extra Workbench renders. Native maximize and batch selection use their actual
+Model state. Viewport changes preserve that state; applications own small-screen presentation.
 
 The demo uses native Pin and maximize controls directly. Floating, popouts, sublayouts, protected
 document identity and guarded-close constraints keep their existing ownership boundaries.

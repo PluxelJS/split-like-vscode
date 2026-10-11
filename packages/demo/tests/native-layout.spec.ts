@@ -821,7 +821,7 @@ test("group snapshots restore native names, colors and collapsed state without u
   ).toEqual({ status: "rejected" });
 });
 
-test("narrow switching resolves grouped tabs to their native TabSets and preserves desktop layout", async ({
+test("narrow resizing preserves grouped native layout and tab selection remains native", async ({
   page,
 }) => {
   await start(page);
@@ -834,37 +834,63 @@ test("narrow switching resolves grouped tabs to their native TabSets and preserv
   const desktop = await layout(page);
   const aContainer = tabset(desktop, a).id!;
   const bContainer = tabset(desktop, b).id!;
+  const desktopSnapshot = await page.evaluate(() => window.worksplitDemo.workbench.snapshot());
+  await page.evaluate(() => {
+    window.retainedDraft = document.querySelector('[aria-label="Draft A"]');
+  });
   const before = await page.evaluate(() => ({ ...window.worksplitDemo.metrics }));
   await expect(page.getByTestId("metrics")).toContainText('"subscriptions": 2');
   await page.screenshot({ path: "refactor/acceptance/native-groups-desktop.png" });
   await page.setViewportSize({ width: 390, height: 844 });
-  const switcher = page.getByRole("combobox", { name: "Open document" });
-  await expect(switcher).toBeVisible();
-  await switcher.selectOption(a);
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  await expect(page.getByRole("combobox", { name: "Open document" })).toHaveCount(0);
+  expect(await layout(page)).toEqual(desktop);
+  expect(await page.evaluate(() => window.worksplitDemo.workbench.snapshot())).toEqual(
+    desktopSnapshot,
+  );
+  await expect(page.getByLabel("Draft A")).toBeVisible();
+  await expect(page.getByLabel("Draft B")).toBeVisible();
+  await page.locator(`#flexlayout-tabbutton-${a}`).press("Enter");
   await expect(page.getByLabel("Draft A")).toHaveValue("narrow retained A");
-  await page.getByLabel("Draft A").click();
+  await expect(page).toHaveURL(/\/documents\/A\?/);
   expect(
     await page.evaluate(() => window.worksplitDemo.workbench.getEditingContext()),
-  ).toMatchObject({ activeGroupId: aContainer, focusedArea: "document", focusedTabId: a });
-  await switcher.selectOption(b);
+  ).toMatchObject({ activeGroupId: aContainer, activeTabId: a });
+  await page.locator(`#flexlayout-tabbutton-${b}`).press("Enter");
   await expect(page.getByLabel("Draft B")).toHaveValue("narrow retained B");
-  await page.getByLabel("Draft B").click();
+  await expect(page).toHaveURL(/\/documents\/B\?/);
   expect(
     await page.evaluate(() => window.worksplitDemo.workbench.getEditingContext()),
-  ).toMatchObject({ activeGroupId: bContainer, focusedArea: "document", focusedTabId: b });
+  ).toMatchObject({ activeGroupId: bContainer, activeTabId: b });
+  expect(nodes(await layout(page)).some((node) => node.maximized)).toBe(false);
+  const narrowSnapshot = await page.evaluate(() => window.worksplitDemo.workbench.snapshot());
   await page.screenshot({ path: "refactor/acceptance/native-groups-narrow.png" });
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  expect(await page.evaluate(() => window.worksplitDemo.workbench.snapshot())).toEqual(
+    narrowSnapshot,
+  );
   await expect(page.getByLabel("Draft A")).toHaveValue("narrow retained A");
   await expect(page.getByLabel("Draft B")).toHaveValue("narrow retained B");
+  expect(
+    await page.evaluate(
+      () => window.retainedDraft === document.querySelector('[aria-label="Draft A"]'),
+    ),
+  ).toBe(true);
   expect(await page.evaluate(() => window.worksplitDemo.metrics)).toMatchObject({
     requests: before.requests,
     mounts: before.mounts,
     subscriptions: before.subscriptions,
     unmounts: before.unmounts,
+    disposed: before.disposed,
   });
 });
 
-test("narrow moving the same active group into a native split reveals its new TabSet", async ({
+test("narrow native group splits retain content without automatic maximization", async ({
   page,
 }) => {
   await start(page);
@@ -875,16 +901,25 @@ test("narrow moving the same active group into a native split reveals its new Ta
   const desktop = await layout(page);
   const previousContainer = tabset(desktop, groupId).id!;
   const destination = tabset(desktop, b).id!;
+  const desktopSnapshot = await page.evaluate(() => window.worksplitDemo.workbench.snapshot());
   await page.evaluate(() => {
     window.retainedDraft = document.querySelector('[aria-label="Draft A"]');
   });
   const before = await page.evaluate(() => ({ ...window.worksplitDemo.metrics }));
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("combobox", { name: "Open document" })).toHaveCount(0);
   await expect(page.getByLabel("Draft A")).toBeVisible();
+  await expect(page.getByLabel("Draft B")).toBeVisible();
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
   );
+  expect(await layout(page)).toEqual(desktop);
+  expect(await page.evaluate(() => window.worksplitDemo.workbench.snapshot())).toEqual(
+    desktopSnapshot,
+  );
   await page.getByTestId("scroll-A").evaluate((element) => {
+    // Isolate pixel retention from Chromium's text anchoring during the native split.
+    element.style.overflowAnchor = "none";
     element.scrollTop = 360;
   });
   expect(
@@ -899,6 +934,7 @@ test("narrow moving the same active group into a native split reveals its new Ta
     ),
   ).toEqual({ status: "applied" });
   await expect(page.getByLabel("Draft A")).toBeVisible();
+  await expect(page.getByLabel("Draft B")).toBeVisible();
   await expect(page.getByLabel("Draft A")).toHaveValue("active group remains visible");
   await expect
     .poll(() =>
@@ -910,12 +946,12 @@ test("narrow moving the same active group into a native split reveals its new Ta
   );
   expect(nodes(await layout(page)).find((node) => node.id === activeContainer)).toMatchObject({
     type: "tabset",
-    maximized: true,
   });
   const finalContainers = nodes(await layout(page)).filter((node) => node.type === "tabset");
   expect(finalContainers).toHaveLength(2);
   expect(finalContainers.every((node) => node.children?.length)).toBe(true);
   expect(finalContainers.some((node) => node.id === previousContainer)).toBe(false);
+  expect(finalContainers.some((node) => node.maximized)).toBe(false);
   expect(
     await page.evaluate(() => window.worksplitDemo.workbench.getEditingContext().activeTabId),
   ).toBe(activeId);
@@ -930,11 +966,12 @@ test("narrow moving the same active group into a native split reveals its new Ta
     mounts: before.mounts,
     subscriptions: before.subscriptions,
     unmounts: before.unmounts,
+    disposed: before.disposed,
   });
   await page.screenshot({ path: "refactor/acceptance/split-empty-after-narrow.png" });
 });
 
-test("narrow native batches maximize the final selected source after moving its active document", async ({
+test("narrow native batches retain the final selected source without automatic maximization", async ({
   page,
 }) => {
   await start(page);
@@ -946,19 +983,24 @@ test("narrow native batches maximize the final selected source after moving its 
   await page.evaluate(() => {
     window.retainedDraft = document.querySelector('[aria-label="Draft A"]');
   });
+  const desktop = await layout(page);
+  const desktopSnapshot = await page.evaluate(() => window.worksplitDemo.workbench.snapshot());
   await page.setViewportSize({ width: 390, height: 844 });
-  const switcher = page.getByRole("combobox", { name: "Open document" });
-  await expect(switcher).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Open document" })).toHaveCount(0);
   await expect(page.getByLabel("Draft A")).toBeVisible();
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
   );
   const native = await layout(page);
+  expect(native).toEqual(desktop);
+  expect(await page.evaluate(() => window.worksplitDemo.workbench.snapshot())).toEqual(
+    desktopSnapshot,
+  );
   const source = tabset(native, a).id!;
   const destination = tabset(native, b).id!;
   expect(tabset(native, c).id).toBe(source);
   expect(destination).not.toBe(source);
-  expect(tabset(native, a)).toMatchObject({ maximized: true });
+  expect(nodes(native).some((node) => node.maximized)).toBe(false);
   const before = await page.evaluate(() => ({ ...window.worksplitDemo.metrics }));
   expect(
     await page.evaluate(
@@ -975,17 +1017,16 @@ test("narrow native batches maximize the final selected source after moving its 
     ),
   ).toEqual({ status: "applied" });
   await expect(page.getByLabel("Draft C")).toBeVisible();
-  await expect(page.getByLabel("Draft A")).toBeHidden();
+  await expect(page.getByLabel("Draft A")).toBeVisible();
   await expect(page.getByLabel("Draft B")).toBeHidden();
   await expect(page).toHaveURL(/\/documents\/C\?/);
-  await expect(switcher).toHaveValue(c);
   expect(
     await page.evaluate(() => window.worksplitDemo.workbench.getEditingContext()),
   ).toMatchObject({ activeTabId: c, activeGroupId: source });
   const final = await layout(page);
-  expect(tabset(final, c)).toMatchObject({ id: source, active: true, maximized: true });
+  expect(tabset(final, c)).toMatchObject({ id: source, active: true });
   expect(tabset(final, a).id).toBe(destination);
-  expect(tabset(final, b).maximized).not.toBe(true);
+  expect(nodes(final).some((node) => node.maximized)).toBe(false);
   await expect(page.getByLabel("Draft A")).toHaveValue("A retained after native batch");
   expect(
     await page.evaluate(
