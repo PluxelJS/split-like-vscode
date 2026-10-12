@@ -21,12 +21,15 @@ import {
 } from "@worksplit/react";
 import {
   Actions,
+  ContextMenuBuilder,
   DockLocation,
   I18nLabel,
+  PopupMenu,
   TabSetNode,
   type Action,
   type ILayoutApi,
   type ILayoutProps,
+  type IPopupMenuProps,
   type ITabSetAttributes,
   type Model,
   type TabNode,
@@ -36,6 +39,13 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const HostTheme = createContext("day");
+function MenuLabel({ label }: { label: ReactNode }) {
+  return (
+    <span>
+      {useContext(HostTheme)}: {label}
+    </span>
+  );
+}
 const SessionContext = createContext<{ id: string; token: number } | null>(null);
 const disposals: (() => Promise<unknown>)[] = [];
 
@@ -339,6 +349,72 @@ function pressSave(target: HTMLElement, shiftKey = false) {
 }
 
 describe("public React customization", () => {
+  it("keeps declarative native menus in the host provider and guards their close actions", async () => {
+    const consumer = fixture();
+    const id = await consumer.open("A");
+    const receipts: string[] = [];
+    function Shell() {
+      const [menu, setMenu] = useState<IPopupMenuProps>();
+      return (
+        <HostTheme.Provider value="night">
+          <Workbench
+            workbench={consumer.workbench}
+            native={{
+              onContextMenu(node, event) {
+                event.preventDefault();
+                event.stopPropagation();
+                const closeMenu = () => setMenu(undefined);
+                setMenu({
+                  anchor: { x: event.clientX, y: event.clientY },
+                  container: node.getLayoutRef()!,
+                  returnFocusTo: event.currentTarget,
+                  onClose: closeMenu,
+                  title: "Host actions",
+                  items: new ContextMenuBuilder(node, {
+                    onAction: (action) => {
+                      void consumer.workbench
+                        .dispatch(action)
+                        .then((result) => receipts.push(result.status));
+                    },
+                    closeMenu,
+                  })
+                    .add("close")
+                    .build(),
+                  renderItem: (item, _index, api) => (
+                    <button
+                      role="menuitem"
+                      tabIndex={-1}
+                      aria-disabled={item.disabled}
+                      onClick={api.select}
+                    >
+                      <MenuLabel label={item.label} />
+                    </button>
+                  ),
+                });
+              },
+            }}
+          />
+          {menu && <PopupMenu {...menu} />}
+        </HostTheme.Provider>
+      );
+    }
+    const view = render(<Shell />);
+    const editor = await screen.findByLabelText("Editor A");
+    fireEvent.change(editor, { target: { value: "retained draft" } });
+    const tab = document.getElementById(`flexlayout-tabbutton-${id}`)!;
+    fireEvent.contextMenu(tab);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "night: Close" }));
+    await waitFor(() => expect(receipts).toEqual(["rejected"]));
+    expect(consumer.decide).toHaveBeenCalledWith(id, "close");
+    expect(consumer.workbench.getDocument(id)).toBeDefined();
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(tab);
+    fireEvent.contextMenu(tab);
+    expect(await screen.findByRole("menuitem", { name: "night: Close" })).toBeDefined();
+    view.unmount();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   it("inherits native host HotkeysProvider defaults for built-in command bindings and unregisters them", async () => {
     const execute = vi.fn<WorkbenchCommand["execute"]>();
     const consumer = fixture(false, [{ id: "save", hotkey: "Mod+S", target: "document", execute }]);

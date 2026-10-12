@@ -139,6 +139,26 @@ async function group(page: Page, name: string, title = "Research") {
   return result!.id!;
 }
 
+test("shell-owned native menus return focus and disappear when their target closes", async ({
+  page,
+}) => {
+  await start(page);
+  const id = await documentId(page, "A");
+  const tab = page.locator(`#flexlayout-tabbutton-${id}`);
+  await expect(await menu(page, "A")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu", { name: "Layout actions" })).toHaveCount(0);
+  await expect(tab).toBeFocused();
+  await expect(await menu(page, "A")).toBeVisible();
+  const result = await page.evaluate(
+    (contentId) => window.worksplitDemo.workbench.close(contentId),
+    id,
+  );
+  expect(result.status).toBe("closed");
+  await expect(page.getByRole("menu", { name: "Layout actions" })).toHaveCount(0);
+  await expect(tab).toHaveCount(0);
+});
+
 test("native menus create, rename, color, join, remove, collapse and ungroup tabs", async ({
   page,
 }) => {

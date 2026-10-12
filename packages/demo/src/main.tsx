@@ -21,13 +21,10 @@ import {
 } from "@worksplit/react";
 import {
   Actions,
-  BorderNode,
   ContextMenuBuilder,
   DockLocation,
-  showPopupMenu,
-  TabGroupNode,
-  TabNode,
-  TabSetNode,
+  PopupMenu,
+  type IPopupMenuProps,
   type IJsonModel,
   type IJsonRowNode,
   type IJsonTabSetNode,
@@ -602,39 +599,6 @@ function Navigation() {
   );
 }
 const nativePresentation: NonNullable<import("@worksplit/react").WorkbenchProps["native"]> = {
-  onContextMenu(node, event) {
-    if (
-      !(node instanceof TabNode) &&
-      !(node instanceof TabSetNode) &&
-      !(node instanceof TabGroupNode) &&
-      !(node instanceof BorderNode)
-    )
-      return;
-    event.preventDefault();
-    event.stopPropagation();
-    const items = new ContextMenuBuilder(node, {
-      onAction: (action) => {
-        void workbench
-          .dispatch(action)
-          .then((result) => message(`Layout: ${result.status}`))
-          .catch((error: unknown) => message(`Layout failed: ${String(error)}`));
-      },
-      closeMenu: () => hide(),
-    })
-      .addStandard()
-      .addDivider()
-      .add("closeAll")
-      .add("closeRight")
-      .add("closeOthers")
-      .build();
-    const hide = showPopupMenu({
-      anchor: { x: event.clientX, y: event.clientY },
-      container: node.getLayoutRef()!,
-      items,
-      title: "Layout actions",
-      onClose: () => {},
-    });
-  },
   onRenderTab(node, values) {
     const doc = workbench.getDocument(node.getId());
     if (doc)
@@ -648,6 +612,7 @@ const nativePresentation: NonNullable<import("@worksplit/react").WorkbenchProps[
   },
 };
 function App() {
+  const [contextMenu, setContextMenu] = useState<{ nodeId: string; props: IPopupMenuProps }>();
   const pending = useStore(decisions, (state) => state);
   const notices = useStore(messages, (state) => state);
   const [restore, setRestore] = useState(localStorage.getItem("worksplit.demo.restore") === "true");
@@ -720,7 +685,43 @@ function App() {
       <main>
         <Workbench
           workbench={workbench}
-          native={nativePresentation}
+          native={{
+            ...nativePresentation,
+            onModelChange(model) {
+              if (contextMenu && !model.getNodeById(contextMenu.nodeId)) setContextMenu(undefined);
+            },
+            onContextMenu(node, event) {
+              event.preventDefault();
+              event.stopPropagation();
+              const closeMenu = () => setContextMenu(undefined);
+              const items = new ContextMenuBuilder(node, {
+                onAction: (action) => {
+                  void workbench
+                    .dispatch(action)
+                    .then((result) => message(`Layout: ${result.status}`))
+                    .catch((error: unknown) => message(`Layout failed: ${String(error)}`));
+                },
+                closeMenu,
+              })
+                .addStandard()
+                .addDivider()
+                .add("closeAll")
+                .add("closeRight")
+                .add("closeOthers")
+                .build();
+              setContextMenu({
+                nodeId: node.getId(),
+                props: {
+                  anchor: { x: event.clientX, y: event.clientY },
+                  container: node.getLayoutRef()!,
+                  returnFocusTo: event.currentTarget,
+                  items,
+                  title: "Layout actions",
+                  onClose: closeMenu,
+                },
+              });
+            },
+          }}
           navigation={<Navigation />}
           empty={
             <div>
@@ -730,6 +731,8 @@ function App() {
           }
         />
       </main>
+      {/* A portal keeps application providers and unmounts with the shell, unlike a new root. */}
+      {contextMenu && <PopupMenu key={contextMenu.nodeId} {...contextMenu.props} />}
       <footer>
         <span data-testid="active-location">
           {workbench.getActiveDocument()?.href ?? "No active document"}

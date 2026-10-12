@@ -602,13 +602,34 @@ TypeScript readonly declarations cannot isolate those child references. Route ho
 expose the native Router; keep workspace ownership rules when using its escape hatches.
 
 FlexLayout exposes `onContextMenu` and menu helpers, rather than installing a context menu itself.
-The [demo](packages/demo/src/main.tsx) uses `ContextMenuBuilder` and `showPopupMenu` directly through
-`native.onContextMenu`. Pass the builder an `onAction` callback that submits to `workbench.dispatch`
+The [demo](packages/demo/src/main.tsx) uses `ContextMenuBuilder` through `native.onContextMenu`,
+then renders the native `PopupMenu` declaratively in the application tree. Pass the builder an
+`onAction` callback that submits to `workbench.dispatch`
 and handles its receipt; the upstream default callback would call `Model.doAction` directly and
 bypass dirty decisions. Worksplit adds no parallel menu API. Native bulk menu actions enumerate
 the visible strip tabs, so collapsed group members are not targets of “close others/right/all”.
 Whole-Tabset close covers hidden members too. Border groups are valid native layout nodes;
 the upstream standard Border menu does not offer group creation/membership commands.
+
+For provider-based UI libraries such as Mantine, render the menu under the application's providers.
+`PopupMenu` uses a portal, which preserves React context; `showPopupMenu` creates a separate React
+root, which does not inherit those providers. Keep one transient menu in shell state, prevent the
+context event from bubbling to the enclosing TabSet, and supply `returnFocusTo` for point anchors.
+Dismiss it when its target disappears; unmounting the shell must also remove the menu. The demo
+shows this ownership without introducing a Worksplit menu controller.
+
+Style native menu CSS from the host theme, or use `PopupMenu.renderItem` for ordinary items. Call
+its `api.select()` / `api.close()` and preserve the native menu's accessibility contract. Builder
+entries can also contain interactive `content` (group picker, rename and color controls): do not
+wrap those controls inside another clickable menu item or let menu arrow keys consume text input.
+A host using a wholly Mantine-rendered menu can directly submit the same native Actions for those
+controls; keep the native node as the state authority and do not invent a second menu/action DSL.
+Use `native.onShowOverflowMenu` for overflow presentation and the supplied `onSelect` callback
+for its selection semantics. `canDispatch` is a preflight, never a substitute for the receipt.
+
+Pinning applies to individual central tabs, not TabGroups or Border tabs. Pinning a grouped tab
+moves it out of that group into the native pinned run. It also promotes a preview to a regular
+document. A product must not label a separate application lock as native group pinning.
 
 `getEditingContext()` distinguishes active document/group, focused document/tool/shell, and
 window focus. Tools and shell focus preserve the active document. `useWorkbenchState(instance,
