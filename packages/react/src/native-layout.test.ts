@@ -2098,6 +2098,41 @@ describe("native close coordination", () => {
     expect(workbench.getDocument(b)).not.toBeNull();
   });
 
+  it("retains an approved member whose revision capability is withdrawn while another decision is pending", async () => {
+    const { workbench, open } = setup();
+    const a = await open("A");
+    const b = await open("B");
+    const approvalB = deferred(true);
+    const decideA = vi.fn<() => boolean>(() => true);
+    const decideB = vi.fn<() => Promise<boolean>>(() => approvalB.promise);
+    const cleanup = vi.fn<() => void>();
+    const lifecycleA: WorkbenchContentLifecycle = {
+      isDirty: () => true,
+      getCloseRevision: () => 0,
+      beforeLeave: decideA,
+      dispose: cleanup,
+    };
+    integrationState(workbench).register(a, lifecycleA);
+    integrationState(workbench).register(b, {
+      isDirty: () => true,
+      getCloseRevision: () => 0,
+      beforeLeave: decideB,
+      dispose: cleanup,
+    });
+    const before = workbench.getLayout();
+    const closing = workbench.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)]));
+    await vi.waitFor(() => expect(decideB).toHaveBeenCalledTimes(1));
+    expect(decideA).toHaveBeenCalledTimes(1);
+    delete lifecycleA.getCloseRevision;
+    approvalB.resolve(true);
+    expect(await closing).toEqual({ status: "rejected", reason: "changed" });
+    expect(workbench.getLayout()).toEqual(before);
+    expect(workbench.getDocuments()).toHaveLength(2);
+    expect(native(workbench).getNodeById(a)).toBeInstanceOf(TabNode);
+    expect(native(workbench).getNodeById(b)).toBeInstanceOf(TabNode);
+    expect(cleanup).not.toHaveBeenCalled();
+  });
+
   it("retains a previously clean document that becomes dirty during another member's decision", async () => {
     const { workbench, open } = setup();
     const a = await open("A");

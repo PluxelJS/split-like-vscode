@@ -1587,10 +1587,11 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           this.state.documents.get(tab.getId())?.lifecycle ?? this.toolLifecycles.get(tab.getId()),
       );
       const dirty = contentLifecycles.map((lifecycle) => lifecycle?.isDirty?.() ?? false);
-      const revisions = contentLifecycles.map((lifecycle) => lifecycle?.getCloseRevision?.());
+      const revisionReaders = contentLifecycles.map((lifecycle) => lifecycle?.getCloseRevision);
+      const revisions = revisionReaders.map((read, i) => read?.call(contentLifecycles[i]));
       if (
         tabs.length > 1 &&
-        contentLifecycles.some((lifecycle, i) => dirty[i] && !lifecycle?.getCloseRevision)
+        contentLifecycles.some((_lifecycle, i) => dirty[i] && !revisionReaders[i])
       )
         return { status: "rejected", reason: "revision-required" };
       for (const [index, lifecycle] of contentLifecycles.entries()) {
@@ -1611,12 +1612,15 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           (s, i) => s.contentVersion !== versions[i] || s.lifecycle !== lifecycles[i],
         ) ||
         tools.some((tab, i) => this.toolLifecycles.get(tab.getId()) !== toolLifecycles[i]) ||
-        contentLifecycles.some(
-          (lifecycle, i) =>
-            (lifecycle?.getCloseRevision &&
-              !Object.is(lifecycle.getCloseRevision(), revisions[i])) ||
-            (!dirty[i] && lifecycle?.isDirty?.()),
-        ) ||
+        contentLifecycles.some((lifecycle, i) => {
+          const read = lifecycle?.getCloseRevision;
+          // Withdrawing a revision provider cannot disable an already approved member's recheck.
+          return (
+            Boolean(read) !== Boolean(revisionReaders[i]) ||
+            (read && !Object.is(read.call(lifecycle), revisions[i])) ||
+            (!dirty[i] && lifecycle?.isDirty?.())
+          );
+        }) ||
         tabs.some(
           (tab) => !tab.isCloseable() || this.state.model.getNodeById(tab.getId()) !== tab,
         ) ||
