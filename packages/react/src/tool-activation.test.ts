@@ -9,6 +9,7 @@ const instances: ReturnType<typeof setup>["workbench"][] = [];
 afterEach(async () => {
   await Promise.all(instances.splice(0).map((instance) => instance.dispose()));
   window.history.replaceState(null, "", "/");
+  vi.restoreAllMocks();
 });
 
 function setup() {
@@ -36,6 +37,20 @@ function setup() {
 }
 
 describe("explicit tool activation", () => {
+  it("cancels the scheduled native frame when closing before a hidden window can paint", async () => {
+    const { workbench, internal } = setup();
+    instances.push(workbench);
+    vi.spyOn(internal.model.getNodeById("inspector")!, "getWindow").mockReturnValue(window);
+    vi.spyOn(window, "requestAnimationFrame").mockReturnValue(123);
+    const cancel = vi.spyOn(window, "cancelAnimationFrame");
+    const focus = vi.fn<() => void>();
+    internal.register("inspector", { focus });
+    workbench.activate("inspector");
+    expect(cancel).not.toHaveBeenCalled();
+    await workbench.close("inspector");
+    expect(cancel).toHaveBeenCalledWith(123);
+    expect(focus).not.toHaveBeenCalled();
+  });
   it("reveals hidden tools and focuses them without changing the document or browser history", async () => {
     const { workbench, internal } = setup();
     instances.push(workbench);

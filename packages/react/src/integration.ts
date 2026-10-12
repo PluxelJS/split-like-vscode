@@ -229,7 +229,9 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   private browser: BrowserHistoryCoordinator | undefined;
   private disposed = false;
   private focusEpoch = 0;
-  private pendingFocus: { id: string; epoch: number; node: TabNode } | undefined;
+  private pendingFocus:
+    | { id: string; epoch: number; node: TabNode; cancel?: () => void }
+    | undefined;
   private openEpoch = 0;
   private nextId = 0;
   private readonly instancePrefix = Array.from(
@@ -1829,6 +1831,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   }
   private cancelContentFocus() {
     ++this.focusEpoch;
+    this.pendingFocus?.cancel?.();
     this.pendingFocus = undefined;
   }
   private restoreContentFocus(id: string) {
@@ -1839,10 +1842,9 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     // Native Layout applies panel visibility during its render. Mounted content
     // must wait for the next frame before a browser can accept DOM focus.
     const win = request.node.getWindow();
-    const schedule = win
-      ? (callback: () => void) => win.requestAnimationFrame(callback)
-      : queueMicrotask;
-    schedule(() => {
+    request.cancel?.();
+    const restore = () => {
+      delete request.cancel;
       if (
         this.disposed ||
         this.pendingFocus !== request ||
@@ -1866,7 +1868,11 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       } finally {
         this.restoringFocus = false;
       }
-    });
+    };
+    if (win) {
+      const frame = win.requestAnimationFrame(restore);
+      request.cancel = () => win.cancelAnimationFrame(frame);
+    } else queueMicrotask(restore);
   }
   private observeFocus(id: string | null, area: WorkbenchState["focusedArea"]) {
     if (id && this.state.documents.has(id) && !this.restoringFocus)
