@@ -134,8 +134,46 @@ const Content = memo(function Content({
     <ContentContext.Provider value={context}>
       <div
         className="worksplit-content"
+        role="presentation"
         data-worksplit-content={id}
         data-worksplit-role={tool ? "tool" : "document"}
+        onKeyDown={(event) => {
+          if (event.defaultPrevented || !event.currentTarget.contains(event.target as Node)) return;
+          // Native content portals and Tab panels are siblings in the React tree.
+          // Hand only the panel's configured focus toggle to its existing native handler.
+          const panel = event.currentTarget.closest<HTMLElement>('[role="tabpanel"]');
+          const parts = panel?.getAttribute("aria-keyshortcuts")?.split("+");
+          const key = parts?.pop();
+          const win = event.currentTarget.ownerDocument.defaultView;
+          if (!panel || !parts || !key || !win) return;
+          const has = (modifier: string) => parts.some((part) => part.toLowerCase() === modifier);
+          if (
+            event.key.toLowerCase() !== key.toLowerCase() ||
+            event.ctrlKey !== has("control") ||
+            event.shiftKey !== has("shift") ||
+            event.altKey !== has("alt") ||
+            event.metaKey !== has("meta")
+          )
+            return;
+          const accepted = !panel.dispatchEvent(
+            new win.KeyboardEvent("keydown", {
+              key: event.key,
+              code: event.code,
+              location: event.location,
+              ctrlKey: event.ctrlKey,
+              shiftKey: event.shiftKey,
+              altKey: event.altKey,
+              metaKey: event.metaKey,
+              repeat: event.repeat,
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+          if (accepted) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
       >
         {tool ? (
           tool.render({ id })
