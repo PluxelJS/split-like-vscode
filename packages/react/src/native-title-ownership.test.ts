@@ -82,6 +82,27 @@ function setup({
 }
 
 describe("native document title ownership", () => {
+  it("reloads an accepted ordinary owner beside its explicit copy without a new conflict", async () => {
+    const first = setup();
+    const a = (await first.open("A")).document;
+    expect((await first.workbench.duplicate(a.id)).status).toBe("committed");
+    await first.routers[1]!.invalidate();
+    expect(first.onIssue).not.toHaveBeenCalled();
+    expect(first.workbench.getDocuments()).toHaveLength(2);
+  });
+
+  it("lazily restores an accepted ordinary owner beside its explicit copy without a new conflict", async () => {
+    const first = setup();
+    const a = (await first.open("A")).document;
+    expect((await first.workbench.duplicate(a.id)).status).toBe("committed");
+    const restored = setup({ snapshot: first.workbench.snapshot() });
+    await restored.workbench.start(a.href);
+    restored.workbench.activate(a.id, { focus: false });
+    expect(await restored.open("A")).toMatchObject({ status: "committed", reused: true });
+    expect(restored.onIssue).not.toHaveBeenCalled();
+    expect(restored.workbench.getDocuments()).toHaveLength(2);
+  });
+
   it("keeps native renames across coordinated and native view-state navigation and reloading", async () => {
     const { workbench, open, routers, onIssue } = setup();
     const first = await open("A");

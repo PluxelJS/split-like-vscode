@@ -264,7 +264,9 @@ Router resolves redirect targets before admission, leaving the source intact. Ex
 URLs avoid loaders. A changed existing URL may run a speculative loader and then the live
 Router loader; these are read operations and must be safe to repeat. Shared data caching belongs
 to the application. Ordinary Link/navigate can commit a duplicate identity after redirect;
-Worksplit reports `native-identity-conflict` and keeps both instances. It does not merge them,
+Worksplit reports `native-identity-conflict` and keeps both instances. Reloading or restoring an
+already accepted ordinary document beside its explicit copy does not create a new conflict.
+It does not merge them,
 roll back Router internals, or silently discard content. Prefer `open` for cross-document entrances.
 
 The memory-history blocker adapter observes public blocker decisions, because the installed

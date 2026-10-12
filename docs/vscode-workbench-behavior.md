@@ -75,7 +75,8 @@ metadata, the last matched route owns identity. Native nested
 routes continue to match/render through Router, not a second route table.
 
 Native Link/navigate is scoped to its document Router. It can commit a duplicate identity;
-native-identity-conflict reports this and both instances stay alive. No automatic merge or
+native-identity-conflict reports this and both instances stay alive. Reloading or restoring
+accepted ordinary and explicit-copy owners does not create a new conflict. No automatic merge or
 rollback follows. This differs from the original design recommendation for every navigation
 entrance: pre-commit final redirect deduplication is confined to open because native Router loads
 commit matches before the resolved notification. The integration does not copy that pipeline.

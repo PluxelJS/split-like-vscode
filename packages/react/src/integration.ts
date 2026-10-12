@@ -1468,7 +1468,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     const other = [...this.state.documents.values()].find(
       (s) => s !== session && s.identity === session.identity,
     );
-    if (other && !session.multi)
+    // Reloading an accepted ordinary owner beside an explicit copy is not a new collision.
+    if (identityChanged && other && !session.multi)
       this.issue(
         "native-identity-conflict",
         new Error(
