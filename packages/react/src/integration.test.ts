@@ -229,6 +229,29 @@ describe("real Router session coordination", () => {
     ).toThrow("Unknown");
   });
 
+  it.each([
+    { global: {}, layout: {} },
+    { global: {}, layout: { type: "row" } },
+    { global: {}, layout: { children: [] } },
+    { layout: { type: "row", children: [{ type: "tabset" }] } },
+    {
+      layout: {
+        type: "row",
+        children: [{ type: "tabset", children: [{ component: "worksplit.tool", id: "tool" }] }],
+      },
+    },
+  ])("rejects incomplete serialized layouts without rewriting the candidate: %j", (layout) => {
+    const { makeRouter } = setup();
+    const factory = vi.fn<typeof makeRouter>(makeRouter);
+    const candidate = { version: 1, workspaceId: "default", layout };
+    const before = structuredClone(candidate);
+    expect(() => createWorkbench({ createRouter: factory, snapshot: candidate })).toThrow(
+      /snapshot.*(type|children)/iu,
+    );
+    expect(factory).not.toHaveBeenCalled();
+    expect(candidate).toEqual(before);
+  });
+
   it("keeps the native navigation pipeline and explicitly reports committed identity conflicts", async () => {
     const { workbench, open, issues } = setup();
     const a = await open("A");

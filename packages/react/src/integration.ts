@@ -1,7 +1,6 @@
 import type { UseHotkeyDefinition } from "@tanstack/react-hotkeys";
 import {
   createMemoryHistory,
-  defaultParseSearch,
   type AnyRouter,
   type NavigateOptions,
   type RouterHistory,
@@ -254,7 +253,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       options.snapshot === undefined
         ? structuredClone(options.layout ?? defaultWorkbenchLayout())
         : this.validateSnapshot(options.snapshot);
-    this.validateLayout(layout);
+    this.validateLayout(layout, options.snapshot !== undefined);
     const model = Model.fromJson(layout);
     const documents = new Map<string, DocumentSession>();
     const tools = new Map((options.tools ?? []).map((tool) => [tool.id, tool]));
@@ -377,7 +376,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     const location = this.resolver.buildLocation(
       navigation as Parameters<AnyRouter["buildLocation"]>[0],
     );
-    return this.openHref(location.href, options, !!navigation.replace);
+    return this.openHref(location.publicHref, options, !!navigation.replace);
   }
 
   /** Copy committed view conditions, never a draft, into a new ordinary document lifetime. */
@@ -1118,7 +1117,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       const identity = this.identity(router);
       const existing =
         !options.newInstance &&
-        (initialTarget?.href === router.state.location.href
+        (initialTarget?.href === router.state.location.publicHref
           ? initialTarget
           : this.preferred(
               [...this.state.documents.values()].filter(
@@ -1126,7 +1125,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
               ),
             ));
       if (existing) {
-        const finalHref = router.state.location.href;
+        const finalHref = router.state.location.publicHref;
         if (existing.href === finalHref || options.reuse === "preserve") {
           this.checkPresentation(existing, existing.href, presentation);
           this.revealDocument(existing, presentation);
@@ -1174,7 +1173,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       const session: DocumentSession = {
         id,
         router,
-        href: router.state.location.href,
+        href: router.state.location.publicHref,
         identity,
         multi: !!options.newInstance,
         preview,
@@ -1381,8 +1380,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         return { status: "rejected", reason: "router-blocked" };
       if (!valid()) return { status: "superseded" };
       if (
-        router.state.location.href !== href &&
-        router.state.location.href === session.href &&
+        router.state.location.publicHref !== href &&
+        router.state.location.publicHref === session.href &&
         session.contentVersion === before
       )
         return { status: "rejected", reason: "router-blocked" };
@@ -1456,7 +1455,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   }
   private acceptRouter(session: DocumentSession) {
     const router = session.router!;
-    const href = router.state.location.href;
+    const href = router.state.location.publicHref;
     if (href !== session.href) {
       session.href = href;
       ++session.contentVersion;
@@ -1934,13 +1933,13 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     if (session.identity) return session.identity;
     // Lazy restored documents have no Router yet. Match their saved location with the same
     // real route definition, without starting loaders or retaining a second Router per tab.
-    const url = new URL(session.href, "https://worksplit.invalid");
-    const search = (this.resolver.options.parseSearch ?? defaultParseSearch)(url.search);
-    return this.identity(this.resolver, this.resolver.matchRoutes(url.pathname, search));
+    const history = createMemoryHistory({ initialEntries: [session.href] });
+    const location = this.resolver.parseLocation(history.location);
+    return this.identity(this.resolver, this.resolver.matchRoutes(location));
   }
   private identity(router: AnyRouter, matches = router.state.matches) {
     const owner = matches.toReversed().find((m) => m.staticData?.worksplit) ?? matches.at(-1);
-    if (!owner) throw new Error(`No Router match for ${router.state.location.href}`);
+    if (!owner) throw new Error(`No Router match for ${router.state.location.publicHref}`);
     const fields = owner.staticData?.worksplit?.identitySearch ?? [];
     // Host metadata uses runtime keys; a registered Router may give each match a
     // closed search schema without a string index signature.
@@ -1973,18 +1972,20 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     this.options.onIssue?.({ code, error, ...(id ? { id } : {}) });
   }
   private validateSnapshot(candidate: unknown): IJsonModel {
-    if (!candidate || typeof candidate !== "object") throw new Error("Invalid Worksplit snapshot");
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
+      throw new Error("Invalid Worksplit snapshot");
     const snapshot = candidate as Record<string, unknown>;
     if (
       snapshot.version !== 1 ||
       snapshot.workspaceId !== (this.options.workspaceId ?? "default") ||
       !snapshot.layout ||
-      typeof snapshot.layout !== "object"
+      typeof snapshot.layout !== "object" ||
+      Array.isArray(snapshot.layout)
     )
       throw new Error("Incompatible Worksplit snapshot; explicitly reset or convert it");
     return structuredClone(snapshot.layout) as IJsonModel;
   }
-  private validateLayout(layout: IJsonModel) {
+  private validateLayout(layout: IJsonModel, serialized: boolean) {
     const popouts = (layout as IJsonModel & { popouts?: Record<string, unknown> }).popouts;
     if (
       (layout.subLayouts && Object.keys(layout.subLayouts).length > 0) ||
@@ -1998,8 +1999,10 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       if (!value || typeof value !== "object" || Array.isArray(value))
         throw new Error(`Invalid snapshot node at ${path}`);
       const node = value as Record<string, unknown>;
-      // Root/Border context and omitted tab types have native defaults. Nested row children
-      // still require an explicit row/tabset type, as in FlexLayout's own fromJson.
+      // A saved Model must carry its serialized structure. Only native layout initializers
+      // may use FlexLayout's omitted root/Border/tab types and container children.
+      if (serialized && typeof node.type !== "string")
+        throw new Error(`Snapshot node requires explicit type at ${path}`);
       let type = node.type;
       if (type === undefined) {
         if (allowed.includes("tab")) type = "tab";
@@ -2021,6 +2024,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           throw new Error(`Snapshot sublayout content is unsupported at ${path}`);
         return;
       }
+      if (serialized && !Array.isArray(node.children))
+        throw new Error(`Snapshot container requires children array at ${path}`);
       if (node.children === undefined) return;
       if (!Array.isArray(node.children))
         throw new Error(`Snapshot children must be an array at ${path}`);
