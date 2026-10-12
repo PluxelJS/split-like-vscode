@@ -512,8 +512,10 @@ if (result.status !== "applied") console.error(result);
 Group names, colors and collapse state stay in the native Model. TabSets and Borders can contain
 native TabGroups, including in snapshots. `getEditingContext().activeGroupId` identifies the
 containing TabSet or Border, rather than a TabGroup inside its strip. Activating a document in a
-collapsed TabGroup expands it through a native Action. Renaming a tab changes its displayed title;
-a later accepted Router location may apply its route metadata title again.
+collapsed TabGroup expands it through a native Action. The native tab name retains user renames
+through snapshot restoration, Router reloads and view-state navigation within the same identity.
+Route metadata supplies the initial title and applies its default again only when the document
+changes identity (route owner, params or declared `identitySearch` fields).
 
 Pure layout `Actions.group` batches are supported. A batch with one leaf Action has the same
 document selection/move behavior as that Action, including nested singleton batches. The original

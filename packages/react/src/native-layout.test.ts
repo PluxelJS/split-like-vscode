@@ -1081,7 +1081,7 @@ describe("native FlexLayout ownership", () => {
     const router = integrationState(workbench).documents.get(b)?.router;
     if (!router) throw new Error("Missing background document Router");
     await router.navigate({ href: "/documents/B?view=preview" });
-    expect(tab(workbench, b).getName()).toBe("Document");
+    expect(tab(workbench, b).getName()).toBe("Background title");
     expect(workbench.getDocument(b)?.href).toContain("view=preview");
     expect(workbench.getActiveDocument()?.id).toBe(a);
     expect(window.location.pathname).toBe("/documents/A");

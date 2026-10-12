@@ -89,8 +89,10 @@ Native `Actions` and JSON retain layout ownership. TabGroups can be authored, re
 moved, renamed, colored, collapsed and ungrouped without a Worksplit group abstraction. The
 containing TabSet/Border remains the editing group; the TabGroup is its strip organization. An
 explicit document activation expands its collapsed native group before selecting it, and
-transfers maximization when another central TabSet would otherwise hide the target. Tab renames
-are presentation changes; Router acceptance can subsequently apply a route metadata title.
+transfers maximization when another central TabSet would otherwise hide the target. Native tab
+names retain user renames during lazy snapshot restoration, Router reloads and same-identity
+query/hash navigation. Accepting a different route owner, params or declared `identitySearch`
+fields applies the new owner's route metadata title; no parallel label store is maintained.
 
 A native batch with one leaf Action has the same document selection/move behavior as that Action,
 even when nested; Model execution and observer notifications retain the original batch.

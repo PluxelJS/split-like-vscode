@@ -1456,11 +1456,15 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   private acceptRouter(session: DocumentSession) {
     const router = session.router!;
     const href = router.state.location.publicHref;
+    const identity = this.identity(router);
+    // A lazy restored tab already owns its native name. Compare its saved location before
+    // accepting the new href; loading or view-state changes are not content replacements.
+    const identityChanged = this.sessionIdentity(session) !== identity;
     if (href !== session.href) {
       session.href = href;
       ++session.contentVersion;
     }
-    session.identity = this.identity(router);
+    session.identity = identity;
     const other = [...this.state.documents.values()].find(
       (s) => s !== session && s.identity === session.identity,
     );
@@ -1474,7 +1478,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       );
     const node = this.state.model.getNodeById(session.id);
     const title = this.routeMetadata(router)?.title;
-    if (node instanceof TabNode && title && node.getName() !== title)
+    if (identityChanged && node instanceof TabNode && title && node.getName() !== title)
       this.state.model.doAction(Actions.renameTab(session.id, title));
     this.changed();
   }
