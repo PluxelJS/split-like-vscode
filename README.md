@@ -384,7 +384,7 @@ draft while protecting a real resource transition. Close supplies the document's
 (or just the id for a tool). The application still validates its own business editing revision.
 
 Tools may register guarded closing and disposal resources; they need no Router to be dirty.
-Save and document focus callbacks apply to document operations. Use native `enableClose: false`
+Save callbacks apply to document operations; focus callbacks also apply to explicit tool activation. Use native `enableClose: false`
 when a tool should only hide. At shutdown, dispose the instance and then unmount the React root
 to end component effects and binding subscriptions.
 `dispose` releases the instance directly; it does not run dirty decisions or save drafts.
@@ -615,6 +615,14 @@ callback, retaining a pending request until first content registration when need
 activation, native selection/move, observed focus, window blur or disposal supersedes it. Activating
 a document in another central TabSet transfers native maximization to that group, keeping the
 target visible without changing the split topology.
+
+`activate(id, { focus?, history? })` also reveals an existing tool, expanding its hidden Border or
+collapsed TabGroup and transferring central maximization when necessary. A tool preserves the
+active document and browser URL; `history` only applies to documents. The boolean return says
+whether live content was found and revealed, not whether its deferred focus callback has run.
+Missing/closed content and disposed workspaces return `false`. To reopen a closed registered tool,
+first use native `dispatch(Actions.addTab(...))`, then activate its id. The original focus request
+never transfers to a new tool instance that happens to reuse that id.
 
 Content uses FlexLayout's scroll container and `enableScrollbars` attributes; its wrapper adds no
 overflow clipping. Non-Router render failures use FlexLayout's per-tab error boundary and Retry;

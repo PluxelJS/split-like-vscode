@@ -25,7 +25,7 @@ import type { ReactNode } from "react";
 import { BrowserHistoryCoordinator } from "./browser-history";
 import { createDocumentHistory, navigateDocument } from "./document-history";
 import type { WorkbenchLayoutPolicy } from "./layout-policy";
-import { actionsIn, closedGroup, tabContainer, tabsIn } from "./native-layout";
+import { actionsIn, closedGroup, revealTab, tabContainer, tabsIn } from "./native-layout";
 
 export interface WorkbenchRouteMetadata {
   title?: string;
@@ -229,7 +229,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   private browser: BrowserHistoryCoordinator | undefined;
   private disposed = false;
   private focusEpoch = 0;
-  private pendingFocus: { id: string; epoch: number } | undefined;
+  private pendingFocus: { id: string; epoch: number; node: TabNode } | undefined;
   private openEpoch = 0;
   private nextId = 0;
   private readonly instancePrefix = Array.from(
@@ -433,20 +433,16 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     return structuredClone(this.state.model.toJson());
   }
 
-  activate(id: string, options: { focus?: boolean; history?: boolean } = {}) {
+  /** Reveal existing document/tool content; false means missing or disposed. Tools preserve the document URL. */
+  activate(id: string, options: { focus?: boolean; history?: boolean } = {}): boolean {
     const session = this.state.documents.get(id);
-    if (!session || this.disposed) return;
+    if (this.disposed || (!session && !this.state.tools.has(id))) return false;
     const node = this.state.model.getNodeById(id);
-    if (!(node instanceof TabNode)) return;
+    if (!(node instanceof TabNode)) return false;
+    const selecting = this.selecting;
     this.selecting = true;
     try {
-      const group = tabContainer(node);
-      if (group instanceof BorderNode && !group.isShowing())
-        this.state.model.doAction(Actions.updateNodeAttributes(group.getId(), { show: true }));
-      const hidden = closedGroup(node);
-      if (hidden)
-        this.state.model.doAction(Actions.updateNodeAttributes(hidden.getId(), { opened: true }));
-      if (!node.isSelected()) this.state.model.doAction(Actions.selectTab(id));
+      const group = revealTab(this.state.model, node);
       const maximized = this.state.model.getMaximizedTabset();
       // Selecting an obscured tab does not reveal it in FlexLayout. Follow the explicit
       // document target while retaining the user's maximized workspace mode.
@@ -455,19 +451,24 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       if (group instanceof TabSetNode && this.state.model.getActiveTabset() !== group)
         this.state.model.doAction(Actions.setActiveTabset(group.getId()));
     } finally {
-      this.selecting = false;
+      this.selecting = selecting;
     }
     this.cancelContentFocus();
-    if (this.state.store.get().activeDocumentId !== id) {
-      this.state.store.setState((s) => ({ ...s, activeDocumentId: id }));
+    if (session) {
+      if (this.state.store.get().activeDocumentId !== id)
+        this.state.store.setState((s) => ({ ...s, activeDocumentId: id }));
+      this.remember(id);
+      if (session.router && options.history !== false)
+        this.browser?.publish(session.href, id, true);
+      void this.loadDocument(id).catch((error: unknown) =>
+        this.issue("operation-failed", error, id),
+      );
     }
-    this.remember(id);
-    if (session.router && options.history !== false) this.browser?.publish(session.href, id, true);
     if (options.focus !== false) {
-      this.pendingFocus = { id, epoch: this.focusEpoch };
-      this.restoreContentFocus(session);
+      this.pendingFocus = { id, epoch: this.focusEpoch, node };
+      this.restoreContentFocus(id);
     }
-    void this.loadDocument(id).catch((error: unknown) => this.issue("operation-failed", error, id));
+    return true;
   }
 
   async close(id: string): Promise<CloseResult> {
@@ -996,11 +997,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     const selecting = this.selecting;
     this.selecting = true;
     try {
-      if (container instanceof BorderNode && !container.isShowing())
-        model.doAction(Actions.updateNodeAttributes(container.getId(), { show: true }));
       if (maximized) model.doAction(Actions.maximizeToggle(maximized.getId()));
-      if (hidden) model.doAction(Actions.updateNodeAttributes(hidden.getId(), { opened: true }));
-      if (!node.isSelected()) model.doAction(Actions.selectTab(session.id));
+      revealTab(model, node);
       if (active && model.getActiveTabset() !== active)
         model.doAction(Actions.setActiveTabset(active.getId()));
     } finally {
@@ -1768,7 +1766,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     if (session) session.lifecycle = lifecycle;
     else if (this.state.tools.has(id)) this.toolLifecycles.set(id, lifecycle);
     else throw new Error(`Cannot register closed content ${id}`);
-    if (session) this.restoreContentFocus(session);
+    this.restoreContentFocus(id);
     return () => {
       if (this.state.model.getNodeById(id) !== node) return;
       if (session?.lifecycle !== lifecycle && this.toolLifecycles.get(id) !== lifecycle) return;
@@ -1833,19 +1831,29 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     ++this.focusEpoch;
     this.pendingFocus = undefined;
   }
-  private restoreContentFocus(session: DocumentSession) {
+  private restoreContentFocus(id: string) {
     const request = this.pendingFocus;
-    if (!request || request.id !== session.id || !session.lifecycle?.focus) return;
-    queueMicrotask(() => {
+    const session = this.state.documents.get(id);
+    const lifecycle = () => session?.lifecycle ?? this.toolLifecycles.get(id);
+    if (!request || request.id !== id || !lifecycle()?.focus) return;
+    // Native Layout applies panel visibility during its render. Mounted content
+    // must wait for the next frame before a browser can accept DOM focus.
+    const win = request.node.getWindow();
+    const schedule = win
+      ? (callback: () => void) => win.requestAnimationFrame(callback)
+      : queueMicrotask;
+    schedule(() => {
       if (
         this.disposed ||
         this.pendingFocus !== request ||
         request.epoch !== this.focusEpoch ||
-        this.state.store.get().activeDocumentId !== session.id ||
-        this.state.documents.get(session.id) !== session
+        this.state.model.getNodeById(id) !== request.node ||
+        (session &&
+          (this.state.store.get().activeDocumentId !== id ||
+            this.state.documents.get(id) !== session))
       )
         return;
-      const focus = session.lifecycle?.focus;
+      const focus = lifecycle()?.focus;
       // A route can unmount between scheduling and commit. Keep the request available
       // for the next owner, provided no user interaction has superseded it.
       if (!focus) return;
@@ -1854,7 +1862,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       try {
         focus();
       } catch (error) {
-        this.issue("operation-failed", error, session.id);
+        this.issue("operation-failed", error, id);
       } finally {
         this.restoringFocus = false;
       }
@@ -1875,6 +1883,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     this.state.store.setState((s) => ({ ...s, revision: s.revision + 1 }));
   }
   private clearRemovedFocus(ids: ReadonlySet<string>) {
+    if (this.pendingFocus && ids.has(this.pendingFocus.id)) this.cancelContentFocus();
     this.state.store.setState((s) =>
       s.focusedTabId && ids.has(s.focusedTabId)
         ? { ...s, focusedTabId: null, focusedArea: null }

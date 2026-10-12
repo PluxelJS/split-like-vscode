@@ -520,18 +520,11 @@ function centralTabsets(row: IJsonRowNode): IJsonTabSetNode[] {
   );
 }
 async function openBeside(id: string, delay = 0) {
-  const result = await open(id, undefined, delay);
-  if (
-    result.status === "committed" &&
-    !result.reused &&
-    workbench.getActiveDocument()?.id === result.document.id
-  ) {
-    const target = workbench.getEditingContext().activeGroupId!;
-    const moved = await workbench.dispatch(
-      Actions.moveNode(result.document.id, target, DockLocation.RIGHT, -1),
-    );
-    message(`Layout: ${moved.status}`);
-  }
+  const result = await workbench.open(
+    { to: "/documents/$id", params: { id }, search: { view: "edit", delay } },
+    { location: DockLocation.RIGHT },
+  );
+  report(result);
   return result;
 }
 function moveActive(location: DockLocation) {

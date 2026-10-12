@@ -410,10 +410,13 @@ function Editor() {
 }
 
 function Tool({ id }: { id: string }) {
+  const input = useRef<HTMLTextAreaElement>(null);
+  useWorkbenchContentLifecycle(useMemo(() => ({ focus: () => input.current?.focus() }), []));
   return (
     <article className="tool">
       <h2>{id === "inspector" ? "Inspector" : "Outline"}</h2>
       <textarea
+        ref={input}
         aria-label={id + " note"}
         defaultValue="A native tool, with its title owned by FlexLayout JSON."
       />

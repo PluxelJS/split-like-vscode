@@ -61,6 +61,7 @@ export async function checkPackageBrowser(consumerDirectory) {
     await checkEmptyHome(page, url, report);
     await checkStrictMode(context, consumerDirectory, report);
     await checkFocusedToolPlacement(page, url, report);
+    await checkToolActivation(page, url, report);
     assert.equal(preview.exit, null, "The packed consumer preview exited during acceptance");
     assert.deepEqual(report.pageErrors, [], "The packed consumer raised an unhandled page error");
     assert.deepEqual(report.consoleErrors, [], "The packed consumer logged a console error");
@@ -83,6 +84,41 @@ export async function checkPackageBrowser(consumerDirectory) {
       );
     }
   }
+}
+
+async function checkToolActivation(page, url, report) {
+  await page.goto(`${url}/documents/A?view=edit`);
+  await page.getByLabel("Draft A", { exact: true }).waitFor();
+  const before = await page.evaluate(async () => {
+    const { workbench, Actions } = window.packedConsumer;
+    const active = workbench.getActiveDocument().id;
+    const href = location.href;
+    const border = workbench
+      .getLayout()
+      .borders.find((node) => node.children.some((tab) => tab.id === "inspector"));
+    if (!border) throw new Error("Inspector border missing");
+    const result = await workbench.dispatch(
+      Actions.updateNodeAttributes(`border_${border.location}`, { show: false }),
+    );
+    if (result.status !== "applied") throw new Error(result.status);
+    return { active, href };
+  });
+  assert.equal(
+    await page.evaluate(() => window.packedConsumer.workbench.activate("inspector")),
+    true,
+  );
+  await expect(page.getByLabel("inspector note", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("inspector note", { exact: true })).toBeFocused();
+  assert.deepEqual(
+    await page.evaluate(() => ({
+      active: window.packedConsumer.workbench.getActiveDocument().id,
+      href: location.href,
+    })),
+    before,
+  );
+  report.checks.push(
+    "Explicit tool activation reveals and focuses a hidden native Border without changing the active document or URL",
+  );
 }
 
 async function checkConsumer(page, url, report) {

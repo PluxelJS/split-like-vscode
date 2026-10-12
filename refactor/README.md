@@ -1,7 +1,7 @@
 # Worksplit 架构与维护约束
 
 当前实现使用一个 FlexLayout Model、每文档独立的真实 TanStack Router，以及一个 Worksplit 会话协调实例。
-内部 demo 和独立打包消费者均通过公开入口接入。Pluxel 与第二应用仍未迁移；通过范围、版本和测量限制见 [验收记录](acceptance.md)。
+内部 demo 和独立打包消费者均通过公开入口接入。Pluxel 的 Report Template Studio 先导应用也消费固定提交的包制品；Pluxel 本体仍未迁移。库内证据范围、版本和测量限制见 [验收记录](acceptance.md)，Studio 的业务验收由其项目测试维护。
 
 本页维护当前架构及变更约束，不再并列维护原型推荐行为或已完成的实施计划。
 原始设计的演进由 Git 历史及验收记录保存；当前 API 以公开 exports、实现和测试为依据。
@@ -105,6 +105,16 @@ Worksplit 没有手机模式、自动最大化策略或桌面布局覆盖层。�
 真实消费入口是 [demo](../packages/demo/src/main.tsx) 与 [独立安装 fixture](../scripts/fixtures/packed-consumer/app.tsx)，均通过公开包入口使用库的协调。
 
 ## 后续修改与应用迁移
+
+Studio 先导接入确认了以下边界，后续 Pluxel 本体迁移沿用：
+
+- 项目/工作台会话由宿主持有，React shell 借用；组件 effect 重放不创建或释放整套业务实例。文档 route tree、项目业务操作和 UI 外壳按所有权组织，不按文件行数机械拆分。
+- 工具显隐、分组展开和焦点使用现有 `activate`；移动和重新插入仍提交原生 Actions。旁开文档在 `open` 时给出原生位置，避免先接纳再移动而撤销自己的焦点请求。
+- 批量关闭使用纯删除的原生 Action group。关闭拒绝保留整个批次；文件写入与关闭不组成跨系统事务，宿主明确报告已完成阶段及恢复失败。
+- 多视图共享草稿、输入和编译产物由业务资源所有者维护。视图释放使用权，明确的业务操作才丢弃共享修改；晚到编译结果必须复核实际资源代次。
+- 制品接入校验同一份 React、Router、Store、FlexLayout 和 core 的解析身份及 peer 范围；源码测试通过不能替代独立安装制品的类型、构建和浏览器检查。
+
+Studio 是 Electron 应用，其项目级关闭与文件操作证据不覆盖 Pluxel 外层 Router、浏览器历史和插件撤回。迁移时分别验证这些实际宿主边界，不预先增加通用 adapter、快照迁移器或插件协议。
 
 修改前核对 exports、上游锁定版本、实现、调用方和相应测试；正常原生操作不能因包装新增另一套语义。可选 layoutPolicy 在短寿命原生候选上执行 Action 验证结构上限，不保留第二个 Model，也不自写 tidy。
 受保护身份、dirty 与资源移除路径必须在 UI、程序 Actions 和恢复入口保持同一约束。

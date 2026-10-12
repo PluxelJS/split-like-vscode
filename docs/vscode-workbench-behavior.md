@@ -20,6 +20,9 @@ Tool position does not change its role. A tool focused or docked centrally prese
 active document and its URL. A document docked in Border remains a routed document. Native moves,
 grouping, pin, selection, maximize and collapse retain mounted content lifetimes.
 Hidden content keeps running; close and resource registration teardown end its lifetime.
+Explicit `activate(id)` reveals either document or tool content and may invoke its registered focus
+callback. Tool activation preserves the document/URL. Its pending focus belongs to the actual native
+tab instance, so closing and reopening a tool with the same id cannot inherit an obsolete request.
 Empty central TabSets follow native cleanup by default. An edge split that moves the last tab
 removes its empty source, while the final empty main root still gets one native placeholder.
 There are no permanent left/right/main region ids. Explicit native `enableDeleteWhenEmpty: false`
