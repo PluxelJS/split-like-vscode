@@ -111,6 +111,44 @@ describe("public document URLs under a Router basepath", () => {
     });
   });
 
+  it.each([false, true])(
+    "publishes accepted native search changes only while their document remains active (switch=%s)",
+    async (switchDocument) => {
+      const { workbench, routers } = setup();
+      workbench.connectBrowser();
+      const first = await workbench.open({
+        to: "/documents/$id",
+        params: { id: "A" },
+        search: { view: "edit" },
+      });
+      if (first.status !== "committed") throw new Error(first.status);
+      const firstRouter = routers.at(-1)!;
+      const second = await workbench.open({
+        to: "/documents/$id",
+        params: { id: "B" },
+        search: { view: "edit" },
+      });
+      if (second.status !== "committed") throw new Error(second.status);
+      workbench.activate(first.document.id);
+      const off = firstRouter.subscribe("onBeforeLoad", () => {
+        workbench.activate(switchDocument ? second.document.id : first.document.id, {
+          focus: false,
+          history: switchDocument,
+        });
+      });
+      await firstRouter.navigate({ to: "/documents/A", search: { view: "preview" } });
+      off();
+      expect(workbench.getDocument(first.document.id)?.href).toBe(
+        `${basepath}/documents/A?view=preview`,
+      );
+      expect(window.location.pathname + window.location.search).toBe(
+        switchDocument
+          ? `${basepath}/documents/B?view=edit`
+          : `${basepath}/documents/A?view=preview`,
+      );
+    },
+  );
+
   it("retains a lazily restored identity when the requested view conditions change", async () => {
     const first = setup();
     const opened = await first.workbench.open({

@@ -17,6 +17,7 @@ import {
   TabSetNode,
   type Action,
   type IJsonModel,
+  type IJsonTabNode,
   type Node,
 } from "flexlayout-react";
 import type { ReactNode } from "react";
@@ -126,6 +127,11 @@ export interface WorkbenchOptions<TRouter extends AnyRouter> {
   createRouter: (history: RouterHistory) => TRouter;
   layout?: IJsonModel;
   tools?: readonly WorkbenchTool[];
+  /** Pure resolver for non-static tool tabs during restore and native ADD_TAB validation.
+   * Return undefined for unknown/invalid definitions. Returned id must equal tab.id.
+   * Receives detached JSON; may run more than once without committing a tool.
+   */
+  resolveTool?: (tab: Readonly<IJsonTabNode>) => WorkbenchTool | undefined;
   commands?: readonly WorkbenchCommand[];
   home?: string;
   /** Empty applies only to start(home) and owned home history anchors; open remains routed. */
@@ -313,8 +319,12 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           contentVersion: 0,
           release: [],
         });
-      } else if (node.getComponent() !== TOOL_COMPONENT || !tools.has(node.getId())) {
-        throw new Error(`Unknown Worksplit content: ${node.getId()} (${node.getComponent()})`);
+      } else {
+        const tool =
+          node.getComponent() === TOOL_COMPONENT ? this.resolveTool(node.toJson()) : undefined;
+        if (!tool)
+          throw new Error(`Unknown Worksplit content: ${node.getId()} (${node.getComponent()})`);
+        tools.set(node.getId(), tool);
       }
     });
     if ([...documents.values()].filter((session) => session.preview).length > 1)
@@ -532,19 +542,24 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     return { status: this.applyLayoutAction(action, actions) ? "applied" : "rejected" };
   }
 
+  private resolveTool(tab: IJsonTabNode): WorkbenchTool | undefined {
+    const predefined = this.options.tools?.find((tool) => tool.id === tab.id);
+    if (predefined) return predefined;
+    const tool = this.options.resolveTool?.(structuredClone(tab));
+    if (tool && (tool.id !== tab.id || typeof tool.render !== "function"))
+      throw new Error(`Resolved Worksplit tool must render its declared id ${tab.id}`);
+    return tool;
+  }
+
   private allowToolAdmission(action: Action): boolean {
     const model = this.state.model;
     const json = action.data.json as Record<string, unknown>;
-    // A new TabNode for the current Model cannot be constructed through upstream public APIs
-    // before insertion. Refuse policy-bound admission rather than changing layout then undoing it.
     if (
-      this.options.allowDrop ||
       !json ||
       typeof json !== "object" ||
       Array.isArray(json) ||
       typeof json.id !== "string" ||
       !json.id ||
-      !this.state.tools.has(json.id) ||
       this.state.documents.has(json.id) ||
       model.getNodeById(json.id) ||
       this.closing.has(json.id) ||
@@ -555,6 +570,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       ["enableFloat", "enablePopout"].some((key) => json[key] !== undefined && json[key] !== false)
     )
       return false;
+    if (!this.resolveTool(json as IJsonTabNode)) return false;
     const target = model.getNodeById(action.data.toNode as string);
     if (
       !(
@@ -576,7 +592,24 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     model.visitNodes((node) => {
       if (node === target) live = true;
     });
-    return live;
+    if (!live) return false;
+    if (this.options.allowDrop) {
+      // Validate a detached candidate before publishing insertion or mounting resources.
+      const candidate = Model.fromJson(model.toJson());
+      candidate.doAction(action);
+      const tab = candidate.getNodeById(json.id);
+      const destination = candidate.getNodeById(target.getId());
+      const location = [
+        DockLocation.CENTER,
+        DockLocation.LEFT,
+        DockLocation.RIGHT,
+        DockLocation.TOP,
+        DockLocation.BOTTOM,
+      ].find((entry) => entry.getName() === action.data.location)!;
+      if (!(tab instanceof TabNode) || !destination || !this.allowMove(tab, destination, location))
+        return false;
+    }
+    return true;
   }
 
   private allowLayoutAction(action: Action): boolean {
@@ -613,7 +646,13 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         // belong to the coordinator; floating/sub-layout content has a different lifetime owner.
         if (["id", "type", "component", "subLayoutId", "children"].some((key) => key in json))
           return false;
-        if (node instanceof TabNode && this.state.documents.has(node.getId()) && "config" in json)
+        if (
+          node instanceof TabNode &&
+          "config" in json &&
+          (this.state.documents.has(node.getId()) ||
+            (this.state.tools.has(node.getId()) &&
+              !this.options.tools?.some((tool) => tool.id === node.getId())))
+        )
           return false;
         return !["enableFloat", "enablePopout"].some(
           (key) => key in json && json[key] !== false && json[key] !== undefined,
@@ -655,6 +694,11 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     // A batch with one leaf has the same selection/move meaning as that native Action.
     // Execute the original batch so native notifications and observers retain its identity.
     const operation = actions.length === 1 ? actions[0]! : action;
+    const admittedTool =
+      operation.type === Actions.ADD_TAB
+        ? this.resolveTool(operation.data.json as IJsonTabNode)
+        : undefined;
+    if (operation.type === Actions.ADD_TAB && !admittedTool) return false;
     const activeSet = model.getActiveTabset();
     const previousSet = activeSet?.getId();
     const previousSelected = activeSet?.getSelectedNode()?.getId();
@@ -675,10 +719,17 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     const selectedHere = container?.getSelectedNode()?.getId();
     const selecting = this.selecting;
     this.selecting = true;
+    if (admittedTool) this.state.tools.set(admittedTool.id, admittedTool);
     try {
       model.doAction(action);
     } finally {
       this.selecting = selecting;
+      if (
+        admittedTool &&
+        !model.getNodeById(admittedTool.id) &&
+        !this.options.tools?.some((tool) => tool.id === admittedTool.id)
+      )
+        this.state.tools.delete(admittedTool.id);
     }
     // Native ADD_TAB can return a detached node when a destination ignores insertion (e.g.
     // a pinned tab into a TabGroup). updateIdMap has now rebuilt from the actual native tree.
@@ -1405,7 +1456,6 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   private readonly coordinating = new Set<string>();
   private attachRouter(session: DocumentSession) {
     const router = session.router!;
-    let focus = this.focusEpoch;
     let replace = false;
     session.release.push(router.history.subscribe(router.load));
     session.release.push(
@@ -1436,18 +1486,15 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       }),
     );
     session.release.push(
-      router.subscribe("onBeforeNavigate", () => {
-        focus = this.focusEpoch;
-      }),
-    );
-    session.release.push(
       router.subscribe("onResolved", () => {
         if (!this.state.documents.has(session.id)) return;
         this.acceptRouter(session);
+        // URL publication follows the active document's accepted location. Focus can
+        // change inside that document when navigation replaces the clicked control;
+        // it must not leave the browser URL pointing at the previous search state.
         if (
           !this.coordinating.has(session.id) &&
-          this.state.store.get().activeDocumentId === session.id &&
-          focus === this.focusEpoch
+          this.state.store.get().activeDocumentId === session.id
         )
           this.browser?.publish(session.href, session.id, replace);
       }),
@@ -1791,6 +1838,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   private async releaseTool(id: string): Promise<unknown[]> {
     const lifecycle = this.toolLifecycles.get(id);
     this.toolLifecycles.delete(id);
+    if (!this.options.tools?.some((tool) => tool.id === id)) this.state.tools.delete(id);
     const previous = [...(this.cleanupTasks.get(id) ?? [])];
     return (await Promise.all([...previous, this.settleLifecycle(id, lifecycle)])).flat();
   }

@@ -1509,16 +1509,31 @@ describe("registered native tool admission", () => {
     integrationState(workbench).model.removeChangeListener(observer);
   });
 
-  it("explicitly refuses new tool admission with an application docking policy", async () => {
-    const allowDrop = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["allowDrop"]>>(() => true);
+  it("checks new tool admission against a detached candidate with an application docking policy", async () => {
+    const allowDrop = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["allowDrop"]>>((tabs, target) =>
+      tabs.every(
+        (tab) => tab.getComponent() !== "worksplit.tool" || target.getId() === "border_bottom",
+      ),
+    );
     const { workbench, open } = setup({
       layout: withBorder,
       tools: [{ id: "outline", render: () => null }],
       allowDrop,
     });
     await open("A", "main");
-    allowDrop.mockClear();
     const before = workbench.getLayout();
+    const observer = vi.fn();
+    const model = integrationState(workbench).model;
+    model.addChangeListener(observer);
+    const denied = Actions.addTab(
+      { id: "outline", component: "worksplit.tool" },
+      "main",
+      DockLocation.CENTER,
+      -1,
+    );
+    expect(await workbench.dispatch(denied)).toEqual({ status: "rejected" });
+    expect(workbench.getLayout()).toEqual(before);
+    expect(observer).not.toHaveBeenCalled();
     expect(
       await workbench.dispatch(
         Actions.addTab(
@@ -1528,10 +1543,11 @@ describe("registered native tool admission", () => {
           -1,
         ),
       ),
-    ).toEqual({ status: "rejected" });
-    expect(allowDrop).not.toHaveBeenCalled();
-    expect(workbench.getLayout()).toEqual(before);
-    expect(integrationState(workbench).model.getNodeById("outline")).toBeUndefined();
+    ).toEqual({ status: "applied" });
+    expect(model.getNodeById("outline")).toBeDefined();
+    const [tabs] = allowDrop.mock.calls.at(-1)!;
+    expect(tabs[0]!.getModel()).not.toBe(model);
+    expect(observer).toHaveBeenCalledOnce();
   });
 
   it("keeps the selected document when provisional admission is rejected by policy", async () => {
