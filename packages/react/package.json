@@ -25,11 +25,11 @@
     }
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "vp run compile",
     "format:check": "oxfmt . --check",
     "lint": "oxlint -c ../../oxlint.config.ts . --deny-warnings",
-    "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.registered-consumer.json --noEmit"
+    "test": "vp run check-tests",
+    "typecheck": "vp run check-types"
   },
   "dependencies": {
     "@worksplit/core": "workspace:*"
@@ -44,7 +44,8 @@
     "flexlayout-react": "catalog:frontend",
     "jsdom": "catalog:dev",
     "react": "catalog:frontend",
-    "react-dom": "catalog:frontend"
+    "react-dom": "catalog:frontend",
+    "vite-plus": "catalog:build"
   },
   "peerDependencies": {
     "@tanstack/react-hotkeys": "^0.13.0",

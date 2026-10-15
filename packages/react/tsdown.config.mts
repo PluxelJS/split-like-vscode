@@ -1,4 +1,4 @@
-import { defineConfig } from "tsdown";
+import { defineConfig } from "vite-plus/pack";
 
 const config: ReturnType<typeof defineConfig> = defineConfig({
   minify: true,
