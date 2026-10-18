@@ -4,22 +4,23 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
-    "dev": "vite --host 0.0.0.0",
-    "format:check": "oxfmt . --check",
-    "lint": "oxlint -c ../../oxlint.config.ts . --deny-warnings",
-    "preview": "vite preview --host 0.0.0.0",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "vp run compile",
+    "dev": "vp dev",
+    "check": "vp check",
+    "fix": "vp check --fix",
+    "preview": "vp preview",
+    "typecheck": "vp run check-types"
   },
   "dependencies": {
     "@worksplit/react": "workspace:*",
-    "lucide-react": "^1.37.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "lucide-react": "catalog:frontend",
+    "react": "catalog:frontend",
+    "react-dom": "catalog:frontend"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^6.1.1",
-    "typescript": "^7.0.2",
-    "vite": "^8.2.2"
+    "@vitejs/plugin-react": "catalog:frontend",
+    "typescript": "catalog:tooling",
+    "vite": "catalog:tooling",
+    "vite-plus": "catalog:tooling"
   }
 }

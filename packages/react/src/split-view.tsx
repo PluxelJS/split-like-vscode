@@ -625,7 +625,9 @@ export const SplitView = forwardRef<SplitViewHandle, SplitViewProps>(
       >
         {paneElements.map((source) => {
           const item = layout?.items.find((candidate) => candidate.id === source.props.id);
-          const shown = Boolean(item && resolvePaneVisible(source, visibility));
+          // Visibility follows the current declaration, even while layout geometry settles.
+          // The owner can restore focus in its layout effect during this same commit.
+          const shown = resolvePaneVisible(source, visibility);
           if (!shown && !source.props.keepMounted) {
             return null;
           }

@@ -3,14 +3,28 @@ packages:
 allowBuilds:
   core-js: false
   es5-ext: false
-minimumReleaseAgeExclude:
-  - "@turbo/darwin-64@2.10.3"
-  - "@turbo/darwin-arm64@2.10.3"
-  - "@turbo/linux-64@2.10.3"
-  - "@turbo/linux-arm64@2.10.3"
-  - "@turbo/windows-64@2.10.3"
-  - "@turbo/windows-arm64@2.10.3"
-  - turbo@2.10.3
-  - '@vitest/mocker@5.0.0'
-  - '@vitest/spy@5.0.0'
-  - vitest@5.0.0
+
+overrides:
+  vite@*: npm:@voidzero-dev/vite-plus-core@1.2.0
+
+peerDependencyRules:
+  allowedVersions:
+    vite: 1.2.0
+
+catalogs:
+  frontend:
+    "@types/react": ^19.3.0
+    "@types/react-dom": ^19.3.0
+    "@vitejs/plugin-react": ^6.1.2
+    lucide-react: ^1.52.0
+    react: ^19.3.0
+    react-dom: ^19.3.0
+  test:
+    "@testing-library/react": ^16.3.3
+    jsdom: ^30.1.2
+    vitest: 5.0.4
+  tooling:
+    "@types/node": ^26.6.4
+    typescript: ^7.0.2
+    vite: npm:@voidzero-dev/vite-plus-core@1.2.0
+    vite-plus: 1.2.0

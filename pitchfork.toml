@@ -1,0 +1,16 @@
+[settings.proxy]
+enable = true
+https = false
+host = "127.0.0.1"
+tld = "localhost"
+lan = false
+port = 8088
+auto_trust = false
+dns = false
+sync_hosts = false
+
+[daemons.demo]
+run = "vp run @worksplit/demo#dev:server"
+mise = true
+port = { expect = [5174], bump = 100 }
+ready_output = { pattern = "Local:", timeout = "2m" }

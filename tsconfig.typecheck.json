@@ -3,11 +3,5 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": [
-    "oxlint.config.ts",
-    "packages/core/tsdown.config.mts",
-    "packages/core/vitest.config.mts",
-    "packages/react/tsdown.config.mts",
-    "packages/react/vitest.config.mts"
-  ]
+  "include": ["vite.config.ts", "packages/*/vite.config.ts"]
 }

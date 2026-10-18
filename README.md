@@ -9,7 +9,7 @@ This repo is intentionally split into DOM-free core logic and a React binding:
   editor-grid topology, and value snapshots.
 - `@worksplit/react`: React components, ResizeObserver integration, pointer handling, CSS.
 
-pnpm workspaces manage package linking. Turbo coordinates package task graphs and local caching. The
+pnpm workspaces manage package linking. Vite+ coordinates native task graphs and local caching. The
 root package stays as the workspace orchestration layer; demo dependencies belong in the demo
 package.
 
@@ -19,31 +19,57 @@ The VS Code-like behavior contract is tracked in
 ## Run
 
 ```sh
-pnpm install
-pnpm dev
+mise install
+mise exec -- vp install
+mise exec -- vp run hooks:install
+mise exec -- vp run dev
 ```
 
-`pnpm dev` starts the library demo on port `5174`.
+`dev` starts the demo through Pitchfork. Use `pitchfork status demo` to see its assigned port and
+checkout-specific `.localhost:8088` URL, and `pitchfork stop demo` to stop it. Run these commands
+through `mise exec --` when mise is not activated in your shell. Use
+`pitchfork logs demo --since 5min -n 100 --no-pager` for process logs. The demo uses port `5174` when
+available; Pitchfork assigns another port on conflicts.
+
+Pitchfork derives the namespace from the checkout directory. If multiple checkouts have the same
+directory name (for example, vendored copies in different applications), give each one a distinct
+top-level `namespace = "my-worksplit"` in its ignored `pitchfork.local.toml` before starting the demo.
+
+For a nonstandard mise installation such as Nix, [Pitchfork 2.30.1 on Unix](https://github.com/jdx/pitchfork/blob/v2.30.1/src/settings.rs) may need its absolute path.
+Find it with `command -v mise`, add the following to `pitchfork.local.toml` in **this Git root** while
+preserving any namespace, then check `pitchfork settings explain general.mise_bin` points to that file:
+
+```toml
+[settings.general]
+mise_bin = "/absolute/path/to/mise"
+```
+
+Edit this file explicitly: this Pitchfork version's `settings set --local` can select the outer project
+when Git checkouts are nested. The demo's `mise = true` requires this binary to load its tool environment.
 
 ## Scripts
 
 ```sh
-pnpm lint
-pnpm format
-pnpm test
-pnpm typecheck
-pnpm build
+mise exec -- vp check
+mise exec -- vp check --fix
+mise exec -- vp run test
+mise exec -- vp run typecheck
+mise exec -- vp run build
 ```
 
-`build`, `test`, `typecheck`, and `lint` are Turbo-backed. `format` stays a whole-repo write operation.
+`build`, `test`, and `typecheck` delegate to native Vite+ tasks with declared prerequisites and output
+caches. `vp check` owns formatting and lint; `hk` uses the same entrypoint for changed files.
+`typecheck` checks library, demo, and tooling TypeScript projects. Library builds keep generated
+declarations inside `dist`.
 
 ## Example
 
 ### SplitView
 
 ```tsx
-import { useRef } from "react";
 import { Pane, SplitView, type SplitViewHandle } from "@worksplit/react";
+import { useRef } from "react";
+
 import "@worksplit/react/style.css";
 
 export function Workspace() {
@@ -86,6 +112,8 @@ React state, DOM values, and scroll positions survive collapse and expansion. Ef
 and subscriptions continue running; applications still own background-work policies
 and focus restoration. Removing the pane or remounting the SplitView ends its lifetime.
 This option does not move content between containers or manage responsive overlays.
+Controlled visibility becomes effective in the same React commit, so an owner can
+restore focus in a layout effect after revealing a pane.
 
 ### Workbench
 
@@ -96,6 +124,7 @@ import {
   type WorkbenchLayout,
   type WorkbenchView,
 } from "@worksplit/react";
+
 import "@worksplit/react/style.css";
 
 const views: WorkbenchView[] = [

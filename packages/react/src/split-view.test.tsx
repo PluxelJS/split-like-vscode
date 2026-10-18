@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createRef, useEffect, useState, type ComponentProps } from "react";
+import { createRef, useEffect, useLayoutEffect, useState, type ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Pane, SplitView, type SplitViewHandle } from "./split-view";
@@ -39,6 +39,34 @@ function Content({ onUnmount }: { onUnmount: () => void }) {
 }
 
 describe("@worksplit/react", () => {
+  it.each([false, true])(
+    "reveals a pane before the owner's layout effect restores focus (keepMounted=%s)",
+    (keepMounted) => {
+      const input = createRef<HTMLInputElement>();
+      let focusableInLayout = false;
+      function Fixture({ visible }: { visible: boolean }) {
+        useLayoutEffect(() => {
+          if (visible) {
+            focusableInLayout = !input.current?.closest("[hidden], [inert]");
+            input.current?.focus();
+          }
+        }, [visible]);
+        return (
+          <SplitView>
+            <Pane id="search" visible={visible} keepMounted={keepMounted}>
+              <input ref={input} aria-label="Search" />
+            </Pane>
+            <Pane id="editor">Editor</Pane>
+          </SplitView>
+        );
+      }
+      const { rerender } = render(<Fixture visible={false} />);
+      rerender(<Fixture visible />);
+      expect(focusableInLayout).toBe(true);
+      expect(document.activeElement).toBe(input.current);
+    },
+  );
+
   it("preserves state and DOM through controlled collapse and cleans up on removal", () => {
     const unmount = vi.fn<() => void>();
     function Fixture({ visible, present = true }: { visible: boolean; present?: boolean }) {
