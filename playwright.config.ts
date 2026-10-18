@@ -10,7 +10,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "pnpm --filter @worksplit/demo dev --port 5188 --strictPort",
+    command: "vp run @worksplit/demo#dev:server --port 5188 --strictPort",
     url: "http://127.0.0.1:5188",
     reuseExistingServer: true,
   },

@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
-    "dev": "vite --host 0.0.0.0",
-    "format:check": "oxfmt . --check",
-    "lint": "oxlint -c ../../oxlint.config.ts . --deny-warnings",
-    "preview": "vite preview --host 0.0.0.0",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "vp run compile",
+    "dev": "vp dev",
+    "check": "vp check",
+    "fix": "vp check --fix",
+    "preview": "vp preview",
+    "typecheck": "vp run check-types"
   },
   "dependencies": {
     "@tanstack/react-hotkeys": "catalog:frontend",
@@ -23,6 +23,7 @@
   "devDependencies": {
     "@vitejs/plugin-react": "catalog:tooling",
     "typescript": "catalog:tooling",
-    "vite": "catalog:tooling"
+    "vite": "catalog:tooling",
+    "vite-plus": "catalog:build"
   }
 }

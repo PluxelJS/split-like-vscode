@@ -26,10 +26,10 @@
   },
   "scripts": {
     "build": "vp run compile",
-    "format:check": "oxfmt . --check",
-    "lint": "oxlint -c ../../oxlint.config.ts . --deny-warnings",
     "test": "vp run check-tests",
-    "typecheck": "vp run check-types"
+    "typecheck": "vp run check-types",
+    "check": "vp check",
+    "fix": "vp check --fix"
   },
   "dependencies": {
     "@worksplit/core": "workspace:*"

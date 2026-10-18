@@ -10,28 +10,30 @@ one native Model, with no parallel docking tree or pathname renderer dispatcher.
 - `packages/demo`: the complete internal consumer, using public package exports without source aliases.
 
 This is a breaking replacement of the old Workbench descriptors, arrangement/grid helpers, part
-state and snapshots. Pluxel and the second application have **not** been migrated. See
+state and snapshots. Pluxel consumes the native Workbench API. Applications that only need independent panes use
+`SplitView` without creating a document workspace. See
 [behavior and migration](docs/vscode-workbench-behavior.md) and [acceptance evidence](refactor/acceptance.md).
 
 | Task                                         | Start here                                                                                                            |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Install in another React application         | [Branch trial](#try-this-branch-in-another-project)                                                                   |
+| Install in another React application         | [Source checkout](#install-from-source)                                                                               |
 | Create a routed workspace                    | [Initialization](#a-complete-routed-workspace)                                                                        |
 | Guard edits and own resource cleanup         | [Content decisions](#content-decisions-commands-and-resources)                                                        |
 | Customize shell, providers and native Layout | [Host customization](#customize-the-host-with-native-apis)                                                            |
 | Use application stores and dynamic shortcuts | [Store and Hotkeys](#host-shortcuts-and-frontend-stores)                                                              |
 | Change the integration or assess its limits  | [Architecture](refactor/README.md), [behavior](docs/vscode-workbench-behavior.md), [evidence](refactor/acceptance.md) |
 
-## Try this branch in another project
+## Install from source
 
-Use `refactor/flexlayout-tanstack` in a separate checkout and build the two library packages:
+Use the main branch in a separate checkout and build the two library packages:
 
 ```sh
-git clone --branch refactor/flexlayout-tanstack --single-branch \
+git clone --branch main --single-branch \
   https://github.com/PluxelJS/split-like-vscode.git worksplit
 cd worksplit
+mise install
 pnpm install --frozen-lockfile
-pnpm build
+vp run build
 mkdir -p dist
 pnpm --filter @worksplit/core pack --out "$PWD/dist/worksplit-core.tgz"
 pnpm --filter @worksplit/react pack --out "$PWD/dist/worksplit-react.tgz"
@@ -64,7 +66,7 @@ Continue with [the complete initialization example](#a-complete-routed-workspace
 services, shell, tools and optional snapshot storage.
 
 For a complete external consumer, see [the isolated fixture](scripts/fixtures/packed-consumer/app.tsx).
-It uses public packages, its own shell and real document Routers. `pnpm test:package --browser`
+It uses public packages, its own shell and real document Routers. `vp run test:package --browser`
 independently installs freshly packed archives, checks strict types, builds the fixture, and
 drives its production preview. The command prints the retained temporary directory; `npm run dev`
 in that directory starts the fixture independently. Its services are application-local examples;
@@ -73,20 +75,26 @@ an actual host owns its document loading, saving and resource cleanup.
 ## Run and verify
 
 ```sh
+mise install
 pnpm install --frozen-lockfile
-pnpm dev                         # http://localhost:5188
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm test:package                # pack, independently install, typecheck and build a consumer
-pnpm format:check
-pnpm exec playwright install chromium
-pnpm test:browser
-pnpm test:package --browser       # also drive the independently installed production preview
-pnpm measure                     # a running demo is required
-pnpm measure:native              # native grouping, collapse, movement and batch closing
+vp run dev                       # managed by Pitchfork; inspect with pitchfork status demo
+vp run check
+vp run typecheck
+vp run test
+vp run build
+vp run test:package                # pack, independently install, typecheck and build a consumer
+vp fmt --check .
+vp exec playwright install chromium
+vp run test:browser
+vp run test:package --browser       # also drive the independently installed production preview
+vp run measure                     # a running demo is required
+vp run measure:native              # native grouping, collapse, movement and batch closing
 ```
+
+Run `vp run hooks:install` after installation. mise supplies tools and the environment; package
+scripts expose operations; native Vite tasks own dependencies and caches; hk checks staged files;
+Pitchfork owns the development process. `oxlint.config.ts` and `oxfmt.config.ts` keep rule policy
+separate from task and build configuration. `vp run verify` runs the full merge gate.
 
 External versions live in the workspace pncat catalogs and are locked by `pnpm-lock.yaml`.
 Library source exports use the `development` condition; production consumers use `dist`. Demo
@@ -765,7 +773,7 @@ chrome belongs in a root route around `Outlet`. A tool's `render` can reuse thos
 components. Router context, loaders, pending/error UI and route hooks remain application-owned.
 This supplies service injection and customized content without another factory protocol.
 
-[`pnpm test:package`](scripts/check-package-consumer.mjs) verifies tarballs in an independent
+[`vp run test:package`](scripts/check-package-consumer.mjs) verifies tarballs in an independent
 installed consumer using public exports, strict route types, native ref/slots and a customized
 React shell. It complements the demo and browser checks; it is a controlled consumer fixture,
 not evidence that Pluxel or a second production application has been migrated.

@@ -31,4 +31,5 @@ Float, popout, sublayout and arbitrary Model replacement remain outside this wor
 The React binding reports `native.onModelChange` exceptions; other native observers remain trusted
 upstream code without sandboxing or rollback.
 
-Pluxel and other applications need a separate migration; their existing contracts are incompatible.
+Existing descriptor-based applications must migrate to the native Workbench API or independent
+SplitView according to their layout needs. The known local consumers are migrated with this change.

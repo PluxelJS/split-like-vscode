@@ -1,6 +1,7 @@
-import { defineConfig } from "oxlint";
+import type { OxlintConfig } from "vite-plus/lint";
 
-export default defineConfig({
+export default {
+  options: { reportUnusedDisableDirectives: "error" },
   categories: {
     correctness: "error",
     perf: "error",
@@ -30,7 +31,7 @@ export default defineConfig({
   },
   settings: {
     react: {
-      version: "19.2.7",
+      version: "19.3.0",
     },
   },
-});
+} satisfies OxlintConfig;

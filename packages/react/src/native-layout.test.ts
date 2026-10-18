@@ -1512,7 +1512,7 @@ describe("registered native tool admission", () => {
   it("checks new tool admission against a detached candidate with an application docking policy", async () => {
     const allowDrop = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["allowDrop"]>>((tabs, target) =>
       tabs.every(
-        (tab) => tab.getComponent() !== "worksplit.tool" || target.getId() === "border_bottom",
+        (node) => node.getComponent() !== "worksplit.tool" || target.getId() === "border_bottom",
       ),
     );
     const { workbench, open } = setup({
@@ -1522,7 +1522,7 @@ describe("registered native tool admission", () => {
     });
     await open("A", "main");
     const before = workbench.getLayout();
-    const observer = vi.fn();
+    const observer = vi.fn<(action: Action) => void>();
     const model = integrationState(workbench).model;
     model.addChangeListener(observer);
     const denied = Actions.addTab(

@@ -1,5 +1,5 @@
 import { createRootRoute, createRoute, createRouter, type AnyRouter } from "@tanstack/react-router";
-import { Actions, DockLocation, TabNode, type IJsonTabNode } from "flexlayout-react";
+import { Actions, DockLocation, TabNode, type IJsonTabNode, type Action } from "flexlayout-react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { createWorkbench, type WorkbenchInstance, type WorkbenchOptions } from "./index";
@@ -40,9 +40,10 @@ function setup(options: Partial<WorkbenchOptions<AnyRouter>> = {}) {
   instances.push(workbench);
   return workbench;
 }
+const staticRender = () => null;
 const add = () => Actions.addTab(tab, "border_bottom", DockLocation.CENTER, -1, true);
 it("resolves fresh native tools without creating a Router, guards close, releases and resolves again on reopen", async () => {
-  const resolver = vi.fn(resolveTool);
+  const resolver = vi.fn<typeof resolveTool>(resolveTool);
   const workbench = setup({ resolveTool: resolver });
   const opened = await workbench.open({ to: "/$id", params: { id: "A" } });
   expect(opened.status).toBe("committed");
@@ -51,8 +52,8 @@ it("resolves fresh native tools without creating a Router, guards close, release
   expect(workbench.getDocuments()).toHaveLength(1);
   expect(workbench.getActiveDocument()).toEqual(document);
   const internal = integrationState(workbench);
-  const dispose = vi.fn();
-  const beforeLeave = vi.fn(async () => false);
+  const dispose = vi.fn<() => void>();
+  const beforeLeave = vi.fn<() => Promise<boolean>>(async () => false);
   internal.register(tab.id, { isDirty: () => true, beforeLeave, dispose });
   expect(await workbench.close(tab.id)).toMatchObject({ status: "rejected", reason: "decision" });
   expect(internal.tools.has(tab.id)).toBe(true);
@@ -87,8 +88,7 @@ it("restores native tool positions/config and refuses unknown or mismatched defi
   expect(restored.getLayout()).toEqual(before);
 });
 it("uses static tools first and isolates resolver input from the persisted definition", async () => {
-  const staticRender = () => null;
-  const resolver = vi.fn((input: Readonly<IJsonTabNode>) => {
+  const resolver = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["resolveTool"]>>((input) => {
     (input.config as typeof tab.config).owner = "changed";
     return { id: input.id!, render: () => null };
   });
@@ -109,7 +109,7 @@ it("uses static tools first and isolates resolver input from the persisted defin
 it("keeps rejected candidates out of the live model and renderer registry", async () => {
   const workbench = setup({ allowDrop: () => false });
   const internal = integrationState(workbench);
-  const observer = vi.fn();
+  const observer = vi.fn<(action: Action) => void>();
   internal.model.addChangeListener(observer);
   const before = workbench.getLayout();
   expect(workbench.canDispatch(add())).toBe(false);

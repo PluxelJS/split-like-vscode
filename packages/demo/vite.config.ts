@@ -1,5 +1,5 @@
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig } from "vite-plus";
 
 export default defineConfig(({ command }) => ({
   plugins: [
@@ -19,8 +19,39 @@ export default defineConfig(({ command }) => ({
       },
     },
   ],
+  run: {
+    tasks: {
+      "dev:server": { command: "vp dev --config vite.config.ts", cache: false },
+      compile: {
+        command: "vp build",
+        dependsOn: ["@worksplit/react#compile"],
+        cache: {
+          input: [
+            { auto: true },
+            { pattern: "../../tsconfig.base.json", base: "package" },
+            { pattern: "../../mise.toml", base: "package" },
+            { pattern: "mise.toml", base: "workspace" },
+          ],
+          output: ["dist/**"],
+        },
+      },
+      "check-types": {
+        command: "tsc -p tsconfig.json --noEmit",
+        dependsOn: ["@worksplit/react#compile"],
+        cache: {
+          input: [
+            { auto: true },
+            { pattern: "../../tsconfig.base.json", base: "package" },
+            { pattern: "../../mise.toml", base: "package" },
+            { pattern: "mise.toml", base: "workspace" },
+          ],
+          output: [],
+        },
+      },
+    },
+  },
   resolve: {
     conditions: command === "serve" ? ["development"] : ["module", "browser", "production"],
   },
-  server: { host: "0.0.0.0", port: 5188, strictPort: true },
+  server: { host: "127.0.0.1", port: Number(process.env.PORT ?? 5188), strictPort: true },
 }));
