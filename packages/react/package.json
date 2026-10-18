@@ -25,22 +25,23 @@
     }
   },
   "scripts": {
-    "build": "tsdown",
-    "format:check": "oxfmt . --check",
-    "lint": "oxlint -c ../../oxlint.config.ts . --deny-warnings",
-    "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "vp run compile",
+    "check": "vp check",
+    "fix": "vp check --fix",
+    "test": "vp run check-tests",
+    "typecheck": "vp run check-types"
   },
   "dependencies": {
     "@worksplit/core": "workspace:*"
   },
   "devDependencies": {
-    "@testing-library/react": "^16.3.3",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.5",
-    "jsdom": "^30.0.1",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "@testing-library/react": "catalog:test",
+    "@types/react": "catalog:frontend",
+    "@types/react-dom": "catalog:frontend",
+    "jsdom": "catalog:test",
+    "react": "catalog:frontend",
+    "react-dom": "catalog:frontend",
+    "vite-plus": "catalog:tooling"
   },
   "peerDependencies": {
     "react": ">=18.3.0 || >=19.0.0",

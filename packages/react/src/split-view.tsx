@@ -184,10 +184,6 @@ export const SplitView = forwardRef<SplitViewHandle, SplitViewProps>(
       [paneElements],
     );
     const paneModelElements = useStablePaneModelElements(paneElements, paneModelSignature);
-    const panesById = useMemo(
-      () => new Map(paneElements.map((pane) => [pane.props.id, pane])),
-      [paneElements],
-    );
     const paneModels = useMemo<PaneConstraints[]>(() => {
       return paneModelElements.map((pane, index) => ({
         id: pane.props.id || `pane-${index}`,
@@ -623,17 +619,19 @@ export const SplitView = forwardRef<SplitViewHandle, SplitViewProps>(
         data-orientation={orientation}
         style={{ "--worksplit-sash-size": `${sashSize}px`, ...style } as CSSProperties}
       >
-        {layout?.items.map((item) => {
-          const source = panesById.get(item.id);
-          if (!source) {
+        {paneElements.map((source) => {
+          // Visibility follows the current declaration so the owner can restore focus
+          // in its layout effect while layout geometry settles in this same commit.
+          if (!resolvePaneVisible(source, visibility)) {
             return null;
           }
+          const item = layout?.items.find((candidate) => candidate.id === source.props.id);
 
           return cloneElement(source, {
-            key: item.id,
+            key: source.props.id,
             className: ["worksplit-pane", source.props.className].filter(Boolean).join(" "),
             style: {
-              ...paneStyle(orientation, item.offset, item.size),
+              ...(item ? paneStyle(orientation, item.offset, item.size) : {}),
               ...source.props.style,
             },
           });

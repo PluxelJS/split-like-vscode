@@ -1,7 +1,9 @@
 node_modules
 dist
 coverage
-.turbo
+.vite
 .DS_Store
 *.local
 *.tsbuildinfo
+
+pitchfork.local.toml

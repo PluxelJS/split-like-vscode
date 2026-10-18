@@ -9,7 +9,7 @@ This repo is intentionally split into DOM-free core logic and a React binding:
   editor-grid topology, and value snapshots.
 - `@worksplit/react`: React components, ResizeObserver integration, pointer handling, CSS.
 
-pnpm workspaces manage package linking. Turbo coordinates package task graphs and local caching. The
+pnpm workspaces manage package linking. Vite+ coordinates native task graphs and local caching. The
 root package stays as the workspace orchestration layer; demo dependencies belong in the demo
 package.
 
@@ -19,31 +19,54 @@ The VS Code-like behavior contract is tracked in
 ## Run
 
 ```sh
-pnpm install
-pnpm dev
+mise install
+mise exec -- vp install
+mise exec -- vp run hooks:install
+mise exec -- vp run dev
 ```
 
-`pnpm dev` starts the library demo on port `5174`.
+`dev` starts the demo through Pitchfork. Use `pitchfork status demo` to see its assigned port and
+checkout-specific `.localhost:8088` URL, and `pitchfork stop demo` to stop it. Run these commands
+through `mise exec --` when mise is not activated in your shell. Use
+`pitchfork logs demo --since 5min -n 100 --no-pager` for process logs. The demo uses port `5174` when
+available; Pitchfork assigns another port on conflicts.
+
+Pitchfork derives the namespace from the checkout directory. If multiple checkouts have the same
+directory name (for example, vendored copies in different applications), give each one a distinct
+top-level `namespace = "my-worksplit"` in its ignored `pitchfork.local.toml` before starting the demo.
+
+For mise installations in a nonstandard location, such as Nix, put the absolute path returned by
+`command -v mise` in this Git checkout's ignored `pitchfork.local.toml` so Pitchfork loads the tools
+and environment:
+
+```toml
+[settings.general]
+mise_bin = "/absolute/path/to/mise"
+```
 
 ## Scripts
 
 ```sh
-pnpm lint
-pnpm format
-pnpm test
-pnpm typecheck
-pnpm build
+mise exec -- vp check
+mise exec -- vp check --fix
+mise exec -- vp run test
+mise exec -- vp run typecheck
+mise exec -- vp run build
 ```
 
-`build`, `test`, `typecheck`, and `lint` are Turbo-backed. `format` stays a whole-repo write operation.
+`build`, `test`, and `typecheck` delegate to native Vite+ tasks with declared prerequisites and output
+caches. `vp check` owns formatting and lint; `hk` uses the same entrypoint for changed files.
+`typecheck` checks library, demo, and tooling TypeScript projects. Library builds keep generated
+declarations inside `dist`.
 
 ## Example
 
 ### SplitView
 
 ```tsx
-import { useRef } from "react";
 import { Pane, SplitView, type SplitViewHandle } from "@worksplit/react";
+import { useRef } from "react";
+
 import "@worksplit/react/style.css";
 
 export function Workspace() {
@@ -69,6 +92,24 @@ export function Workspace() {
 its `reason` identifies pointer, keyboard, visibility, reset, or imperative work. Persistence
 should only consume `commit` events so pointer movement never performs synchronous storage writes.
 
+### Preserving pane content
+
+A collapsed pane unmounts its content by default. Opt into `keepMounted` for forms,
+tabs, or other stateful content:
+
+```tsx
+<Pane id="inspector" keepMounted visible={inspectorVisible}>
+  <Inspector />
+</Pane>
+```
+
+This mounts content even when initially collapsed. Hidden content uses `display: none`,
+`hidden`, `inert`, and `aria-hidden`; it does not participate in the split layout.
+React state, DOM values, and scroll positions survive collapse and expansion. Effects
+and subscriptions continue running; applications still own background-work policies
+and focus restoration. Removing the pane or remounting the SplitView ends its lifetime.
+This option does not move content between containers or manage responsive overlays.
+
 ### Workbench
 
 ```tsx
@@ -78,6 +119,7 @@ import {
   type WorkbenchLayout,
   type WorkbenchView,
 } from "@worksplit/react";
+
 import "@worksplit/react/style.css";
 
 const views: WorkbenchView[] = [
@@ -160,8 +202,8 @@ export function Workspace() {
 
 Workbench state is controlled with `value` / `onValueChange`; uncontrolled initialization uses one
 versioned `defaultLayout`. Layout changes emit through `onLayout`, with area sizes stored by pane
-id. The center area is either an `editor` node or descriptor-based `editorGroups` with tabs.
-Runtime
+id. The center area is an `editor` node, static descriptor-based `editorGroups`, or a flat
+`editorTabs` catalog backed by a mutable editor arrangement. Runtime
 `WorkbenchValue` is complete, while `WorkbenchValueSnapshot` stays partial for persistence and
 initialization. Render slots receive a stable `actions` object, so common UI does not need an
 imperative ref.
@@ -194,3 +236,38 @@ renderEditorTabLabel={({ actions, group, tab }) => (
 `toggleEditorGroupMaximized` are available on both render-slot actions and `WorkbenchHandle`.
 Maximizing is non-destructive: the topology and committed sash sizes stay intact, and sibling group
 DOM remains mounted.
+
+For user-driven editor placement, pass a flat tab catalog and initialize
+`defaultLayout.editorArrangement`. Worksplit then owns tab order, active tabs, group topology,
+pointer drop targets, empty-group removal, and persistence. The application continues to own tab
+content and lifecycle:
+
+```tsx
+const editorTabs: WorkbenchEditorTab[] = [
+  { id: "ledger", title: "Ledger", renderContent: () => <Ledger /> },
+  { id: "review", title: "Review", renderContent: () => <Review /> },
+];
+
+<Workbench
+  defaultLayout={{
+    version: 1,
+    panelPosition: "bottom",
+    value: { version: 1 },
+    editorArrangement: {
+      groups: [{ id: "main", tabIds: ["ledger", "review"], activeTabId: "ledger" }],
+      layout: { type: "group", groupId: "main" },
+    },
+  }}
+  editorTabs={editorTabs}
+  renderEditorTab={({ tab, tabProps }) => <button {...tabProps}>{tab.title}</button>}
+  storageKey="workspace-layout"
+/>;
+```
+
+Dragging a tab within a strip reorders it; dragging across strips moves it; dropping at an editor
+edge creates a left, right, top, or bottom split. Moving the final tab out removes its empty group
+and collapses redundant split nodes. `moveEditorTab` exposes the same operation through render-slot
+actions and `WorkbenchHandle`. `editorArrangement` / `onEditorArrangementChange` provide controlled
+ownership when an application needs it. `renderEditorTab` receives the complete accessible
+`tabProps`; `onEditorTabContextMenu` is available when the application only needs a menu hook.
+Worksplit intentionally does not define close, pin, dirty-document, or product menu semantics.

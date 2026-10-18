@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createRef, type ComponentProps } from "react";
+import { createRef, useLayoutEffect, type ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Pane, SplitView, type SplitViewHandle } from "./split-view";
@@ -28,6 +28,31 @@ afterEach(() => {
 });
 
 describe("@worksplit/react", () => {
+  it("reveals a pane before the owner's layout effect restores focus", () => {
+    const input = createRef<HTMLInputElement>();
+    let focusableInLayout = false;
+    function Fixture({ visible }: { visible: boolean }) {
+      useLayoutEffect(() => {
+        if (visible) {
+          focusableInLayout = input.current !== null;
+          input.current?.focus();
+        }
+      }, [visible]);
+      return (
+        <SplitView>
+          <Pane id="search" visible={visible}>
+            <input ref={input} aria-label="Search" />
+          </Pane>
+          <Pane id="editor">Editor</Pane>
+        </SplitView>
+      );
+    }
+    const { rerender } = render(<Fixture visible={false} />);
+    rerender(<Fixture visible />);
+    expect(focusableInLayout).toBe(true);
+    expect(document.activeElement).toBe(input.current);
+  });
+
   it("renders declared panes", () => {
     render(
       <div style={{ height: 400, width: 800 }}>

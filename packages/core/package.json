@@ -20,10 +20,13 @@
     }
   },
   "scripts": {
-    "build": "tsdown",
-    "format:check": "oxfmt . --check",
-    "lint": "oxlint -c ../../oxlint.config.ts . --deny-warnings",
-    "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "vp run compile",
+    "check": "vp check",
+    "fix": "vp check --fix",
+    "test": "vp run check-tests",
+    "typecheck": "vp run check-types"
+  },
+  "devDependencies": {
+    "vite-plus": "catalog:tooling"
   }
 }
