@@ -352,7 +352,7 @@ test("narrow resizing preserves native layout and manual maximize persists witho
   expect(
     await page.evaluate(() => JSON.parse(localStorage.getItem("worksplit.demo.layout"))),
   ).toEqual(manuallyMaximized);
-  await page.screenshot({ path: "refactor/acceptance/narrow.png" });
+  await page.screenshot({ path: "test-results/browser/narrow.png" });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
@@ -380,7 +380,7 @@ test("narrow resizing preserves native layout and manual maximize persists witho
     unmounts: before.metrics.unmounts,
     disposed: before.metrics.disposed,
   });
-  await page.screenshot({ path: "refactor/acceptance/desktop.png" });
+  await page.screenshot({ path: "test-results/browser/desktop.png" });
   await page.reload();
   await expect(page.getByLabel("Draft B")).toBeVisible();
   await expect(page.getByLabel("Draft A")).toBeHidden();

@@ -38,13 +38,17 @@ try {
       ].map(async (name) => [name, await installedVersion(name)]),
     ),
   );
-  const devDependencies = Object.fromEntries(
-    await Promise.all(
-      ["typescript", "vite", "@vitejs/plugin-react", "@types/react", "@types/react-dom"].map(
-        async (name) => [name, await installedVersion(name)],
+  const devDependencies = {
+    // The isolated public consumer deliberately uses standard Vite, not the workspace alias.
+    vite: "8.3.3",
+    ...Object.fromEntries(
+      await Promise.all(
+        ["typescript", "@vitejs/plugin-react", "@types/react", "@types/react-dom"].map(
+          async (name) => [name, await installedVersion(name)],
+        ),
       ),
     ),
-  );
+  };
   await writeFile(
     join(consumer, "package.json"),
     JSON.stringify(

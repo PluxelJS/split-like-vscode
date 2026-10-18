@@ -778,7 +778,7 @@ installed consumer using public exports, strict route types, native ref/slots an
 React shell. It complements the demo and browser checks; it is a controlled consumer fixture,
 not evidence that Pluxel or a second production application has been migrated.
 Add `--browser` to exercise the compiled consumer in Chromium and retain desktop/narrow screenshots
-and its results in `refactor/acceptance`. The checker retains its independent installation directory
+and its results in `test-results/packed-consumer`. The checker retains its independent installation directory
 for inspection; remove that printed temporary directory when the evidence is no longer needed.
 
 ## Independent SplitView

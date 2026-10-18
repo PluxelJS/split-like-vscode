@@ -1,5 +1,5 @@
 /* eslint-disable no-await-in-loop -- Sequential operations and two-frame settlements are the measured workload. */
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 
 import { chromium } from "@playwright/test";
@@ -271,8 +271,9 @@ try {
       await context.close();
     }
   }
+  await mkdir("test-results", { recursive: true });
   await writeFile(
-    "refactor/acceptance/native-measurements.json",
+    "test-results/native-measurements.json",
     JSON.stringify(
       {
         environment: {

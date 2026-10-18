@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { chromium, expect } from "@playwright/test";
 
 const repository = resolve(import.meta.dirname, "..");
-const acceptance = resolve(repository, "refactor/acceptance/migration-readiness");
+const acceptance = resolve(repository, "test-results/packed-consumer");
 
 /** Drive the built app installed from Worksplit tarballs, using the real public consumer fixture. */
 export async function checkPackageBrowser(consumerDirectory) {

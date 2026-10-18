@@ -1,5 +1,5 @@
 /* eslint-disable no-await-in-loop -- Sequential operations and two-frame settlements are the measured workload. */
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 
 import { chromium } from "@playwright/test";
@@ -105,8 +105,9 @@ for (const count of [2, 10, 50]) {
   });
   await context.close();
 }
+await mkdir("test-results", { recursive: true });
 await writeFile(
-  "refactor/acceptance/measurements.json",
+  "test-results/measurements.json",
   JSON.stringify(
     {
       environment: {

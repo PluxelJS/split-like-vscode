@@ -469,7 +469,7 @@ test("real edge drags prune empty TabSets, preserve content, merge and reopen th
     subscriptions: before.subscriptions,
     unmounts: before.unmounts,
   });
-  await page.screenshot({ path: "refactor/acceptance/split-empty-after-desktop.png" });
+  await page.screenshot({ path: "test-results/browser/split-empty-after-desktop.png" });
   const previousContainer = tabset(await layout(page), a).id!;
   const destination = tabset(await layout(page), b).id!;
   await mouseDrop(
@@ -866,7 +866,7 @@ test("narrow resizing preserves grouped native layout and tab selection remains 
   });
   const before = await page.evaluate(() => ({ ...window.worksplitDemo.metrics }));
   await expect(page.getByTestId("metrics")).toContainText('"subscriptions": 2');
-  await page.screenshot({ path: "refactor/acceptance/native-groups-desktop.png" });
+  await page.screenshot({ path: "test-results/browser/native-groups-desktop.png" });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
@@ -892,7 +892,7 @@ test("narrow resizing preserves grouped native layout and tab selection remains 
   ).toMatchObject({ activeGroupId: bContainer, activeTabId: b });
   expect(nodes(await layout(page)).some((node) => node.maximized)).toBe(false);
   const narrowSnapshot = await page.evaluate(() => window.worksplitDemo.workbench.snapshot());
-  await page.screenshot({ path: "refactor/acceptance/native-groups-narrow.png" });
+  await page.screenshot({ path: "test-results/browser/native-groups-narrow.png" });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
@@ -994,7 +994,7 @@ test("narrow native group splits retain content without automatic maximization",
     unmounts: before.unmounts,
     disposed: before.disposed,
   });
-  await page.screenshot({ path: "refactor/acceptance/split-empty-after-narrow.png" });
+  await page.screenshot({ path: "test-results/browser/split-empty-after-narrow.png" });
 });
 
 test("narrow native batches retain the final selected source without automatic maximization", async ({
@@ -1151,7 +1151,7 @@ test("native right Border toggle, splitter resize and snapshot preserve the glob
       () => window.retainedDetails === document.querySelector('[aria-label="Details note"]'),
     ),
   ).toBe(true);
-  await page.screenshot({ path: "refactor/acceptance/right-border-desktop.png" });
+  await page.screenshot({ path: "test-results/browser/right-border-desktop.png" });
   await page.getByRole("button", { name: "Save layout", exact: true }).click();
   await page.getByLabel("Restore on refresh").check();
   await page.reload();
@@ -1259,7 +1259,7 @@ test("native right Border docking and small-window toggles retain the same tool 
     unmounts: before.unmounts,
     disposed: before.disposed,
   });
-  await page.screenshot({ path: "refactor/acceptance/narrow-right-border.png" });
+  await page.screenshot({ path: "test-results/browser/narrow-right-border.png" });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
