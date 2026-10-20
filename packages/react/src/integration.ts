@@ -1,4 +1,4 @@
-import type { UseHotkeyDefinition } from "@tanstack/react-hotkeys";
+import type { RegisterableHotkey } from "@tanstack/react-hotkeys";
 import {
   createMemoryHistory,
   type AnyRouter,
@@ -113,7 +113,7 @@ export interface WorkbenchTool {
 export interface WorkbenchCommand {
   id: string;
   target: "document" | "focused";
-  hotkey?: UseHotkeyDefinition["hotkey"];
+  hotkey?: RegisterableHotkey;
   /** Inputs are ignored by default. Set false for an intentional editor command. */
   ignoreInputs?: boolean;
   execute: (target: { id: string; document: WorkbenchDocument | null }) => void | Promise<void>;
