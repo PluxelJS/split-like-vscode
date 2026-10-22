@@ -92,6 +92,8 @@ export interface WorkbenchLeaveContext {
   id: string;
   from?: string;
   to?: string;
+  /** A host traversal may be superseded while its close confirmation is open. */
+  signal?: AbortSignal;
 }
 export interface WorkbenchContentLifecycle {
   isDirty?: () => boolean;
@@ -250,7 +252,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   private readonly pending = new Set<AnyRouter>();
   private readonly closing = new Map<
     string,
-    { key: string; promise: Promise<CloseActionResult> }
+    { key: string; promise: Promise<CloseActionResult>; signal?: AbortSignal }
   >();
   private disposePromise: Promise<readonly unknown[]> | undefined;
 
@@ -379,7 +381,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   }
 
   /** Type inference follows the application's TanStack route tree. */
-  open<const TFrom extends string = string, const TTo extends string | undefined = undefined>(
+  open<const TFrom extends string = string, const TTo extends string | undefined = ".">(
     navigation: NavigateOptions<TRouter, TFrom, TTo>,
     options: OpenDocumentOptions = {},
   ): Promise<NavigationResult> {
@@ -482,14 +484,21 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     return true;
   }
 
-  async close(id: string): Promise<CloseResult> {
+  async close(
+    id: string,
+    options: { history?: boolean; signal?: AbortSignal } = {},
+  ): Promise<CloseResult> {
     if (
       this.disposed ||
       !(this.state.model.getNodeById(id) instanceof TabNode) ||
       (!this.state.documents.has(id) && !this.state.tools.has(id))
     )
       return { status: "superseded" };
-    return this.closeAction(Actions.deleteTab(id)) as Promise<CloseResult>;
+    return this.closeAction(
+      Actions.deleteTab(id),
+      options.history !== false,
+      options.signal,
+    ) as Promise<CloseResult>;
   }
 
   /** Synchronous eligibility only. Close still makes asynchronous content decisions. */
@@ -530,14 +539,20 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     );
   }
 
-  async dispatch(action: Action): Promise<CloseResult | { status: "applied" | "rejected" }> {
+  /** Close actions may preserve the current browser entry when handing off to the host. */
+  async dispatch(
+    action: Action,
+    options: { history?: boolean; signal?: AbortSignal } = {},
+  ): Promise<CloseResult | { status: "applied" | "rejected" }> {
     if (this.disposed) return { status: "rejected" };
     const actions = actionsIn(action);
     const removals = actions.filter(
       (a) => a.type === Actions.DELETE_TAB || a.type === Actions.DELETE_TABSET,
     );
     if (removals.length > 0)
-      return removals.length === actions.length ? this.closeAction(action) : { status: "rejected" };
+      return removals.length === actions.length
+        ? this.closeAction(action, options.history !== false, options.signal)
+        : { status: "rejected" };
     if (!this.canDispatch(action)) return { status: "rejected" };
     return { status: this.applyLayoutAction(action, actions) ? "applied" : "rejected" };
   }
@@ -811,7 +826,15 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   }
 
   /** Explicitly attach to a browser workspace; returns the listener cleanup. */
-  connectBrowser(options: { window?: Window } = {}) {
+  connectBrowser(
+    options: {
+      window?: Window;
+      beforeOutsideScope?: (
+        href: string,
+        context: { signal: AbortSignal },
+      ) => boolean | Promise<boolean>;
+    } = {},
+  ) {
     if (this.disposed) throw new Error("This Worksplit instance is disposed");
     if (this.browser) throw new Error("This Worksplit instance already owns browser history");
     const win = options.window ?? window;
@@ -832,6 +855,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
             : undefined;
       },
       (error, outside) => this.issue(outside ? "history-outside-scope" : "history", error),
+      options.beforeOutsideScope,
     );
     const browser = this.browser;
     return () => {
@@ -1561,15 +1585,22 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       : false;
   }
   /** Interpret removal effects only. Model remains the sole layout authority. */
-  private closeAction(action: Action): Promise<CloseActionResult> {
+  private closeAction(
+    action: Action,
+    history = true,
+    signal?: AbortSignal,
+  ): Promise<CloseActionResult> {
+    if (signal?.aborted) return Promise.resolve({ status: "superseded" });
     const model = this.state.model;
     const actions = actionsIn(action);
-    const key = JSON.stringify(actions.map((a) => [a.type, a.data.node]).toSorted());
+    const key = JSON.stringify([history, actions.map((a) => [a.type, a.data.node]).toSorted()]);
     for (const a of actions) {
       const pending = this.closing.get(a.data.node as string);
       if (pending)
         return Promise.resolve(
-          pending.key === key ? pending.promise : { status: "rejected", reason: "closing" },
+          pending.key === key && pending.signal === signal
+            ? pending.promise
+            : { status: "rejected", reason: "closing" },
         );
     }
     const scopes: CloseScope[] = [];
@@ -1610,9 +1641,10 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     const promise = new Promise<CloseActionResult>((resolve) => {
       finish = resolve;
     });
-    for (const id of reserved) this.closing.set(id, { key, promise });
+    for (const id of reserved)
+      this.closing.set(id, { key, promise, ...(signal ? { signal } : {}) });
     // Reserve before invoking application decisions, including synchronous/reentrant ones.
-    void this.runCloseAction(scopes, tabs).then((result) => {
+    void this.runCloseAction(scopes, tabs, history, signal).then((result) => {
       for (const id of reserved)
         if (this.closing.get(id)?.promise === promise) this.closing.delete(id);
       finish(result);
@@ -1624,7 +1656,12 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     return promise;
   }
 
-  private async runCloseAction(scopes: CloseScope[], tabs: TabNode[]): Promise<CloseActionResult> {
+  private async runCloseAction(
+    scopes: CloseScope[],
+    tabs: TabNode[],
+    history: boolean,
+    signal?: AbortSignal,
+  ): Promise<CloseActionResult> {
     const sessions = tabs.flatMap((tab) => {
       const session = this.state.documents.get(tab.getId());
       return session ? [session] : [];
@@ -1647,17 +1684,45 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       )
         return { status: "rejected", reason: "revision-required" };
       for (const [index, lifecycle] of contentLifecycles.entries()) {
-        if (this.disposed) return { status: "superseded" };
+        if (this.disposed || signal?.aborted) return { status: "superseded" };
         if (!lifecycle?.isDirty?.()) continue;
         if (tabs.length > 1 && !lifecycle.getCloseRevision)
           return { status: "rejected", reason: "revision-required" };
         const id = tabs[index]!.getId();
         const from = this.state.documents.get(id)?.href;
+        const decision = Promise.resolve(
+          lifecycle.beforeLeave?.("close", {
+            id,
+            ...(from ? { from } : {}),
+            ...(signal ? { signal } : {}),
+          }),
+        );
         // eslint-disable-next-line no-await-in-loop -- Dirty decisions may display a dialog; ask in strip order.
-        const approved = await lifecycle.beforeLeave?.("close", { id, ...(from ? { from } : {}) });
+        const approved = await (signal
+          ? new Promise<boolean | undefined>((resolve, reject) => {
+              const abort = () => resolve(false);
+              signal.addEventListener("abort", abort, { once: true });
+              if (signal.aborted) abort();
+              void decision.then(
+                (value) => {
+                  signal.removeEventListener("abort", abort);
+                  return resolve(value);
+                },
+                (error) => {
+                  signal.removeEventListener("abort", abort);
+                  reject(error);
+                },
+              );
+            })
+          : decision);
+        if (signal?.aborted) return { status: "superseded" };
         if (!approved) return { status: "rejected", reason: "decision" };
       }
-      if (this.disposed || sessions.some((s) => this.state.documents.get(s.id) !== s))
+      if (
+        this.disposed ||
+        signal?.aborted ||
+        sessions.some((s) => this.state.documents.get(s.id) !== s)
+      )
         return { status: "superseded" };
       if (
         sessions.some(
@@ -1751,8 +1816,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
             ) ?? this.preferred(remaining);
           this.state.store.setState((s) => ({ ...s, activeDocumentId: null }));
           this.cancelContentFocus();
-          if (successor) this.activate(successor.id);
-          else this.browser?.publish(this.options.home ?? "/", undefined, true);
+          if (successor) this.activate(successor.id, { history });
+          else if (history) this.browser?.publish(this.options.home ?? "/", undefined, true);
         }
         this.changed();
       } catch (error) {

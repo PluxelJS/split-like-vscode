@@ -59,6 +59,13 @@ React, React DOM, FlexLayout and the TanStack React Router, Store and Hotkeys ad
 peers: the host owns their compatible versions and shared React contexts. Their transitive SDK
 dependencies remain owned by the upstream packages; `@worksplit/core` is a regular dependency.
 
+FlexLayout 0.11.1 requires [the included native patch](patches/flexlayout-react@0.11.1.patch)
+to retain a TabSet and its document when removing the last member from a TabGroup. This workspace
+applies it with pnpm `patchedDependencies`. A consuming application must apply the same patch to
+its own FlexLayout peer; packed library archives do not transfer package-manager patches. Keep
+host and library copies identical, and remove both only after a native upgrade passes the singleton
+and dynamic-batch group regression tests. Worksplit continues to execute the original native Actions.
+
 Use TypeScript `moduleResolution: "Bundler"`. Import Worksplit's public React entry and CSS,
 and import native types, Actions and the selected theme directly from `flexlayout-react`.
 Continue with [the complete initialization example](#a-complete-routed-workspace), then
@@ -391,10 +398,19 @@ it throws for removed/replaced content or a second live owner. Register one stab
 content; compose business editor resources inside that owner instead of overwriting the registration. A rejected registration has not transferred resource
 ownership, so the caller still releases any resources it acquired.
 
-`beforeLeave(reason, { id, from?, to? })` receives the content id and, for document navigation,
+`beforeLeave(reason, { id, from?, to?, signal? })` receives the content id and, for document navigation,
 the current and requested locations. Use this to permit view-only search changes that preserve a
 draft while protecting a real resource transition. Close supplies the document's current `from`
 (or just the id for a tool). The application still validates its own business editing revision.
+`close` and removal `dispatch` accept an optional `signal`. Aborting it supersedes the whole
+close transaction before mutation, even if an application decision resolves later. Lifecycle
+confirmations can use the same signal to dismiss a superseded dialog immediately.
+
+`connectBrowser({ beforeOutsideScope(href, { signal }) })` lets a containing application decide
+whether a traversal may leave the workspace. Pass that signal to the native close batch with
+`{ history: false, signal }`. Another traversal or instance disposal aborts the old decision;
+the coordinator also ignores its late result. The containing application handles an approved
+`history-outside-scope` issue without rewriting the target entry.
 
 Tools may register guarded closing and disposal resources; they need no Router to be dirty.
 Save callbacks apply to document operations; focus callbacks also apply to explicit tool activation. Use native `enableClose: false`

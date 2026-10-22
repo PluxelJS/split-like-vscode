@@ -1,0 +1,19 @@
+diff --git a/dist/index.js b/dist/index.js
+index 78f64a837000a6a49a312810da5f1123628c4b03..443a0e06fa97128668fba2a091eb1fdb2907a8e8 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -2807,11 +2807,13 @@ var Model = class Model {
+ 			const group = tab.getParent();
+ 			const tabset = group.getTabContainer();
+ 			const groupIndex = tabset.getChildren().indexOf(group);
+-			group.remove(tab);
++			group.removeChild(tab);
++			if (group.getChildren().length === 0) tabset.removeChild(group);
+ 			const insertPos = tabset.getChildren().indexOf(group);
+ 			tabset.addChild(tab, insertPos === -1 ? groupIndex : insertPos + 1);
+ 			tabset.setSelected(tabset.getTabNodes().indexOf(tab));
+ 			if (tabset instanceof TabSetNode) this.setActiveTabset(tabset, tabset.getLayoutId());
++			this.tidy();
+ 		}
+ 	}
+ 	/** @internal */

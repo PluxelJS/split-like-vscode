@@ -5,6 +5,8 @@ allowBuilds:
   es5-ext: false
 overrides:
   vite@*: npm:@voidzero-dev/vite-plus-core@1.2.0
+patchedDependencies:
+  flexlayout-react@0.11.1: patches/flexlayout-react@0.11.1.patch
 
 # Vite+ Core exposes Vite 8 APIs under the Vite+ version.
 peerDependencyRules:

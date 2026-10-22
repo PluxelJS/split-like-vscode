@@ -8,6 +8,9 @@ export class BrowserHistoryCoordinator {
   private disposed = false;
   private readonly key: string;
   private scope: string | undefined;
+  private readonly baseIndex: number;
+  private outsideDecision = false;
+  private outsideAbort: AbortController | undefined;
 
   constructor(
     private readonly win: Window,
@@ -18,6 +21,10 @@ export class BrowserHistoryCoordinator {
       current: () => boolean,
     ) => Promise<{ id?: string; href: string } | undefined>,
     private readonly report: (error: unknown, outside?: boolean) => void,
+    private readonly beforeOutsideScope?: (
+      href: string,
+      context: { signal: AbortSignal },
+    ) => boolean | Promise<boolean>,
   ) {
     this.key = `worksplit:${workspaceId}`;
     const saved = this.read(win.history.state);
@@ -27,6 +34,7 @@ export class BrowserHistoryCoordinator {
         value.toString(16),
       ).join("-");
     this.physicalIndex = saved?.index ?? 0;
+    this.baseIndex = this.position(win.history.state) - this.physicalIndex;
     this.accepted = { index: this.physicalIndex, href: this.href(), id: saved?.id };
     this.write(this.accepted.href, this.accepted.id, true);
     win.addEventListener("popstate", this.onPop);
@@ -37,7 +45,7 @@ export class BrowserHistoryCoordinator {
   }
 
   publish(href: string, id: string | undefined, replace: boolean) {
-    if (this.disposed) return;
+    if (this.disposed || this.outsideDecision) return;
     ++this.generation;
     const apply = () => this.write(href, id, replace);
     if (this.busy) {
@@ -50,9 +58,22 @@ export class BrowserHistoryCoordinator {
 
   dispose() {
     this.disposed = true;
+    this.outsideAbort?.abort();
+    this.outsideAbort = undefined;
     ++this.generation;
     this.pendingWrite = undefined;
     this.win.removeEventListener("popstate", this.onPop);
+  }
+
+  // TanStack's native browser index also identifies entries owned by the outer Router.
+  // Keep it monotonic while the workspace exclusively owns browser writes, so a rejected
+  // cross-scope traversal can use history.go without another URL/navigation state machine.
+  private position(state: unknown): number {
+    const value =
+      state && typeof state === "object"
+        ? (state as Record<string, unknown>)["__TSR_index"]
+        : undefined;
+    return Number.isSafeInteger(value) ? (value as number) : 0;
   }
 
   private href() {
@@ -78,7 +99,11 @@ export class BrowserHistoryCoordinator {
   private write(href: string, id: string | undefined, replace: boolean) {
     replace ||= href === this.accepted.href;
     const index = this.accepted.index + (replace ? 0 : 1);
-    const state = { ...this.win.history.state, [this.key]: { scope: this.scope, index, id } };
+    const state = {
+      ...this.win.history.state,
+      __TSR_index: this.baseIndex + index,
+      [this.key]: { scope: this.scope, index, id },
+    };
     this.win.history[replace ? "replaceState" : "pushState"](state, "", href);
     this.physicalIndex = index;
     this.accepted = { index, href, id };
@@ -96,16 +121,51 @@ export class BrowserHistoryCoordinator {
   }
 
   private onPop = (event: PopStateEvent) => {
+    this.outsideAbort?.abort();
+    this.outsideAbort = undefined;
     const state = this.read(event.state);
     // Entries outside this workspace are owned by the containing application.
     if (!state) {
-      ++this.generation;
-      this.report(
-        new Error("History entry is outside this Worksplit workspace; the host must handle it"),
-        true,
-      );
+      const token = ++this.generation;
+      this.physicalIndex = this.position(event.state) - this.baseIndex;
+      const report = () =>
+        this.report(
+          new Error("History entry is outside this Worksplit workspace; the host must handle it"),
+          true,
+        );
+      if (!this.beforeOutsideScope) {
+        report();
+        return;
+      }
+      this.outsideDecision = true;
+      const abort = new AbortController();
+      this.outsideAbort = abort;
+      const href = this.href();
+      void Promise.resolve()
+        .then(() =>
+          abort.signal.aborted ? false : this.beforeOutsideScope!(href, { signal: abort.signal }),
+        )
+        .then(
+          (allowed) => {
+            if (this.disposed || token !== this.generation) return;
+            this.outsideAbort = undefined;
+            this.outsideDecision = false;
+            return allowed ? report() : this.restore();
+          },
+          (error) => {
+            if (this.disposed || token !== this.generation) return;
+            this.outsideAbort = undefined;
+            this.outsideDecision = false;
+            this.report(error);
+            this.restore();
+          },
+        );
       return;
     }
+    // An owned traversal supersedes the host decision, including its publish lock.
+    // Invalidate it before the restoration branch, which can otherwise return early.
+    this.outsideDecision = false;
+    const token = ++this.generation;
     this.physicalIndex = state.index;
     if (this.restoring) {
       this.restoring = false;
@@ -118,7 +178,6 @@ export class BrowserHistoryCoordinator {
       pending?.();
       return;
     }
-    const token = ++this.generation;
     const href = this.href();
     const current = () => !this.disposed && token === this.generation;
     void this.visit(href, state.id, current).then(
