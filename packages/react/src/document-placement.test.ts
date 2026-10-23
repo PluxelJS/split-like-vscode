@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createLayoutPolicy,
   createWorkbench,
+  getLayoutTopology,
   type OpenDocumentOptions,
   type WorkbenchInstance,
   type WorkbenchOptions,
@@ -57,6 +58,217 @@ function deferred() {
 }
 
 describe("routed document placement", () => {
+  it("uses native tab admission, then reuses a split without resizing or creating another pane", async () => {
+    const { workbench, open, internal } = setup();
+    const a = await open("A", { placement: { mode: "tab" } });
+    const b = await open("B", { placement: { mode: "split", source: a.id } });
+    expect(getLayoutTopology(internal.model)).toEqual({ rows: 2, columns: 1, tabsets: 2 });
+    const source = internal.model.getNodeById(a.containerId) as TabSetNode;
+    const detail = internal.model.getNodeById(b.containerId) as TabSetNode;
+    expect(detail.getWeight() / (source.getWeight() + detail.getWeight())).toBeCloseTo(0.35);
+    const weights = [source.getWeight(), detail.getWeight()];
+    workbench.activate(a.id);
+    const c = await open("C", {
+      placement: { mode: "split", source: a.id, direction: DockLocation.RIGHT, ratio: 0.2 },
+      preserveFocus: true,
+    });
+    expect(c.containerId).toBe(b.containerId);
+    expect(getLayoutTopology(internal.model)).toEqual({ rows: 2, columns: 1, tabsets: 2 });
+    expect([source.getWeight(), detail.getWeight()]).toEqual(weights);
+    expect(workbench.getActiveDocument()?.id).toBe(a.id);
+    const tab = await open("D", { placement: { mode: "tab", source: b.id } });
+    expect(tab.containerId).toBe(b.containerId);
+  });
+
+  it("falls back through native layout policy without repeating the route load", async () => {
+    const loader = vi.fn<(id: string) => void>();
+    const { workbench, open, internal } = setup(
+      { layoutPolicy: createLayoutPolicy({ maxRows: 1, maxColumns: 2 }) },
+      loader,
+    );
+    const a = await open("A");
+    const b = await open("B", { placement: { mode: "split", source: a.id, ratio: 0.4 } });
+    expect(loader.mock.calls.filter(([id]) => id === "B")).toHaveLength(1);
+    expect(getLayoutTopology(internal.model)).toEqual({ rows: 1, columns: 2, tabsets: 2 });
+    const source = internal.model.getNodeById(a.containerId) as TabSetNode;
+    const detail = internal.model.getNodeById(b.containerId) as TabSetNode;
+    expect(detail.getWeight() / (source.getWeight() + detail.getWeight())).toBeCloseTo(0.4);
+    expect(workbench.getDocuments()).toHaveLength(2);
+  });
+
+  it("prefers a safe preview over MRU within the requested direction, retaining dirty content", async () => {
+    const { workbench, open, internal } = setup();
+    const a = await open("A");
+    const preview = await open("B", { preview: true, location: DockLocation.RIGHT });
+    internal.register(preview.id, { isDirty: () => true });
+    const recent = await open("C", { target: preview.containerId, location: DockLocation.BOTTOM });
+    workbench.activate(a.id);
+    const next = await open("D", {
+      preview: true,
+      placement: { mode: "split", source: a.id, direction: DockLocation.RIGHT },
+    });
+    expect(next.containerId).toBe(preview.containerId);
+    expect(next.containerId).not.toBe(recent.containerId);
+    expect(workbench.getDocument(preview.id)?.preview).toBe(false);
+    expect(getLayoutTopology(internal.model).tabsets).toBe(3);
+  });
+
+  it("honors direction with three panes instead of always reusing the most recent pane", async () => {
+    const { workbench, open, internal } = setup({
+      layoutPolicy: createLayoutPolicy({ maxRows: 2, maxColumns: 2, maxTabsets: 4 }),
+    });
+    const a = await open("A");
+    const right = await open("B", { target: a.containerId, location: DockLocation.RIGHT });
+    const below = await open("C", { target: a.containerId, location: DockLocation.BOTTOM });
+    workbench.activate(right.id);
+    workbench.activate(a.id);
+    const lower = await open("D", {
+      placement: { mode: "split", source: a.id },
+      preserveFocus: true,
+    });
+    expect(lower.containerId).toBe(below.containerId);
+    const next = await open("E", {
+      placement: { mode: "split", source: a.id, direction: DockLocation.RIGHT },
+      preserveFocus: true,
+    });
+    expect(next.containerId).toBe(right.containerId);
+    expect(getLayoutTopology(internal.model)).toEqual({ rows: 2, columns: 2, tabsets: 3 });
+  });
+
+  it("adds a directional fourth pane within the native limit", async () => {
+    const loader = vi.fn<(id: string) => void>();
+    const { workbench, open, internal } = setup(
+      { layoutPolicy: createLayoutPolicy({ maxRows: 2, maxColumns: 2, maxTabsets: 4 }) },
+      loader,
+    );
+    const a = await open("A");
+    const right = await open("B", { target: a.containerId, location: DockLocation.RIGHT });
+    const lowerLeft = await open("C", { target: a.containerId, location: DockLocation.BOTTOM });
+    workbench.activate(right.id);
+    const next = await open("D", {
+      placement: { mode: "split", source: right.id, ratio: 0.4 },
+      preserveFocus: true,
+    });
+    expect(loader.mock.calls.filter(([id]) => id === "D")).toHaveLength(1);
+    expect(getLayoutTopology(internal.model)).toEqual({ rows: 2, columns: 2, tabsets: 4 });
+    expect([a.containerId, right.containerId, lowerLeft.containerId]).not.toContain(
+      next.containerId,
+    );
+    const source = internal.model.getNodeById(right.containerId) as TabSetNode;
+    const detail = internal.model.getNodeById(next.containerId) as TabSetNode;
+    expect(detail.getWeight() / (source.getWeight() + detail.getWeight())).toBeCloseTo(0.4);
+    expect(workbench.getActiveDocument()?.id).toBe(right.id);
+  });
+
+  it("safely reuses a pane when the native limit rejects both split directions", async () => {
+    const loader = vi.fn<(id: string) => void>();
+    const { workbench, open, internal } = setup(
+      { layoutPolicy: createLayoutPolicy({ maxRows: 2, maxColumns: 2, maxTabsets: 3 }) },
+      loader,
+    );
+    const a = await open("A");
+    const right = await open("B", { target: a.containerId, location: DockLocation.RIGHT });
+    const lowerLeft = await open("C", { target: a.containerId, location: DockLocation.BOTTOM });
+    workbench.activate(right.id);
+    const next = await open("D", {
+      placement: { mode: "split", source: right.id, ratio: 0.4 },
+      preserveFocus: true,
+    });
+    expect(loader.mock.calls.filter(([id]) => id === "D")).toHaveLength(1);
+    expect(getLayoutTopology(internal.model)).toEqual({ rows: 2, columns: 2, tabsets: 3 });
+    expect(next.containerId).toBe(lowerLeft.containerId);
+    expect(workbench.getActiveDocument()?.id).toBe(right.id);
+  });
+
+  it("uses direction with four panes and falls back safely without creating a fifth", async () => {
+    const { workbench, open, internal } = setup({
+      layoutPolicy: createLayoutPolicy({ maxRows: 2, maxColumns: 2, maxTabsets: 4 }),
+    });
+    const a = await open("A");
+    const upperRight = await open("B", { target: a.containerId, location: DockLocation.RIGHT });
+    const lowerLeft = await open("C", { target: a.containerId, location: DockLocation.BOTTOM });
+    const lowerRight = await open("D", {
+      target: upperRight.containerId,
+      location: DockLocation.BOTTOM,
+    });
+    workbench.activate(lowerLeft.id);
+    workbench.activate(lowerRight.id);
+    const above = await open("E", {
+      placement: { mode: "split", source: lowerRight.id, direction: DockLocation.TOP },
+      preserveFocus: true,
+    });
+    expect(above.containerId).toBe(upperRight.containerId);
+    const fallback = await open("F", {
+      placement: { mode: "split", source: lowerRight.id, direction: DockLocation.BOTTOM },
+      preserveFocus: true,
+    });
+    expect(fallback.containerId).toBe(lowerLeft.containerId);
+    expect(getLayoutTopology(internal.model)).toEqual({ rows: 2, columns: 2, tabsets: 4 });
+  });
+
+  it("rejects a split when the only other pane contains the focused tool", async () => {
+    const { workbench, open, internal } = setup({
+      tools: [{ id: "inspector", render: () => null }],
+    });
+    const a = await open("A");
+    const b = await open("B", { location: DockLocation.RIGHT });
+    workbench.activate(a.id);
+    await workbench.dispatch(
+      Actions.addTab(
+        { id: "inspector", component: "worksplit.tool" },
+        b.containerId,
+        DockLocation.CENTER,
+        -1,
+        true,
+      ),
+    );
+    internal.focus("inspector", "tool");
+    const before = workbench.snapshot();
+    expect(await workbench.open(nav("C"), { placement: { mode: "split", source: a.id } })).toEqual({
+      status: "rejected",
+      reason: "focus-conflict",
+    });
+    expect(
+      await workbench.open(nav("D"), {
+        placement: { mode: "split", source: "inspector" },
+        preserveFocus: true,
+      }),
+    ).toEqual({ status: "rejected", reason: "focus-conflict" });
+    expect(workbench.snapshot()).toEqual(before);
+  });
+
+  it.each(["move", "close"] as const)(
+    "does not admit a delayed document after its placement source is %s",
+    async (change) => {
+      const gate = deferred();
+      const { workbench, open } = setup({}, (id) => (id === "C" ? gate.promise : undefined));
+      const a = await open("A");
+      const b = await open("B", { location: DockLocation.RIGHT });
+      const pending = workbench.open(nav("C"), { placement: { mode: "split", source: a.id } });
+      if (change === "move")
+        await workbench.dispatch(Actions.moveNode(a.id, b.containerId, DockLocation.CENTER, -1));
+      else await workbench.close(a.id);
+      gate.resolve();
+      expect(await pending).toEqual({ status: "superseded" });
+      expect(workbench.getDocuments().some((document) => document.href.includes("/C"))).toBe(false);
+    },
+  );
+
+  it("rejects mixed placement options before loading", async () => {
+    const loader = vi.fn<(id: string) => void>();
+    const { workbench, open } = setup({}, loader);
+    const a = await open("A");
+    const before = workbench.snapshot();
+    expect(
+      await workbench.open(nav("B"), {
+        placement: { mode: "split", source: a.id },
+        target: a.containerId,
+      }),
+    ).toMatchObject({ status: "failed", stage: "load" });
+    expect(loader.mock.calls.filter(([id]) => id === "B")).toHaveLength(0);
+    expect(workbench.snapshot()).toEqual(before);
+  });
+
   it("admits directly beside the captured document with one native insertion and projects its container", async () => {
     const { workbench, open, internal } = setup();
     const a = await open("A");

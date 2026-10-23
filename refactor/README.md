@@ -45,7 +45,7 @@ Worksplit 接管的入口只有会话协调需要的部分：Model、内容 fact
 
 浮动、popout、多窗口、sublayout、Model replacement/undo 和任意组件插入未进入当前文档会话契约。
 适用的原生呈现与布局功能自然沿用；无法经公开扩展点协调的能力明确收窄，不 patch 上游或模拟第二个 Model。
-FlexLayout 0.11.1 整 TabSet 删除 TabGroup 的兼容处理仅转换为获准的原生叶删除，整理仍由 FlexLayout 完成。
+FlexLayout 0.11.1 整 TabSet 删除 TabGroup 的兼容处理仅转换为获准的原生叶删除，整理仍由 FlexLayout 完成。当前小补丁另公开 `ILayoutApi.endDrag()`：原生负责清除其拖拽状态，Worksplit 不通过私有 manager 或伪造事件清理取消。补丁与独立消费者要求见 README。
 
 ## 路由、操作与焦点
 
@@ -53,7 +53,7 @@ FlexLayout 0.11.1 整 TabSet 删除 TabGroup 的兼容处理仅转换为获准�
 应用借出登录态、服务和缓存；Router 的 Wrap/InnerWrap 提供每文档 provider，root route 组织可见内容 chrome。
 工具使用普通 React renderer，既不创建 Router，也不参与文档 URL 所有权。
 
-`open` 是跨文档入口，负责最终身份去重；新接纳位置直接使用原生 `target`/`DockLocation`，目标在调用时捕获、接纳时复核。`containerId` 是来源文档的原生容器投影，`preserveFocus` 协调可见旁开而保留来源活动文档/URL/DOM焦点。它们不形成另一套区域或业务布局工作流。文档内 Link/navigate 沿用其 Router 的行为。
+`open` 是跨文档入口，负责最终身份去重；精确接纳使用原生 `target`/`DockLocation`，通用入口用 `placement` 声明普通标签或优先复用其他窗格的分屏。来源在调用时捕获、接纳时复核；恰好两窗格时忽略方向并复用另一安全组；三／四窗格按原生父链及方向选择安全组，三组可在布局政策允许时补为四组，四组只复用。单窗格按方向新建，初始比例使用原生权重，复用时不重设尺寸。`containerId` 是来源文档的原生容器投影，`preserveFocus` 协调可见旁开而保留来源活动文档/URL/DOM焦点。`createLink` 让点击与显式图标拖拽共享目标和异步接纳，延迟目标只在执行时解析。它们不形成另一套区域或业务布局工作流。文档内 Link/navigate 沿用其 Router 的行为。
 原生导航的最终身份冲突保留两个文档实例并报告，不合并或删除实例，也不回滚 Router 已接受的导航。
 这是从最初全入口去重目标收敛后的实际边界，避免复制 Router 导航流水线；完整语义见 [文档操作](../README.md#document-operations-and-completion)。
 

@@ -7,6 +7,7 @@ import {
   memo,
   useContext,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   type HTMLAttributes,
@@ -198,6 +199,9 @@ export function Workbench({
 }: WorkbenchProps) {
   const internal = integrationState(workbench);
   const root = useRef<HTMLDivElement>(null);
+  const nativeLayout = useRef<ILayoutApi>(null);
+  useImperativeHandle(layoutRef, () => nativeLayout.current!);
+  useEffect(() => internal.documentLinks.attach(() => nativeLayout.current), [internal]);
   const factory = useMemo(
     () => (node: TabNode) => <Content id={node.getId()} instance={workbench} />,
     [workbench],
@@ -285,7 +289,7 @@ export function Workbench({
       <div className="worksplit-native-layout">
         <Layout
           {...native}
-          ref={layoutRef}
+          ref={nativeLayout}
           model={internal.model}
           factory={factory}
           onAction={internal.modelAction}

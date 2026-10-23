@@ -60,11 +60,14 @@ peers: the host owns their compatible versions and shared React contexts. Their 
 dependencies remain owned by the upstream packages; `@worksplit/core` is a regular dependency.
 
 FlexLayout 0.11.1 requires [the included native patch](patches/flexlayout-react@0.11.1.patch)
-to retain a TabSet and its document when removing the last member from a TabGroup. This workspace
+to retain a TabSet and its document when removing the last member from a TabGroup, and to expose
+`ILayoutApi.endDrag()` for cancelling a link drag without leaving native overlays or static drag state. This workspace
 applies it with pnpm `patchedDependencies`. A consuming application must apply the same patch to
 its own FlexLayout peer; packed library archives do not transfer package-manager patches. Keep
 host and library copies identical, and remove both only after a native upgrade passes the singleton
-and dynamic-batch group regression tests. Worksplit continues to execute the original native Actions.
+and dynamic-batch group regression tests plus document-link cancellation checks. `endDrag()` only ends
+a drag owned by that Layout; Worksplit does not reach into a private native manager. Worksplit continues
+to execute the original native Actions.
 
 Use TypeScript `moduleResolution: "Bundler"`. Import Worksplit's public React entry and CSS,
 and import native types, Actions and the selected theme directly from `flexlayout-react`.
@@ -241,6 +244,96 @@ claiming activation or selecting the destination tab. An empty native TabSet may
 `selected: -1` until an explicit native selection; a committed background session does not imply
 visible content. The most recent foreground open supersedes older foreground opens;
 activation separately revokes a pending request's right to take focus or write the URL.
+
+### Choosing a tab or another pane
+
+For an entrance that should cooperate with the current layout, supply `placement` instead of native
+`target`/`location`. These two forms cannot be combined:
+
+```tsx
+import { DockLocation } from "flexlayout-react";
+
+// Within a document, content is returned by useWorkbenchContent().
+const link = workbench.createLink(
+  { to: "/documents/$id", params: { id: "B" } },
+  {
+    placement: { mode: "split", source: content.id, direction: DockLocation.BOTTOM, ratio: 0.35 },
+    reuse: "preserve",
+  },
+  (result) => {
+    if (result.status === "failed") console.error(result.error);
+  },
+);
+// A direct tab entrance uses placement: { mode: "tab", source: content.id }.
+```
+
+`source` is a live document/tool content id, including content in a TabGroup; omission captures the
+active/first central TabSet. `mode: "tab"` uses its container. For `mode: "split"`:
+
+- With exactly two central panes, reuse the other safe pane regardless of preferred direction.
+- With three or four panes, prefer safe panes in the requested direction, then an eligible preview
+  within that direction, document MRU and native layout order. Direction comes from native parent
+  links, row orientation and child order, without a second geometry model.
+- With three panes and no matching safe pane, try adding in the preferred then orthogonal direction
+  through the native layout policy before falling back to other safe panes. With four panes,
+  only reuse existing panes; do not automatically create a fifth.
+- With one pane, try the preferred then orthogonal split. If all existing other panes conflict with
+  source/focus protection, reject the request rather than bypassing protection by adding a pane.
+
+The host's layout policy still controls topology and limits, such as a maximum 2×2 arrangement.
+
+New splits default to bottom with a 0.35 share for the new pane. `direction` can be any native edge;
+a topology refusal tries the orthogonal direction. `ratio` must be finite and strictly between 0
+and 1. Native minimum sizes still apply; this is an initial weight preference, not a fixed pixel
+height. Reusing a pane never resets its size. An empty initial workspace admits into its existing
+pane without creating an empty source pane. A Border source uses the active central pane as its
+split anchor. Plain native placement remains available for exact commands and native drag targets.
+
+The source node/container are captured before asynchronous routing and checked before admission.
+Moving or removing them supersedes the request. Available other panes are selected after loading,
+so a pane the user created while waiting is reused. Routing runs once, not once per fallback. Only
+layout-policy refusals try another candidate; load, draft and focus failures retain their meaning.
+Identity reuse still takes precedence: it neither moves an existing tab nor creates a duplicate.
+
+`placement` is independent of `preview`, `preserveFocus` and `background`. A split can hold an
+ordinary foreground document, or an explicitly replaceable preview retaining source focus.
+
+### Click and drag share one document link
+
+`createLink(navigation, options, onResult?)` returns a `DocumentLink` with `href`, read-only `options`,
+`open(overrides?)`, `dragStart(event)` and `dragEnd()`. A direct target resolves its public URL once.
+An asynchronous target resolver is also accepted; its `href` is undefined until resolution, and it
+runs only for an open or an actual drop, never while dragging or cancelling. Use this when the real
+resource scope must be read first; do not manufacture a URL or prefetch every visible row.
+
+Compose the descriptor with the host's existing button/link components. Keep selectable data text
+separate from the draggable icon. A minimal icon handle is:
+
+```tsx
+<button
+  type="button"
+  aria-label="Open related document; drag to choose its pane"
+  draggable
+  onClick={() => void link.open()}
+  onDragStart={link.dragStart}
+  onDragEnd={link.dragEnd}
+>
+  Open
+</button>
+```
+
+Hosts should suppress a pointer click generated after dragging, retain keyboard activation, and
+provide a visible icon plus tooltip explaining its default placement. Worksplit owns the drag
+session; it uses native docking feedback and intercepts the final native insertion before opening
+the routed document. No placeholder document is inserted into the live Model. Cancellation,
+unmount and disposal clear the registered native drag through the public `endDrag()` patch.
+
+Link drops accept central TabSet centers and their four edges. Center appends a tab; an edge is an
+explicit request to create a split subject to the same topology/drop policy. Border targets,
+TabGroup strip insertion, whole-root edges and cross-window dragging are outside this link API.
+Existing native tabs retain their normal native drag capabilities. A drop overrides automatic
+placement, opens an ordinary foreground document and keeps a reused preview; an existing identity
+is revealed in place, not silently moved. To move that tab, drag its native tab instead.
 
 The nearest matched route declaring `staticData.worksplit` owns identity. Its parsed params and
 optional `identitySearch` fields determine reuse; other search fields and hash are view state.

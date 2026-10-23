@@ -261,7 +261,7 @@ native source-group removal after its final tab moves. Borders do not count. The
 uses a short-lived native Model for prediction without retaining a second layout, triggering live
 save listeners or reimplementing tidy. The authoritative Model remains unique. Unsupported
 multi-step docking batches are refused, not partly applied. Snapshot conversion and choosing
-product-specific detail placement remain host responsibilities.
+product-specific preferred directions remain host responsibilities; reusable pane selection belongs to `placement`.
 
 One content has one live lifecycle owner. Duplicate registration throws before ownership transfer;
 the caller keeps its rejected resources. Navigation decisions receive `{ id, from, to }`, while
@@ -271,7 +271,9 @@ focus waits for registration and is cancelled when real user interaction or disp
 
 ## Programmatic document placement
 
-`open` and `duplicate` accept native `target` and `location`. A new document is routed, deduplicated
+`open` and `duplicate` accept native `target` and `location`. `open` also accepts `placement`
+for a direct tab or an automatic split that prioritizes existing safe central panes; see the
+[public placement and link contract](../README.md#choosing-a-tab-or-another-pane). A new document is routed, deduplicated
 and admitted with one native ADD at that location. Existing identities keep their current placement.
 The default container is captured at invocation and checked for live node identity before admission;
 a removed target fails, while a successful identity reuse does not depend on that old placement.

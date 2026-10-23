@@ -12,6 +12,8 @@ export {
   type SplitViewSashRenderInfo,
 } from "./split-view";
 export type { PaneSizeValue, SplitLayout, SplitOrientation } from "@worksplit/core";
+export type { DocumentLink, DocumentLinkResultHandler } from "./document-link";
+export type { DocumentPlacement } from "./document-placement";
 export {
   createLayoutPolicy,
   getLayoutTopology,

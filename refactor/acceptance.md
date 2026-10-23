@@ -19,7 +19,7 @@
 
 原 Pluxel 的 ` M vendor/split-like-vscode` 和其已偏离记录的子模块位置 `+e607932…` 保持原状。
 没有改 Pluxel 源码、依赖、索引或子模块指针。内部验收阶段未推送、合并或发布；后续独立项目试用的
-checkout、打包与安装入口维护在 [公开试用步骤](../README.md#try-this-branch-in-another-project)。
+checkout、打包与安装入口维护在 [公开试用步骤](../README.md#install-from-source)。
 
 ## 实施结果与版本证据
 
@@ -360,3 +360,18 @@ React Store 和 React Hotkeys 现在也需要宿主显式提供兼容 peer；动
 startup/history and content lifecycle under real development React StrictMode. Fresh package
 consumption retains native document routing and default demo homepage behavior. Financial
 application migration and HeroUI integration remain separate application acceptance work.
+
+## Configurable placement and document links (2026-10-23)
+
+Targeted `document-placement.test.ts` passes **33/33** and `document-link.test.ts` passes **12/12**.
+The cases cover exactly-two-pane reuse, directional three/four-pane placement, policy fallback,
+new split weights without resetting existing sizes, routed direct/deferred drops, cancellation,
+unmount, stale source/target ownership, preview retention and rejected public fake-tab insertion.
+React package and registered-consumer type checks, package compilation and changed-file format/lint
+checks also pass in the consuming financial workspace. The host consumes the same native patch
+for singleton groups and the public `ILayoutApi.endDrag()` cancellation entry point.
+
+This is unit/static evidence. Browser dragging, keyboard/focus, text selection, multi-pane visual
+layout, fresh packed installation and full workspace verification were not run for this increment;
+the financial application's user is handling interactive acceptance. Earlier browser and package
+results in this document do not cover these new APIs.

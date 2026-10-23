@@ -69,7 +69,7 @@ overrides:
   vite@*: npm:@voidzero-dev/vite-plus-core@1.2.0
 
 patchedDependencies:
-  flexlayout-react@0.11.1: e3804bebeebfdd5f89ece54acf9f16b76c36f9128c7e87bd34d4de132210d82f
+  flexlayout-react@0.11.1: 14f3b32f3b39b3902e90af5208f80789600646fa3d0308fa1ccb52165986fb83
 
 importers:
 
@@ -122,7 +122,7 @@ importers:
         version: link:../react
       flexlayout-react:
         specifier: catalog:frontend
-        version: 0.11.1(patch_hash=e3804bebeebfdd5f89ece54acf9f16b76c36f9128c7e87bd34d4de132210d82f)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        version: 0.11.1(patch_hash=14f3b32f3b39b3902e90af5208f80789600646fa3d0308fa1ccb52165986fb83)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       react:
         specifier: catalog:frontend
         version: 19.3.0
@@ -169,7 +169,7 @@ importers:
         version: 19.3.0(@types/react@19.3.0)
       flexlayout-react:
         specifier: catalog:frontend
-        version: 0.11.1(patch_hash=e3804bebeebfdd5f89ece54acf9f16b76c36f9128c7e87bd34d4de132210d82f)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        version: 0.11.1(patch_hash=14f3b32f3b39b3902e90af5208f80789600646fa3d0308fa1ccb52165986fb83)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       jsdom:
         specifier: catalog:dev
         version: 30.1.2
@@ -2263,7 +2263,7 @@ snapshots:
 
   flatted@3.4.4: {}
 
-  flexlayout-react@0.11.1(patch_hash=e3804bebeebfdd5f89ece54acf9f16b76c36f9128c7e87bd34d4de132210d82f)(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
+  flexlayout-react@0.11.1(patch_hash=14f3b32f3b39b3902e90af5208f80789600646fa3d0308fa1ccb52165986fb83)(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
     dependencies:
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)

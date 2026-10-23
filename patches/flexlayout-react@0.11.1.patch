@@ -1,8 +1,7 @@
 diff --git a/dist/index.js b/dist/index.js
-index 78f64a837000a6a49a312810da5f1123628c4b03..443a0e06fa97128668fba2a091eb1fdb2907a8e8 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -2807,11 +2807,13 @@ var Model = class Model {
+@@ -2807,11 +2807,13 @@
  			const group = tab.getParent();
  			const tabset = group.getTabContainer();
  			const groupIndex = tabset.getChildren().indexOf(group);
@@ -17,3 +16,26 @@ index 78f64a837000a6a49a312810da5f1123628c4b03..443a0e06fa97128668fba2a091eb1fdb
  		}
  	}
  	/** @internal */
+@@ -9433,6 +9435,10 @@
+ 		addTabWithDragAndDrop: (event, json, onDrop) => {
+ 			controllerRef.current?.addTabWithDragAndDrop(event, json, onDrop);
+ 		},
++		endDrag: () => {
++			const controller = controllerRef.current;
++			if (controller && DragDropManager.dragState?.mainLayoutController === controller.getMainController()) controller.getDragDropManager().onDragEnded();
++		},
+ 		moveTabWithDragAndDrop: (event, node) => {
+ 			controllerRef.current?.moveTabWithDragAndDrop(event, node);
+ 		},
+diff --git a/types/view/Layout.d.ts b/types/view/Layout.d.ts
+--- a/types/view/Layout.d.ts
++++ b/types/view/Layout.d.ts
+@@ -118,6 +118,8 @@
+      * @param onDrop a callback to call when the drag is complete
+      */
+     addTabWithDragAndDrop(event: DragEvent, json: IJsonTabNode, onDrop?: (node?: Node, event?: React.DragEvent<HTMLElement>) => void): void;
++    /** End a drag owned by this Layout and clear its native docking overlays. */
++    endDrag(): void;
+     /**
+      * Move a tab/tabset using drag and drop, must be called from within an HTML
+      * drag start handler

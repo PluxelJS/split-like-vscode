@@ -24,6 +24,17 @@ import type { ReactNode } from "react";
 
 import { BrowserHistoryCoordinator } from "./browser-history";
 import { createDocumentHistory, navigateDocument } from "./document-history";
+import {
+  DocumentLinkController,
+  type DocumentLink,
+  type DocumentLinkResultHandler,
+} from "./document-link";
+import {
+  applySplitRatio,
+  centralTabsets,
+  isInSplitDirection,
+  type DocumentPlacement,
+} from "./document-placement";
 import type { WorkbenchLayoutPolicy } from "./layout-policy";
 import { actionsIn, closedGroup, revealTab, tabContainer, tabsIn } from "./native-layout";
 
@@ -151,6 +162,8 @@ export interface WorkbenchOptions<TRouter extends AnyRouter> {
   }) => void;
 }
 export interface OpenDocumentOptions {
+  /** Automatic placement for a new document; cannot be combined with target/location. */
+  placement?: DocumentPlacement;
   /** Native TabSet/Border target, captured at invocation and revalidated before admission. */
   target?: string;
   /** New admission only; defaults to CENTER. Edge locations require a central TabSet. */
@@ -178,6 +191,7 @@ type DocumentSession = {
   release: (() => void)[];
 };
 class FocusConflict extends Error {}
+class PlacementChanged extends Error {}
 type OpenPresentation = {
   focus: number;
   background: boolean;
@@ -188,6 +202,7 @@ type OpenPresentation = {
 };
 type Internal = {
   model: Model;
+  documentLinks: DocumentLinkController;
   documents: Map<string, DocumentSession>;
   store: ReturnType<typeof createStore<WorkbenchState>>;
   tools: Map<string, WorkbenchTool>;
@@ -266,8 +281,19 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     const documents = new Map<string, DocumentSession>();
     const tools = new Map((options.tools ?? []).map((tool) => [tool.id, tool]));
     if (tools.size !== (options.tools?.length ?? 0)) throw new Error("Duplicate Worksplit tool id");
+    const documentLinks = new DocumentLinkController(
+      model,
+      (drag, target, location) => this.allowMove(drag, target, location),
+      options.layoutPolicy,
+      (id) => {
+        this.keep(id);
+        return this.getDocument(id);
+      },
+      (error) => this.issue("operation-failed", error),
+    );
     this.state = {
       model,
+      documentLinks,
       documents,
       tools,
       commands: options.commands ?? [],
@@ -290,6 +316,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         }));
       },
       modelAction: (action) => {
+        if (documentLinks.consume(action)) return undefined;
         void this.dispatch(action).catch((error: unknown) => this.issue("operation-failed", error));
         return undefined;
       },
@@ -335,9 +362,10 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       throw new Error("Snapshot violates layout policy; explicitly convert it before restoring");
     model.setOnAllowDrop(
       (drag, drop) =>
-        this.allowMove(drag, drop.node, drop.location) &&
-        (options.layoutPolicy?.allowsDrop(model, drag, drop.node, drop.location, drop.index) ??
-          true),
+        documentLinks.allowsDrop(drag, drop.node, drop.location) ??
+        (this.allowMove(drag, drop.node, drop.location) &&
+          (options.layoutPolicy?.allowsDrop(model, drag, drop.node, drop.location, drop.index) ??
+            true)),
     );
     if (options.allowDrop) {
       model.visitNodes((node) => {
@@ -389,6 +417,78 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       navigation as Parameters<AnyRouter["buildLocation"]>[0],
     );
     return this.openHref(location.publicHref, options, !!navigation.replace);
+  }
+
+  /** One routed target for activation and native docking, with optional lazy resolution. */
+  createLink<const TFrom extends string = string, const TTo extends string | undefined = ".">(
+    navigation:
+      | NavigateOptions<TRouter, TFrom, TTo>
+      | (() => Promise<NavigateOptions<TRouter, TFrom, TTo>>),
+    options: OpenDocumentOptions = {},
+    onResult?: DocumentLinkResultHandler,
+  ): DocumentLink {
+    const deferred = typeof navigation === "function";
+    const configuredSource = options.placement?.source;
+    let href = deferred
+      ? undefined
+      : this.resolver.buildLocation(navigation as Parameters<AnyRouter["buildLocation"]>[0])
+          .publicHref;
+    const replace = !deferred && !!navigation.replace;
+    return this.state.documentLinks.create(
+      () => href,
+      async (requested, current) => {
+        if (!current() || this.disposed) return { status: "rejected", reason: "closed" };
+
+        // Keep the initiating content and explicit drop target alive through resolution
+        // and route loading, even when a drop replaces the configured placement.
+        const focus = this.focusEpoch;
+        const editing = this.state.store.get();
+        const sourceId =
+          requested.placement?.source ??
+          configuredSource ??
+          (editing.focusedArea === "document" || editing.focusedArea === "tool"
+            ? editing.focusedTabId
+            : null) ??
+          editing.activeDocumentId;
+        const source = sourceId ? this.state.model.getNodeById(sourceId) : undefined;
+        const sourceContainer = tabContainer(source);
+        if (sourceId && !source) return { status: "rejected", reason: "closed" };
+        const targetId =
+          requested.target ??
+          (deferred && !requested.placement
+            ? (this.state.model.getActiveTabset()?.getId() ??
+              this.state.model.getFirstTabSet()?.getId())
+            : undefined);
+        const target = targetId ? this.state.model.getNodeById(targetId) : undefined;
+        if (targetId && !target) return { status: "rejected", reason: "closed" };
+        const owned = () =>
+          current() &&
+          !this.disposed &&
+          (requested.background || focus === this.focusEpoch) &&
+          (!sourceId ||
+            (this.state.model.getNodeById(sourceId) === source &&
+              tabContainer(source) === sourceContainer)) &&
+          (!targetId || this.state.model.getNodeById(targetId) === target);
+        if (!deferred) return this.openHref(href!, requested, replace, owned);
+        // Reserve foreground admission before resolving an application-owned target.
+        const epoch = requested.background ? this.openEpoch : ++this.openEpoch;
+        const resolved = await navigation();
+        if (!owned() || (!requested.background && epoch !== this.openEpoch))
+          return { status: "superseded" };
+        href = this.resolver.buildLocation(
+          resolved as Parameters<AnyRouter["buildLocation"]>[0],
+        ).publicHref;
+        const captured = { ...requested };
+        if (captured.placement && !captured.placement.source && sourceId)
+          captured.placement = { ...captured.placement, source: sourceId };
+        else if (!captured.placement && targetId) captured.target = targetId;
+        // This is the same admission pipeline as open(); keep the original ownership
+        // check alive through Router loaders as well as through the deferred resolver.
+        return this.openHref(href, captured, !!resolved.replace, owned);
+      },
+      options,
+      onResult,
+    );
   }
 
   /** Copy committed view conditions, never a draft, into a new ordinary document lifetime. */
@@ -956,6 +1056,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       finish = resolve;
     });
     this.disposed = true;
+    this.state.documentLinks.dispose();
     this.cancelContentFocus();
     ++this.openEpoch;
     const errors: unknown[] = [];
@@ -1114,26 +1215,88 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       replace,
       fromPop,
     };
-    const location = options.location ?? DockLocation.CENTER;
+    const placement = options.placement ? { ...options.placement } : undefined;
+    let placementSource: TabNode | undefined;
+    let placementContainer: TabSetNode | BorderNode | undefined;
+    let placementAnchor: TabSetNode | undefined;
+    const liveNode = (candidate: Node | undefined) => {
+      let live = false;
+      this.state.model.visitNodes((node) => {
+        if (node === candidate) live = true;
+      });
+      return live;
+    };
+    const placementCurrent = () =>
+      !placement ||
+      (liveNode(placementContainer) &&
+        (placement.mode === "tab" || liveNode(placementAnchor)) &&
+        (!placementSource ||
+          (liveNode(placementSource) && tabContainer(placementSource) === placementContainer)));
+    let location = options.location ?? DockLocation.CENTER;
     const initialPreview =
       options.preview && !options.newInstance && options.location === undefined
         ? [...this.state.documents.values()].find((session) => session.preview)
         : undefined;
-    const target =
+    let target =
       options.target ??
       (initialPreview
         ? tabContainer(this.state.model.getNodeById(initialPreview.id))?.getId()
         : undefined) ??
       this.state.model.getActiveTabset()?.getId() ??
       this.state.model.getFirstTabSet()?.getId();
-    const targetNode = target ? this.state.model.getNodeById(target) : undefined;
+    let targetNode = target ? this.state.model.getNodeById(target) : undefined;
     const valid = () =>
       !this.disposed &&
       current() &&
+      placementCurrent() &&
       (options.background || epoch === this.openEpoch) &&
       (!options.preview || options.newInstance || focus === this.focusEpoch);
     let router: AnyRouter | undefined;
     try {
+      if (placement) {
+        if (options.target !== undefined || options.location !== undefined)
+          throw new Error("Document placement cannot be combined with target/location");
+        if (placement.mode !== "tab" && placement.mode !== "split")
+          throw new Error("Unsupported document placement mode");
+        if (placement.mode === "split") {
+          if (
+            placement.direction !== undefined &&
+            ![
+              DockLocation.BOTTOM,
+              DockLocation.RIGHT,
+              DockLocation.TOP,
+              DockLocation.LEFT,
+            ].includes(placement.direction)
+          )
+            throw new Error("Split placement requires an edge direction");
+          if (
+            placement.ratio !== undefined &&
+            (!Number.isFinite(placement.ratio) || placement.ratio <= 0 || placement.ratio >= 1)
+          )
+            throw new Error("Split ratio must be greater than zero and less than one");
+        }
+        if (placement.source !== undefined) {
+          const node = this.state.model.getNodeById(placement.source);
+          if (
+            !(node instanceof TabNode) ||
+            (!this.state.documents.has(placement.source) &&
+              !this.state.tools.has(placement.source)) ||
+            !liveNode(node)
+          )
+            throw new Error(`Unknown document placement source ${placement.source}`);
+          placementSource = node;
+          placementContainer = tabContainer(node);
+        } else {
+          placementContainer =
+            this.state.model.getActiveTabset() ?? this.state.model.getFirstTabSet();
+        }
+        placementAnchor =
+          placementContainer instanceof TabSetNode
+            ? placementContainer
+            : (this.state.model.getActiveTabset() ?? this.state.model.getFirstTabSet());
+        if (!placementCurrent())
+          throw new Error("Document placement requires a live central Tabset");
+      }
       // Exact accepted URLs can be reused without speculative loaders.
       const active = this.state.store.get().activeDocumentId;
       const exact =
@@ -1223,6 +1386,104 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         ? [...this.state.documents.values()].find((session) => session.preview)
         : undefined;
       const id = this.freshId();
+      const title = this.routeMetadata(router)?.title ?? router.state.location.publicHref;
+      const insertionFor = (destination: string, direction: DockLocation) =>
+        Actions.addTab(
+          {
+            type: "tab",
+            id,
+            name: title,
+            component: DOCUMENT_COMPONENT,
+            config: { href: router!.state.location.publicHref, multi: !!options.newInstance },
+            enableFloat: false,
+            enablePopout: false,
+          },
+          destination,
+          direction,
+          -1,
+          false,
+        );
+      if (placement) {
+        let candidates: { node: TabSetNode | BorderNode; location: DockLocation }[];
+        if (placement.mode === "tab") {
+          candidates = [{ node: placementContainer!, location: DockLocation.CENTER }];
+        } else {
+          const central = centralTabsets(this.state.model);
+          const direction = placement.direction ?? DockLocation.BOTTOM;
+          const fallback =
+            direction === DockLocation.BOTTOM || direction === DockLocation.TOP
+              ? DockLocation.RIGHT
+              : DockLocation.BOTTOM;
+          const splits = [direction, fallback].map((edge) => ({
+            node: placementAnchor!,
+            location: edge,
+          }));
+          if (central.length > 1) {
+            const context = this.state.store.get();
+            const focused =
+              context.focusedArea === "document" || context.focusedArea === "tool"
+                ? this.state.model.getNodeById(context.focusedTabId ?? "")
+                : undefined;
+            const excluded = new Set([
+              placementContainer,
+              placementAnchor,
+              tabContainer(focused),
+              options.preserveFocus
+                ? tabContainer(this.state.model.getNodeById(sourceId ?? ""))
+                : undefined,
+              options.preserveFocus
+                ? tabContainer(this.state.model.getNodeById(context.activeDocumentId ?? ""))
+                : undefined,
+            ]);
+            const safe = central.filter((node) => !excluded.has(node));
+            if (safe.length === 0) throw new FocusConflict("No safe existing document container");
+            const ordered = [
+              previousPreview
+                ? tabContainer(this.state.model.getNodeById(previousPreview.id))
+                : undefined,
+              ...this.mru.map((documentId) =>
+                tabContainer(this.state.model.getNodeById(documentId)),
+              ),
+              ...central,
+            ];
+            const reusable = [...new Set(ordered)]
+              .filter(
+                (node): node is TabSetNode => node instanceof TabSetNode && safe.includes(node),
+              )
+              .map((node) => ({ node, location: DockLocation.CENTER }));
+            if (central.length === 2) {
+              // Two panes already provide the companion space, regardless of preference.
+              candidates = reusable;
+            } else {
+              const directional = reusable.filter(({ node }) =>
+                isInSplitDirection(placementAnchor!, node, direction),
+              );
+              candidates = [
+                ...directional,
+                ...(central.length < 4 ? splits : []),
+                ...reusable.filter((candidate) => !directional.includes(candidate)),
+              ];
+            }
+          } else if (placementAnchor!.getChildren().length === 0) {
+            candidates = [{ node: placementAnchor!, location: DockLocation.CENTER }];
+          } else {
+            candidates = splits;
+          }
+        }
+        const accepted = candidates.find(
+          (candidate) =>
+            !this.options.layoutPolicy ||
+            this.options.layoutPolicy.allowsAction(
+              this.state.model,
+              insertionFor(candidate.node.getId(), candidate.location),
+            ),
+        );
+        if (!accepted) return { status: "rejected", reason: "layout-policy" };
+        if (!placementCurrent()) return { status: "superseded" };
+        targetNode = accepted.node;
+        target = accepted.node.getId();
+        location = accepted.location;
+      }
       if (!target) throw new Error("Layout requires a central Tabset for opening documents");
       // fromJson can leave pruned empty Tabsets in the upstream idMap until its next Action.
       // Validate the live tree rather than admitting content into a detached old container.
@@ -1256,7 +1517,6 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         contentVersion: 0,
         release: [],
       };
-      const title = this.routeMetadata(router)?.title ?? session.href;
       const model = this.state.model;
       const previousActive = model.getActiveTabset();
       const destination = targetNode as TabSetNode | BorderNode;
@@ -1291,22 +1551,12 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           this.selecting = selecting;
         }
       };
-      const insertion = Actions.addTab(
-        {
-          type: "tab",
-          id,
-          name: title,
-          component: DOCUMENT_COMPONENT,
-          config: { href: session.href, multi: session.multi },
-          enableFloat: false,
-          enablePopout: false,
-        },
-        target,
-        location,
-        -1,
-        false,
-      );
-      if (this.options.layoutPolicy && !this.options.layoutPolicy.allowsAction(model, insertion))
+      const insertion = insertionFor(target, location);
+      if (
+        !placement &&
+        this.options.layoutPolicy &&
+        !this.options.layoutPolicy.allowsAction(model, insertion)
+      )
         return { status: "rejected", reason: "layout-policy" };
       const weights = new Map<RowNode | TabSetNode, number>();
       if (location !== DockLocation.CENTER)
@@ -1327,8 +1577,25 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           (this.options.layoutPolicy && !this.options.layoutPolicy.allows(model))
         )
           throw new Error(`Docking policy rejected document in ${target}`);
+        if (placement && (!placementCurrent() || !liveNode(destination)))
+          throw new PlacementChanged("Document placement changed before admission");
+        if (
+          placement?.mode === "split" &&
+          location !== DockLocation.CENTER &&
+          destination instanceof TabSetNode &&
+          provisionalContainer instanceof TabSetNode
+        )
+          applySplitRatio(model, destination, provisionalContainer, placement.ratio ?? 0.35);
         if (options.background || options.preserveFocus || focus !== this.focusEpoch)
           restoreSelection();
+        if (
+          placement &&
+          (!placementCurrent() ||
+            !liveNode(destination) ||
+            !liveNode(node) ||
+            tabContainer(node) !== provisionalContainer)
+        )
+          throw new PlacementChanged("Document placement changed during native admission");
       } catch (error) {
         const errors = [error];
         provisionalContainer ??= tabContainer(model.getNodeById(id));
@@ -1402,6 +1669,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       }
       return { status: "committed", document: this.getDocument(id)!, reused: false };
     } catch (error) {
+      if (error instanceof PlacementChanged) return { status: "superseded" };
       if (error instanceof FocusConflict) return { status: "rejected", reason: "focus-conflict" };
       this.issue("operation-failed", error);
       return { status: "failed", stage: "load", error };
