@@ -12,6 +12,7 @@
 | 导航、历史、关闭及原生操作的行为边界   | [行为契约](../docs/vscode-workbench-behavior.md) |
 | 模块职责与后续修改约束                 | 本页                                             |
 | 已验证场景、截图、资源成本与未验证范围 | [验收记录](acceptance.md)                        |
+| 评审资源接入与 API 精进方向（未实现）  | [精进提案](API_REFINEMENT_PROPOSAL.md)           |
 
 ## 单一所有权
 

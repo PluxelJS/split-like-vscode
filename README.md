@@ -19,6 +19,7 @@ state and snapshots. Pluxel consumes the native Workbench API. Applications that
 | Install in another React application         | [Source checkout](#install-from-source)                                                                               |
 | Create a routed workspace                    | [Initialization](#a-complete-routed-workspace)                                                                        |
 | Guard edits and own resource cleanup         | [Content decisions](#content-decisions-commands-and-resources)                                                        |
+| Attach RPC capabilities and other resources  | [Resource ownership and Cap’n Web](docs/resource-lifetimes.md)                                                        |
 | Customize shell, providers and native Layout | [Host customization](#customize-the-host-with-native-apis)                                                            |
 | Use application stores and dynamic shortcuts | [Store and Hotkeys](#host-shortcuts-and-frontend-stores)                                                              |
 | Change the integration or assess its limits  | [Architecture](refactor/README.md), [behavior](docs/vscode-workbench-behavior.md), [evidence](refactor/acceptance.md) |
@@ -397,6 +398,10 @@ The imperative `useWorkbenchContent().register(lifecycle)` returns an immediate 
 it throws for removed/replaced content or a second live owner. Register one stable lifecycle per
 content; compose business editor resources inside that owner instead of overwriting the registration. A rejected registration has not transferred resource
 ownership, so the caller still releases any resources it acquired.
+
+For asynchronous acquisition, late results after close and shared connections, see
+[resource ownership and the Cap’n Web example](docs/resource-lifetimes.md). The integration uses
+these public lifecycle APIs; protocol dependencies and resource creation remain application-owned.
 
 `beforeLeave(reason, { id, from?, to?, signal? })` receives the content id and, for document navigation,
 the current and requested locations. Use this to permit view-only search changes that preserve a
