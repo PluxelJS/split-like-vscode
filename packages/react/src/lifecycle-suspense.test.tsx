@@ -1,35 +1,20 @@
-import { createRootRoute, createRoute, createRouter, type AnyRouter } from "@tanstack/react-router";
+import { createRootRoute, createRouter, type AnyRouter } from "@tanstack/react-router";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import {
-  Activity,
-  createContext,
-  StrictMode,
-  Suspense,
-  useContext,
-  useMemo,
-  type ReactNode,
-} from "react";
+import { Activity, createContext, StrictMode, Suspense, useContext, useLayoutEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createWorkbench,
-  useWorkbenchContentLifecycle,
-  Workbench,
-  type WorkbenchContentLifecycle,
-  type WorkbenchInstance,
-} from "./index";
+import { createWorkbench, useWorkbenchContent, Workbench, type WorkbenchInstance } from "./index";
 
 const instances: WorkbenchInstance<AnyRouter>[] = [];
-const resizeObservers = new Map<ResizeObserver, ResizeObserverCallback>();
 interface Scope {
-  id: string;
-  lifecycle: WorkbenchContentLifecycle;
-  read: () => void;
+  mode: "visible" | "hidden";
+  pending: Promise<void> | undefined;
+  acquire: (signal: AbortSignal) => () => void;
+  decide: () => boolean;
 }
 const ScopeContext = createContext<Scope | null>(null);
 
 beforeEach(() => {
-  resizeObservers.clear();
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
     new DOMRect(0, 0, 1000, 700),
   );
@@ -39,14 +24,9 @@ beforeEach(() => {
   vi.stubGlobal(
     "ResizeObserver",
     class {
-      constructor(callback: ResizeObserverCallback) {
-        resizeObservers.set(this, callback);
-      }
       observe() {}
       unobserve() {}
-      disconnect() {
-        resizeObservers.delete(this);
-      }
+      disconnect() {}
     },
   );
 });
@@ -57,165 +37,128 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-function Editor() {
+function Resources() {
   const scope = useContext(ScopeContext)!;
-  useWorkbenchContentLifecycle(scope.lifecycle);
-  scope.read();
-  return <input aria-label={`Editor ${scope.id}`} />;
+  const content = useWorkbenchContent();
+  const acquire = scope.acquire;
+  useLayoutEffect(
+    () => content.effect(({ signal, defer }) => defer(acquire(signal))),
+    [content, acquire],
+  );
+  if (scope.pending) throw scope.pending;
+  return <input aria-label="Resource editor" />;
 }
-
-function Scoped({ scope, children }: { scope: Scope; children: ReactNode }) {
-  const value = useMemo(() => scope, [scope]);
-  return <ScopeContext.Provider value={value}>{children}</ScopeContext.Provider>;
+function DocumentRoot() {
+  const scope = useContext(ScopeContext)!;
+  useWorkbenchContent({
+    isDirty: () => true,
+    getCloseRevision: () => 0,
+    beforeLeave: scope.decide,
+  });
+  return (
+    <>
+      <p>Persistent editing owner</p>
+      <Activity mode={scope.mode}>
+        <Suspense fallback={<p>Resource area suspended</p>}>
+          <Resources />
+        </Suspense>
+      </Activity>
+    </>
+  );
 }
-
-async function setup(strict = true) {
-  const errors: Error[] = [];
-  const root = createRootRoute({
-    errorComponent: ({ error }) => {
-      const failure = error instanceof Error ? error : new Error(String(error));
-      errors.push(failure);
-      return <p role="alert">{failure.message}</p>;
-    },
-  });
-  const page = createRoute({
-    getParentRoute: () => root,
-    path: "/documents/$id",
-    component: Editor,
-  });
+function setup(strict: boolean) {
+  const signals: AbortSignal[] = [];
+  const released = vi.fn<(index: number) => void>();
+  const decide = vi.fn<() => boolean>(() => false);
+  const acquire = (signal: AbortSignal) => {
+    const index = signals.push(signal) - 1;
+    return () => released(index);
+  };
+  let scope: Scope = { mode: "visible", pending: undefined, acquire, decide };
+  const root = createRootRoute();
+  const onIssue = vi.fn<(issue: unknown) => void>();
   const workbench = createWorkbench({
-    createRouter: (history) =>
-      createRouter({
-        routeTree: root.addChildren([page]),
-        history,
-        defaultPendingMs: 0,
-        defaultPendingMinMs: 0,
-      }),
+    createRouter: (history) => createRouter({ routeTree: root, history }),
+    onIssue,
+    tools: [{ id: "editor", render: () => <DocumentRoot /> }],
+    layout: {
+      layout: {
+        children: [{ type: "tabset", children: [{ id: "editor", component: "worksplit.tool" }] }],
+      },
+    },
   });
   instances.push(workbench);
-  const result = await workbench.open({ to: "/documents/$id", params: { id: "A" } });
-  if (result.status !== "committed") {
-    throw new Error(`Open failed: ${result.status}`, {
-      cause: result.status === "failed" ? result.error : result,
-    });
-  }
-  const disposeA = vi.fn<() => void>();
-  const disposeB = vi.fn<() => void>();
-  const lifeA = { dispose: disposeA, isDirty: () => true, beforeLeave: () => false };
-  const lifeB = { dispose: disposeB, isDirty: () => true, beforeLeave: () => false };
-  let scope: Scope = { id: "A", lifecycle: lifeA, read: () => undefined };
-  let providerKey = "A";
-  let mode: "visible" | "hidden" = "visible";
-  const wrap = (children: ReactNode) => (strict ? <StrictMode>{children}</StrictMode> : children);
-  const element = () =>
-    wrap(
-      <Activity mode={mode}>
-        <Scoped key={providerKey} scope={scope}>
-          <Suspense fallback={<p>Editor suspended</p>}>
-            <Workbench workbench={workbench} />
-          </Suspense>
-        </Scoped>
-      </Activity>,
+  const element = (value: Scope) => {
+    const child = (
+      <ScopeContext.Provider value={value}>
+        <Workbench workbench={workbench} />
+      </ScopeContext.Provider>
     );
-  const view = render(element());
-  await screen.findByRole("textbox", { name: "Editor A" });
-  return {
-    workbench,
-    id: result.document.id,
-    errors,
-    disposeA,
-    disposeB,
-    unmount: () => view.unmount(),
-    async remountScope() {
-      providerKey = "B";
-      scope = { id: "B", lifecycle: lifeB, read: () => undefined };
-      await act(async () => view.rerender(element()));
+    return strict ? <StrictMode>{child}</StrictMode> : child;
+  };
+  const view = render(element(scope));
+  const update = async (next: Partial<Scope>) => {
+    scope = { ...scope, ...next };
+    await act(async () => view.rerender(element(scope)));
+  };
+  return { workbench, view, update, signals, released, decide, onIssue };
+}
+
+describe("persistent editing owner with hidden resource children", () => {
+  it.each([false, true])(
+    "keeps dirty close protection during Activity hiding and reacquires on reveal (StrictMode: %s)",
+    async (strict) => {
+      const { workbench, update, signals, released, decide, onIssue } = setup(strict);
+      await screen.findByRole("textbox", { name: "Resource editor" });
+      const initial = signals.length;
+      const replayReleases = released.mock.calls.length;
+      await update({ mode: "hidden" });
+      expect(signals.at(-1)?.aborted).toBe(true);
+      expect(released).toHaveBeenCalledTimes(replayReleases + 1);
+      expect(screen.getByText("Persistent editing owner")).toBeDefined();
+      expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
+      expect(decide).toHaveBeenCalledTimes(1);
+      await update({ mode: "visible" });
+      await screen.findByRole("textbox", { name: "Resource editor" });
+      expect(signals.length).toBeGreaterThan(initial);
+      expect(signals.at(-1)?.aborted).toBe(false);
+      expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
+      expect(onIssue).not.toHaveBeenCalled();
+      await act(async () => {
+        await workbench.dispose();
+      });
+      expect(released).toHaveBeenCalledTimes(signals.length);
     },
-    async setMode(next: typeof mode) {
-      mode = next;
-      await act(async () => view.rerender(element()));
-      if (mode === "visible") {
-        await act(async () => {
-          resizeObservers.forEach((callback, observer) => callback([], observer));
-        });
-      }
-    },
-    async suspend() {
+  );
+
+  it.each([false, true])(
+    "keeps dirty close protection while Suspense cleans and restores child layout effects (StrictMode: %s)",
+    async (strict) => {
+      const { workbench, update, signals, released, decide, onIssue } = setup(strict);
+      await screen.findByRole("textbox", { name: "Resource editor" });
+      const initial = signals.length;
+      const replayReleases = released.mock.calls.length;
       let resolve!: () => void;
       const pending = new Promise<void>((done) => {
         resolve = done;
       });
-      scope = {
-        ...scope,
-        read: () => {
-          throw pending;
-        },
-      };
-      await act(async () => view.rerender(element()));
-      return async () => {
-        scope = { ...scope, read: () => undefined };
-        await act(async () => {
-          resolve();
-          view.rerender(element());
-        });
-      };
-    },
-  };
-}
-
-describe("lifecycle ownership through router reconnection", () => {
-  it.each([false, true])(
-    "refuses an overlapping owner when a keyed scope remounts the same instance (StrictMode: %s)",
-    async (strict) => {
-      vi.spyOn(console, "error").mockImplementation(() => undefined);
-      vi.spyOn(console, "warn").mockImplementation(() => undefined);
-      const { errors, remountScope, disposeA, disposeB, workbench, id } = await setup(strict);
-      await remountScope();
-      // A new Content context cannot claim another context's still-pending registration.
-      // The project owner must end its old instance before starting a new scoped one.
-      expect(errors.length).toBeGreaterThan(0);
-      errors.forEach((error) => {
-        expect(error.message).toBe(`Content ${id} already has a lifecycle owner`);
+      await update({ pending });
+      expect(screen.getByText("Resource area suspended")).toBeDefined();
+      expect(signals.at(-1)?.aborted).toBe(true);
+      expect(released).toHaveBeenCalledTimes(replayReleases + 1);
+      expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
+      expect(decide).toHaveBeenCalledTimes(1);
+      resolve();
+      await update({ pending: undefined });
+      await screen.findByRole("textbox", { name: "Resource editor" });
+      expect(signals.length).toBeGreaterThan(initial);
+      expect(signals.at(-1)?.aborted).toBe(false);
+      expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
+      expect(onIssue).not.toHaveBeenCalled();
+      await act(async () => {
+        await workbench.dispose();
       });
-      expect(screen.queryByRole("textbox", { name: "Editor B" })).toBeNull();
-      expect(disposeA).toHaveBeenCalledTimes(1);
-      expect(disposeB).not.toHaveBeenCalled();
-      await workbench.dispose();
-      expect(disposeA).toHaveBeenCalledTimes(1);
-      expect(disposeB).not.toHaveBeenCalled();
+      expect(released).toHaveBeenCalledTimes(signals.length);
     },
   );
-
-  it("reconnects the same document owner after Activity hides and reveals it", async () => {
-    const { errors, setMode, workbench, id } = await setup();
-    await setMode("hidden");
-    await setMode("visible");
-    expect(errors).toEqual([]);
-    expect(await screen.findByRole("textbox", { name: "Editor A" })).toBeDefined();
-    expect(await workbench.close(id)).toEqual({ status: "rejected", reason: "decision" });
-  });
-
-  it("reconnects the same document owner after its route suspends and resolves", async () => {
-    const { errors, suspend, workbench, id } = await setup();
-    const resolve = await suspend();
-    await resolve();
-    expect(errors).toEqual([]);
-    expect(screen.getByRole("textbox", { name: "Editor A" })).toBeDefined();
-    expect(await workbench.close(id)).toEqual({ status: "rejected", reason: "decision" });
-  });
-
-  it("starts a fresh scoped instance after the project owner disposes and unmounts the old one", async () => {
-    const previous = await setup();
-    await act(async () => {
-      await previous.workbench.dispose();
-    });
-    previous.unmount();
-    const next = await setup();
-    expect(previous.errors).toEqual([]);
-    expect(next.errors).toEqual([]);
-    expect(previous.disposeA).toHaveBeenCalledTimes(1);
-    expect(next.disposeA).not.toHaveBeenCalled();
-    expect(screen.getByRole("textbox", { name: "Editor A" })).toBeDefined();
-    expect(await next.workbench.close(next.id)).toEqual({ status: "rejected", reason: "decision" });
-  });
 });

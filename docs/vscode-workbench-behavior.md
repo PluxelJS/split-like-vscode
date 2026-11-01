@@ -19,7 +19,7 @@ owns behavior rules; [README](../README.md) owns installation and API use, and
 Tool position does not change its role. A tool focused or docked centrally preserves the last
 active document and its URL. A document docked in Border remains a routed document. Native moves,
 grouping, pin, selection, maximize and collapse retain mounted content lifetimes.
-Hidden content keeps running; close and resource registration teardown end its lifetime.
+Native hidden content keeps running. React effect cleanup, manual stop and content close end the corresponding resource effect.
 Explicit `activate(id)` reveals either document or tool content and may invoke its registered focus
 callback. Tool activation preserves the document/URL. Its pending focus belongs to the actual native
 tab instance, so closing and reopening a tool with the same id cannot inherit an obsolete request.
@@ -180,18 +180,20 @@ Whole-Tabset closing includes folded members. Border TabGroups are supported in 
 while its standard Border menu omits group commands. The demo provides the menu wiring.
 
 Dirty approval belongs to application content. Repeated closes share its pending decision;
-registered lifecycle or committed route changes invalidate older approval. Closed reports
-cleanup errors after removal. Ending a registration disposes its resources once; close/dispose
-wait for relevant in-flight cleanup. A node is never recreated to pretend failed cleanup did not
+editing owner replacement, application revision changes or committed route changes invalidate older approval. Closed reports
+cleanup errors after removal. Each content effect releases registered resources once; close/dispose
+wait for their fixed set of registered cleanup and earlier in-flight stop tasks. A node is never recreated to pretend failed cleanup did not
 happen. Shared application services outlive individual document Routers.
 
 `dispose` is the host's explicit shutdown operation. It closes admission without running dirty
-decisions or saves, settles registered cleanup and returns collected errors; repeated calls share
+decisions or saves, settles its fixed cleanup set and returns collected errors; repeated calls share
 its completion. Router cleanup attempts abort, cache release and history destruction even when
 one stage fails, and failures do not prevent the remaining content from being released.
 Browser refresh/page close and the host's decision to leave are application-owned; Worksplit
-does not install a beforeunload approval policy. Resource ownership transfers only after a
-successful lifecycle registration; a rejected registration leaves cleanup with the caller.
+does not install a beforeunload approval policy. A content effect establishes ownership before setup. Refused close leaves effects running; setup
+failure stops its effect and releases resources already deferred. Programmatic close/dispatch/dispose
+return errors, native UI reports its receipt once, and unowned background failures use `onIssue` or
+the default console diagnostic. Later waiters do not receive a second copy of an already owned error.
 
 Command targets are captured before awaiting execution. A `document` command uses the active
 document. A `focused` command uses the supplied content id or last focused content;
@@ -210,7 +212,7 @@ FlexLayout isolates non-Router render failures per tab and provides Retry; TanSt
 failures. Desktop Workbench does not subscribe to the catalogue revision for rendering, preserving
 native adjusting-resize behavior.
 
-## Breaking changes for later Pluxel migration
+## Breaking contracts and host migration
 
 The old Workbench component name remains, with an instance from createWorkbench, optional
 navigation/empty content, native Layout props, native `layoutRef` and standard root DOM props.
@@ -231,12 +233,12 @@ custom editor drag engine. Old snapshots are not read or migrated at startup. Pr
 explicit conversion/reset when migrating actual local data. SplitView, Pane, pane sizing and
 independent Pane Kit uses remain.
 
-Pluxel's future work must replace split/view.tsx conversions, its manual
-WorkbenchDocumentRenderer.tsx pathname matching, and separate Shell/grid close/address controllers
-with this integration. Plugin identity, remote renderers, RPC, dirty/save decisions, shared
-services and dynamic availability remain Pluxel owned. This branch changes no Pluxel source,
-dependency or recorded submodule pointer. A second application has not been inspected or accepted;
-internal demo success is not evidence of cross-application compatibility.
+Pluxel Shell uses WorkspaceSession and native Worksplit document/tool instances; Report Template
+Studio uses the same integration. Plugin identity, remote renderers, RPC, editing revisions, shared
+drafts and retain/release protocols remain application owned. Content resource effects replace
+application-owned generic registration bags. The library demo and packed consumer validate public
+integration boundaries; Shell and Studio still require their own business and runtime evidence.
+Historical acceptance records retain their original scope and do not prove the current API batch.
 
 ## Explorer reuse, previews and bounded workspaces
 
@@ -263,8 +265,9 @@ save listeners or reimplementing tidy. The authoritative Model remains unique. U
 multi-step docking batches are refused, not partly applied. Snapshot conversion and choosing
 product-specific detail placement remain host responsibilities.
 
-One content has one live lifecycle owner. Duplicate registration throws before ownership transfer;
-the caller keeps its rejected resources. Navigation decisions receive `{ id, from, to }`, while
+One content has one editing owner and multiple independent resource effects. Declaring a second
+editing owner throws; it does not take ownership of resources. Effect admission happens before setup,
+so a stale handle cannot acquire a resource through a rejected effect. Navigation decisions receive `{ id, from, to }`, while
 close supplies id and an optional document location. This permits business owners to distinguish
 view changes from resource replacement without bypassing guarded closing. Explicit first-open
 focus waits for registration and is cancelled when real user interaction or disposal supersedes it.
@@ -298,11 +301,26 @@ restores an old focus or routes into the newly active pane merely because its lo
 Business-specific adjacency and capacity fallback belong to the application; they use these
 operations and existing native Actions, without a second focus queue or document registry.
 
-## React effect replay
+## React effects, replay and hidden children
 
-`useWorkbenchContentLifecycle` delays unregister by one microtask, allowing the same content's
-stable lifecycle to survive StrictMode cleanup/setup replay. A different lifecycle ends the
-previous registration before taking ownership; two live owners remain invalid. Explicit
-`content.register` cleanup is immediate. Closing content or disposing the instance still releases
-each acquired registration once. This hook does not make a disposed Workbench reusable: the
-host must separately own its instance, history connection and shared services across React replay.
+`useWorkbenchContent(lifecycle?)` declares the single editing owner after commit and reads the latest
+committed callbacks. A new callback object does not replace ownership. Withdrawing, re-declaring
+or remounting the owner invalidates prior close approval. Discarded renders do not publish callbacks.
+Resource effects remain independent of that owner.
+
+`content.effect(setup)` uses native `signal` and `defer`; React dependency lists stay in native
+`useEffect` or `useLayoutEffect`. StrictMode cleanup ends that setup and a later setup acquires
+again. Old async results are immediately released when registered with their ended context.
+Activation, native movement and Border hiding do not themselves stop an effect.
+
+Keep the editing owner in a persistent root and place Activity/Suspense resource children below it.
+Activity cleans child effects when hidden; Suspense cleans hidden layout effects. Child resources
+reacquire when React restores them, while the root still refuses dirty closing. Continuing commands
+while Activity has deactivated the entire editing owner is outside the supported boundary.
+
+After approved native removal or disposal starts, effect admission closes and the operation fixes
+its cleanup waiting set before abort listeners or cleanup execute. Later `defer` registrations are
+cleaned immediately and report independently without extending that set. Pending setup Promises do
+not automatically join it. Stop is synchronous and idempotent; it starts settlement without being a
+completion receipt. See [resource lifetimes](resource-lifetimes.md) for error ownership and protocol
+completion. The host separately owns its Workbench instance, history connection and shared services.

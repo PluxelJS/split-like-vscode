@@ -10,6 +10,9 @@ catalogs:
       specifier: 1.2.0
       version: 1.2.0
   dev:
+    capnweb:
+      specifier: 0.12.0
+      version: 0.12.0
     jsdom:
       specifier: ^30.1.2
       version: 30.1.2
@@ -98,7 +101,7 @@ importers:
         version: 1.2.0(@types/node@26.6.4)(@vitest/ui@5.0.4)(jiti@2.7.0)(jsdom@30.1.2)(playwright@1.64.0)(typescript@7.0.2)(yaml@2.9.1)
       vitest:
         specifier: catalog:test
-        version: 5.0.4(@types/node@26.6.4)(@vitest/browser-preview@5.0.4)(@vitest/ui@5.0.4)(@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(jiti@2.7.0)(jsdom@30.1.2)(typescript@7.0.2)(yaml@2.9.1)
+        version: 5.0.4(@types/node@26.6.4)(@vitest/browser-preview@5.0.4)(@vitest/ui@5.0.4(vitest@5.0.4))(@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(jiti@2.7.0)(jsdom@30.1.2)(typescript@7.0.2)(yaml@2.9.1)
 
   packages/core:
     devDependencies:
@@ -167,6 +170,9 @@ importers:
       '@types/react-dom':
         specifier: catalog:frontend
         version: 19.3.0(@types/react@19.3.0)
+      capnweb:
+        specifier: catalog:dev
+        version: 0.12.0
       flexlayout-react:
         specifier: catalog:frontend
         version: 0.11.1(patch_hash=e3804bebeebfdd5f89ece54acf9f16b76c36f9128c7e87bd34d4de132210d82f)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -1043,6 +1049,9 @@ packages:
   cac@7.0.0:
     resolution: {integrity: sha512-tixWYgm5ZoOD+3g6UTea91eow5z6AAHaho3g0V9CNSNb45gM8SmflpAc+GRd1InC4AqN/07Unrgp56Y94N9hJQ==}
     engines: {node: '>=20.19.0'}
+
+  capnweb@0.12.0:
+    resolution: {integrity: sha512-jgZ/LMtMVTi+RVlooIslH78Gg23XbDTdvcLghWx3oz17D6u5GuJARt+uhZk/wcTo+f81eeabfnow4d3zLBj+JQ==}
 
   chai@6.3.0:
     resolution: {integrity: sha512-XWAtwJ6OHO+tj0EKCs0Y2UamnyOxseZWltU4x2U2wh8g4AigdjwvtUjvLP2tqkA/avxHEtzxNaqGq/YGNwckKg==}
@@ -1974,7 +1983,7 @@ snapshots:
       '@testing-library/dom': 10.4.2
       '@testing-library/user-event': 14.6.8(@testing-library/dom@10.4.2)
       '@vitest/browser': 5.0.4(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(vitest@5.0.4)(yaml@2.9.1)
-      vitest: 5.0.4(@types/node@26.6.4)(@vitest/browser-preview@5.0.4)(@vitest/ui@5.0.4)(@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(jiti@2.7.0)(jsdom@30.1.2)(typescript@7.0.2)(yaml@2.9.1)
+      vitest: 5.0.4(@types/node@26.6.4)(@vitest/browser-preview@5.0.4)(@vitest/ui@5.0.4(vitest@5.0.4))(@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(jiti@2.7.0)(jsdom@30.1.2)(typescript@7.0.2)(yaml@2.9.1)
     transitivePeerDependencies:
       - '@arethetypeswrong/core'
       - '@types/node'
@@ -2011,7 +2020,7 @@ snapshots:
       pngjs: 7.0.0
       sirv: 3.0.2
       tinyrainbow: 3.2.0
-      vitest: 5.0.4(@types/node@26.6.4)(@vitest/browser-preview@5.0.4)(@vitest/ui@5.0.4)(@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(jiti@2.7.0)(jsdom@30.1.2)(typescript@7.0.2)(yaml@2.9.1)
+      vitest: 5.0.4(@types/node@26.6.4)(@vitest/browser-preview@5.0.4)(@vitest/ui@5.0.4(vitest@5.0.4))(@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(jiti@2.7.0)(jsdom@30.1.2)(typescript@7.0.2)(yaml@2.9.1)
       ws: 8.22.0
     transitivePeerDependencies:
       - '@arethetypeswrong/core'
@@ -2090,7 +2099,7 @@ snapshots:
       pathe: 2.0.3
       sirv: 3.0.2
       tinyrainbow: 3.2.0
-      vitest: 5.0.4(@types/node@26.6.4)(@vitest/browser-preview@5.0.4)(@vitest/ui@5.0.4)(@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(jiti@2.7.0)(jsdom@30.1.2)(typescript@7.0.2)(yaml@2.9.1)
+      vitest: 5.0.4(@types/node@26.6.4)(@vitest/browser-preview@5.0.4)(@vitest/ui@5.0.4(vitest@5.0.4))(@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(jiti@2.7.0)(jsdom@30.1.2)(typescript@7.0.2)(yaml@2.9.1)
 
   '@vitest/utils@5.0.4':
     dependencies:
@@ -2199,6 +2208,8 @@ snapshots:
       require-from-string: 2.0.2
 
   cac@7.0.0: {}
+
+  capnweb@0.12.0: {}
 
   chai@6.3.0: {}
 
@@ -2623,7 +2634,7 @@ snapshots:
       oxlint: 1.88.0(oxlint-tsgolint@7.0.2004)(vite-plus@1.2.0(@types/node@26.6.4)(@vitest/ui@5.0.4)(jiti@2.7.0)(jsdom@30.1.2)(playwright@1.64.0)(typescript@7.0.2)(yaml@2.9.1))
       oxlint-tsgolint: 7.0.2004
       vite: '@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1)'
-      vitest: 5.0.4(@types/node@26.6.4)(@vitest/browser-preview@5.0.4)(@vitest/ui@5.0.4)(@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(jiti@2.7.0)(jsdom@30.1.2)(typescript@7.0.2)(yaml@2.9.1)
+      vitest: 5.0.4(@types/node@26.6.4)(@vitest/browser-preview@5.0.4)(@vitest/ui@5.0.4(vitest@5.0.4))(@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(jiti@2.7.0)(jsdom@30.1.2)(typescript@7.0.2)(yaml@2.9.1)
     optionalDependencies:
       '@voidzero-dev/vite-plus-darwin-arm64': 1.2.0
       '@voidzero-dev/vite-plus-darwin-x64': 1.2.0
@@ -2669,7 +2680,7 @@ snapshots:
       - vue-tsc
       - yaml
 
-  vitest@5.0.4(@types/node@26.6.4)(@vitest/browser-preview@5.0.4)(@vitest/ui@5.0.4)(@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(jiti@2.7.0)(jsdom@30.1.2)(typescript@7.0.2)(yaml@2.9.1):
+  vitest@5.0.4(@types/node@26.6.4)(@vitest/browser-preview@5.0.4)(@vitest/ui@5.0.4(vitest@5.0.4))(@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(jiti@2.7.0)(jsdom@30.1.2)(typescript@7.0.2)(yaml@2.9.1):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/mocker': 5.0.4(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1)

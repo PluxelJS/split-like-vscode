@@ -5,7 +5,7 @@ layout; each document has a real Router and memory history; Worksplit owns docum
 activation, guarded closing and the workspace browser history. There is one route definition and
 one native Model, with no parallel docking tree or pathname renderer dispatcher.
 
-- `@worksplit/react`: `createWorkbench`, `Workbench`, content lifecycle hooks and independent `SplitView`.
+- `@worksplit/react`: `createWorkbench`, `Workbench`, the `useWorkbenchContent` hook and independent `SplitView`.
 - `@worksplit/core`: the DOM-free pane sizing/resize calculations used by `SplitView`.
 - `packages/demo`: the complete internal consumer, using public package exports without source aliases.
 
@@ -272,8 +272,8 @@ from the successful new admission; a committed receipt still does not mean React
 `open` resolves to `committed`, `rejected` (with a reason), `superseded`, or `failed` (with the
 original error and stage). A commit means Router/session/Model admission, not completion of
 React painting or business saves. Router-accepted loader errors remain committed error pages.
-Invalid programming inputs can throw; route and operation failures are available in the receipt
-and `onIssue`. Native Router error boundaries retain their original errors.
+Invalid programming inputs can throw; route and operation failures are available in the receipt.
+Native Router error boundaries retain their original errors.
 
 **Deduplication is guaranteed at `open`, not at native document navigation.** A speculative real
 Router resolves redirect targets before admission, leaving the source intact. Exact existing
@@ -349,59 +349,62 @@ existing content still use ordinary native Actions through `dispatch`.
 
 ## Content decisions, commands and resources
 
-Register a stable lifecycle with `useWorkbenchContentLifecycle`. `isDirty` is read for content
-closing and document route-leave decisions. Dirty content without `beforeLeave` is refused.
-A clean document or tool closes directly.
-The application validates its own editing revision and save receipt before returning approval:
+Declare editing decisions with `useWorkbenchContent(lifecycle?)`. No argument only reads the
+content handle; passing an object, including `{}`, declares the content's single editing owner.
+Callbacks read the latest committed render, without identity-only `useMemo` or `useCallback`.
+`isDirty` guards closing and document route changes. Dirty content without `beforeLeave` is refused;
+clean content closes directly. The application validates its own revision and save receipt:
 
 ```tsx
-const lifecycle = useMemo(
-  () => ({
-    isDirty: () => draft.current.text !== draft.current.saved,
-    getCloseRevision: () => draft.current.version,
-    beforeLeave: async () => {
-      const version = draft.current.version;
-      return (await askToDiscard()) && version === draft.current.version;
-    },
-    focus: () => input.current?.focus({ preventScroll: true }),
-    save: async () => {
-      /* save and validate the application's current revision */
-    },
-    dispose: async () => {
-      await releaseDocumentResources();
-    },
-  }),
-  [],
+const content = useWorkbenchContent({
+  isDirty: () => draft.current.text !== draft.current.saved,
+  getCloseRevision: () => draft.current.version,
+  beforeLeave: async () => {
+    const version = draft.current.version;
+    return (await askToDiscard()) && version === draft.current.version;
+  },
+  focus: () => input.current?.focus({ preventScroll: true }),
+  save: () => editor.save(),
+});
+
+useEffect(
+  () => content.effect(({ defer }) => defer(service.subscribe(onChange))),
+  [content, service, onChange],
 );
-useWorkbenchContentLifecycle(lifecycle);
 ```
 
-This fragment belongs inside a routed component; `draft`, `input`, confirmation and business
-resources are application owned. The executable demo implements it without a second controller.
-The registration ends on route/content unmount; cleanup runs once, and its failures are reported.
-Keep `lifecycle` stable to avoid ending resources on every render. `getCloseRevision` reads an
-application-owned string/number that changes with its edits; Worksplit neither generates nor
-persists it. When closing multiple content instances, every dirty member needs this getter or
-the request returns `rejected` with `revision-required` before any decisions. Tokens are captured
-before the batch and checked again after all decisions, so edits to an earlier approved member
-invalidate the whole request while a later dialog waits. A member that becomes dirty also
-invalidates approval. For single close, `beforeLeave` still validates its own editing revision.
-The hook defers effect cleanup by one microtask. React StrictMode's cleanup/setup replay of the
-same content and stable lifecycle cancels that pending cleanup; a replacement lifecycle releases
-the old registration before registering the new one. A genuinely live second owner still throws.
-This protects content registration, not the lifetime of the entire Workbench instance. Keep the
-instance under an explicit project owner, as in the example above. Never permanently `dispose()`
-an instance in a simulated React cleanup and then reuse it; an effect that owns an instance must
-create a fresh one for each setup and dispose that setup's instance on teardown.
+This component fragment uses application-owned `draft`, `input`, `editor` and service. The hook
+updates callbacks after commit, so a discarded render cannot change close protection. Updating
+an object keeps the same owner; committing `undefined` withdraws it, and a later object declares
+a new owner. Ending or replacing the owner invalidates older closing approval but does not stop
+independent resource effects. Use a business revision containing editor identity, or a React key,
+when replacing an editor in place; two different editors' revision `0` is not the same approval.
+A second editing owner throws. Several child components can acquire resources independently.
 
-The imperative `useWorkbenchContent().register(lifecycle)` returns an immediate registration cleanup;
-it throws for removed/replaced content or a second live owner. Register one stable lifecycle per
-content; compose business editor resources inside that owner instead of overwriting the registration. A rejected registration has not transferred resource
-ownership, so the caller still releases any resources it acquired.
+`getCloseRevision` reads an application-owned string or number that changes with edits. Worksplit
+does not generate or persist it. Dirty members of a multi-content close need this getter, or the
+request returns `rejected` with `revision-required` before decisions. Tokens are checked again
+after all decisions; later edits or a newly dirty member invalidate the batch. A single close's
+`beforeLeave` still validates its own business revision.
 
-For asynchronous acquisition, late results after close and shared connections, see
-[resource ownership and the Cap’n Web example](docs/resource-lifetimes.md). The integration uses
-these public lifecycle APIs; protocol dependencies and resource creation remain application-owned.
+`content.effect(setup)` runs setup immediately and returns an idempotent synchronous stop function.
+Its context has only `signal` and `defer(cleanup)`. Start it in a native React effect or an event
+handler. React cleanup, stop and approved content removal end the effect; refused close does not.
+Deferred cleanup runs once in reverse registration order, continuing after failure. An ended
+effect immediately cleans late registrations. Stop returns `void`; close/dispose await their
+fixed set of known cleanup, not unfinished acquisitions or later resources. The handle is stable
+for the content instance; after close its effect and command methods reject, even if the id reopens.
+
+StrictMode may acquire, clean and acquire again. Put shared sessions or drafts under a host owner
+and let each setup release its own reference. Keep the editing owner in a persistent document
+root outside Activity/Suspense resource children when hidden children must retain dirty protection.
+Commands while Activity has deactivated the whole owner are outside this support boundary.
+Keep the Workbench instance under an explicit project owner across React replay. An effect that
+owns an instance creates a fresh one for each setup and disposes that setup's instance on teardown.
+
+For asynchronous acquisition, exact waiting and reporting boundaries, and shared connections, see
+[resource ownership and the Cap’n Web example](docs/resource-lifetimes.md). Ordinary component-only
+behavior continues using ordinary React effects.
 
 `beforeLeave(reason, { id, from?, to?, signal? })` receives the content id and, for document navigation,
 the current and requested locations. Use this to permit view-only search changes that preserve a
@@ -417,17 +420,17 @@ whether a traversal may leave the workspace. Pass that signal to the native clos
 the coordinator also ignores its late result. The containing application handles an approved
 `history-outside-scope` issue without rewriting the target entry.
 
-Tools may register guarded closing and disposal resources; they need no Router to be dirty.
+Tools use the same editing decisions and resource effects; they need no Router to be dirty.
 Save callbacks apply to document operations; focus callbacks also apply to explicit tool activation. Use native `enableClose: false`
 when a tool should only hide. At shutdown, dispose the instance and then unmount the React root
 to end component effects and binding subscriptions.
 `dispose` releases the instance directly; it does not run dirty decisions or save drafts.
 The host owns its leave policy before shutdown, browser refresh or page close. Worksplit's route
 blockers do not install a `beforeunload` prompt.
-Lifecycle cleanup must not await the owning instance's `dispose()`, which is waiting for that cleanup.
+Deferred cleanup must not await a close or dispose operation that is waiting for that cleanup.
 
 `close(id)` shares a pending decision for that instance and rechecks committed route content and
-registration before removal. Native pin and `enableClose: false` are respected; `close` does not
+editing owner before removal. Native pin and `enableClose: false` are respected; `close` does not
 force-remove those tabs. New editing invalidates approval through the application callback;
 new route content invalidates it in the library. Native whole-Tabset and pure deletion batches
 use the same coordinator: decisions finish before any member is removed. Identical pending requests
@@ -438,6 +441,13 @@ background document does not take focus; active close selects same-group MRU, th
 then the configured home URL with an empty editing context. Late navigation cannot revive closed
 instances. Disposal is idempotent, rejects new operations, releases subscriptions and returns
 cleanup errors. Some pending loader work can continue; ignoring its result is not cancellation.
+
+Programmatic close, dispatch and disposal return their operation errors; the caller decides how
+to present them. Native UI consumes the same receipt and reports through `onIssue` once. Background
+failures and cleanup without a waiting operation use `onIssue`, defaulting to `console.error` when
+omitted. A close can take responsibility for unreported cleanup started by React stop; later
+waiters do not gain another report. A throwing reporter cannot interrupt cleanup. `DispatchResult`
+is exported for code that consumes native Action receipts.
 
 Commands have an id, `document` or `focused` target, optional TanStack hotkey, and one execute
 callback. Toolbar/menu calls and shortcuts share `executeCommand`; target identity is captured
@@ -631,8 +641,7 @@ Native attribute updates may reset values with `undefined`, including the disabl
 flags. Under `exactOptionalPropertyTypes`, the upstream Action types do not accept explicit
 `undefined` resets; Worksplit retains those types and the native runtime behavior.
 
-`getLayout()` returns a detached native snapshot. Ordinary content gets its identity and lifecycle
-registration, not the mutable Model. `Workbench.native` uses the upstream `ILayoutProps` presentation
+`getLayout()` returns a detached native snapshot. Ordinary content gets its instance-bound handle, editing decisions and resource effects, not the mutable Model. `Workbench.native` uses the upstream `ILayoutProps` presentation
 and interaction options, including context/overflow menus, drag rendering, resize options and
 `onModelChange`. Worksplit supplies `model`, `factory` and `onAction`; external tab insertion and
 multi-window options are excluded. These native slots intentionally expose native nodes and
@@ -796,8 +805,8 @@ This supplies service injection and customized content without another factory p
 
 [`vp run test:package`](scripts/check-package-consumer.mjs) verifies tarballs in an independent
 installed consumer using public exports, strict route types, native ref/slots and a customized
-React shell. It complements the demo and browser checks; it is a controlled consumer fixture,
-not evidence that Pluxel or a second production application has been migrated.
+React shell. It complements the demo and browser checks. These fixture results do not replace the Pluxel Shell
+and Studio host-specific tests or their online behavior checks.
 Add `--browser` to exercise the compiled consumer in Chromium and retain desktop/narrow screenshots
 and its results in `test-results/packed-consumer`. The checker retains its independent installation directory
 for inspection; remove that printed temporary directory when the evidence is no longer needed.

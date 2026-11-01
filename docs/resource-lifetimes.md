@@ -1,50 +1,57 @@
 # Content resources and Cap’n Web
 
-Worksplit supplies a content lifetime for documents and tools. The application owns resource
-creation, shared services and protocol-specific cleanup. WebSocket clients, RPC capabilities,
-subscriptions and workers can all use the same public lifecycle API; Worksplit has no Cap’n Web
+Use `useWorkbenchContent(lifecycle?)` for editing decisions and `content.effect(setup)` for
+resources that must stop when their React effect or content ends. React owns dependencies;
+Worksplit tracks cleanup through content close and host disposal. Shared services, drafts,
+protocol rules and resource creation remain application owned. Worksplit has no runtime Cap’n Web
 dependency.
 
 Start with [content decisions](../README.md#content-decisions-commands-and-resources) for dirty
-guards, save commands and shutdown. This guide shows how to attach externally acquired resources.
+guards, save commands and shutdown.
 
 ## Choose the owner
 
-| Resource                                                | Owner and release boundary                                               |
-| ------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Application connection or shared service                | The host; individual content instances borrow it                         |
-| Document capability and its page-specific subscriptions | One content lifecycle; release when that registration ends               |
-| Component-local request or visual effect                | The component effect; cancel or release when that effect ends            |
-| Job intended to continue after closing a tab            | An application job owner with its own completion and cancellation policy |
+| Resource                                               | Owner and release boundary                                               |
+| ------------------------------------------------------ | ------------------------------------------------------------------------ |
+| Application connection, shared draft or shared service | The host; a page releases only its own reference or subscription         |
+| Page capability and its subscriptions                  | One `content.effect`; end on React cleanup, manual stop or content close |
+| Component-local request or visual effect               | Ordinary React effect when it need not join Worksplit close settlement   |
+| Job intended to continue after closing a tab           | Application owner with its own completion and cancellation policy        |
 
-Tab activation, backgrounding and docking position do not themselves end a content registration.
-The registering component must remain mounted to retain its resources. Put a document-wide owner
-in a persistent parent route when nested child routes change; put route-specific resources in the
-route that owns them. Closing the tab, replacing that route or unregistering the owner releases
-the corresponding resources. Layout snapshots store locations and layout, not live capabilities;
-restored content acquires new resources when it loads.
+A content can have one editing owner and several independent resource effects. Calling the hook
+without a lifecycle does not claim editing ownership. Put the editing owner in the persistent
+document root that decides whether the user may leave. A child route or hidden region manages
+its own resources. With Activity or Suspense, React may clean effects while keeping component
+state; those resources are reacquired when React runs setup again. The persistent root keeps dirty
+close protection while its child is hidden. Issuing editing or close commands while Activity has
+deactivated the entire editing owner is outside this contract; keep that owner outside the hidden
+boundary when commands must remain available.
 
-Use `useWorkbenchContentLifecycle(lifecycle)` for an existing stable owner. Keep the lifecycle
-object stable, and create external resources outside React render and `useMemo`. The hook preserves
-the same registration across StrictMode's immediate cleanup/setup replay; it does not preserve a
-resource through arbitrary unmounts or make an already disposed resource reusable.
+Native tab activation, backgrounding, movement and Border hiding do not themselves stop an effect.
+Ordinary rerenders keep it when the React dependency list has not changed. StrictMode may run
+setup → cleanup → setup; each setup acquires its own resources and releases its own late results.
+Resources that must survive React remounting belong to an application owner, with the page holding
+only a reference. Snapshots contain locations and layout, never live capabilities.
 
-Use `useWorkbenchContent().register(lifecycle)` when an effect needs to establish ownership before
-starting asynchronous acquisition. It returns an unregister function that starts cleanup
-immediately. Each content has one registered lifecycle: combine editor guards, capabilities and
-subscriptions in that owner. A second registration throws, and resources acquired before a
-rejected registration remain the caller's responsibility.
+A subscription needs only the native React dependency list and a registered cleanup:
+
+```tsx
+const content = useWorkbenchContent();
+useEffect(
+  () => content.effect(({ defer }) => defer(service.subscribe(onChange))),
+  [content, service, onChange],
+);
+```
 
 ## Cap’n Web example
 
 The host installs `capnweb`, authenticates and owns the shared RPC session. Pass a stable borrowed
 API stub through application props or Router context. Each `openDocument` call returns a fresh
 document target; that target's server-side disposer releases its own watchers and subscriptions.
-Authorization and target implementation belong to the application.
+Authorization and the target implementation belong to the application.
 
-This read-only route component uses only public Worksplit exports. The interfaces describe the
-application's RPC contract; server implementations extend `RpcTarget`. Mount the component inside
-a Worksplit document or tool, and keep `api` stable for the host session.
+The interfaces describe the application's RPC contract; server implementations extend `RpcTarget`.
+Mount this component inside a Worksplit document or tool:
 
 ```tsx
 import { useWorkbenchContent } from "@worksplit/react";
@@ -54,7 +61,6 @@ import { useEffect, useState } from "react";
 interface DocumentSession extends RpcTarget {
   title(): string;
 }
-
 interface DocumentApi extends RpcTarget {
   openDocument(id: string): Promise<DocumentSession>;
 }
@@ -67,79 +73,86 @@ export function DocumentPage({
   documentId: string;
 }) {
   const content = useWorkbenchContent();
-  const [status, setStatus] = useState("Opening document…");
+  const [title, setTitle] = useState("Opening document…");
 
-  useEffect(() => {
-    let closed = false;
-    let session: RpcStub<DocumentSession> | undefined;
+  useEffect(
+    () =>
+      content.effect(async ({ signal, defer }) => {
+        setTitle("Opening document…");
+        const session = await api.openDocument(documentId);
+        defer(() => session[Symbol.dispose]());
+        if (signal.aborted) return;
+        const title = await session.title();
+        if (!signal.aborted) setTitle(title);
+      }),
+    [content, api, documentId],
+  );
 
-    // Register before starting RPC: a rejected registration acquires nothing.
-    const unregister = content.register({
-      dispose: () => {
-        closed = true;
-        const current = session;
-        session = undefined;
-        current?.[Symbol.dispose]();
-      },
-    });
-
-    setStatus("Opening document…");
-    const open = async () => {
-      const opened = await api.openDocument(documentId);
-      if (closed) {
-        opened[Symbol.dispose](); // The tab closed while acquisition was pending.
-        return;
-      }
-      session = opened;
-      const title = await opened.title(); // A string result holds no capabilities.
-      if (!closed) setStatus(title);
-    };
-    void open().catch((error: unknown) => {
-      console.error("Document capability failed", error);
-      if (!closed) setStatus("Unable to open document");
-    });
-
-    return unregister;
-  }, [api, content, documentId]);
-
-  return <p role="status">{status}</p>;
+  return <p role="status">{title}</p>;
 }
 ```
 
-The effect acquires a fresh capability for each setup and releases it for that setup's teardown.
-StrictMode can therefore open twice; the first result is released even if it arrives after the
-second setup. This example prioritizes explicit acquisition ownership. To retain an existing
-stable owner through immediate replay, use the lifecycle hook described above; its replay handling
-does not deduplicate a separate acquisition effect.
+`defer` transfers cleanup responsibility immediately, including after an await. If the effect has
+already ended, it immediately releases that late result. The signal check prevents an old route
+from updating the current UI; a standard AbortSignal cannot guarantee cancellation of remote work.
+Only cancellation corresponding to this signal's reason is a normal stop. Other failures remain
+visible even after the signal has aborted.
 
-Changing `documentId` releases the previous session and starts a new one. Ordinary rerenders and
-tab activation keep the same effect. An editor should add its dirty guards and save callback to
-this same registration. A child widget should borrow the owner's session rather than register a
-second lifecycle for the content.
+Unhandled setup failures stop the effect, release resources already deferred, and report through
+`onIssue` or the default `console.error`. A page may catch recoverable business errors inside setup
+to present them inline. It does not need a general cleanup `finally` or a second error reporter.
 
-## Release and completion rules
+## Stop, close and error ownership
+
+`effect` runs setup at the call and returns an idempotent synchronous stop function, directly usable
+as React cleanup. Start it inside an effect or an event handler, never during render. An event
+handler's effect remains owned by the content until stop or content close; component unmount alone
+does not call an event handler's stop.
+
+Each deferred cleanup runs once. Resources already registered in the same effect release in reverse
+acquisition order; failure does not skip the rest. Different effects have no ordering relationship.
+Place resources with a required release order in the same effect. A late `defer` starts independent
+cleanup immediately and cannot recreate a finished effect. An old content handle cannot start work
+or commands after close, including when a new tab reuses the same id.
+
+Refused, canceled or invalidated closing leaves effects and resources running. After approved
+native removal, close fixes its waiting set before calling abort listeners or cleanup: all cleanup
+registered at that point and earlier stop tasks still settling. Disposal does the same for its
+contents. A pending setup Promise is not itself in that set. Resources or setup failures arriving
+after the boundary are still cleaned and reported but do not extend that operation, even when they
+arrive before its receipt. A cleanup that never settles keeps its operation pending; use the
+business API's cancellation and timeout policy when completion must be bounded.
+
+Programmatic `close`, removal `dispatch` and `dispose` return their errors for the caller to handle.
+The native UI consumes its operation receipt and reports through `onIssue` once. A React stop with
+no waiting operation reports cleanup errors through `onIssue`; an operation can take ownership of
+unreported in-flight tasks in its waiting set. Waiting later does not report the same task twice.
+Errors already reported do not reappear in a later close receipt. Without a handler, the library
+uses `console.error`. A synchronously throwing handler falls back to a diagnostic containing the
+original failure and the handler failure and cannot prevent remaining cleanup.
+
+Stop starts cleanup and returns `void`; it is not a completion receipt. Use the existing host close
+or dispose operation to await the defined cleanup set. Cleanup must not await an operation whose
+waiting set contains that cleanup, which would create a self-dependency.
+
+## Protocol release remains explicit
 
 - Dispose the document stub explicitly. Cap’n Web calls the target's `Symbol.dispose` after the
-  stub and its duplicates are released; JavaScript GC is not the resource-management contract.
-  A separate owner that needs to retain a borrowed stub uses `dup()` and releases that duplicate.
-  Such a duplicate can extend the target's lifetime beyond the tab.
-- Track separately acquired child stubs, subscription handles and retained callbacks in the
-  application owner. Releasing a root is not a general recursive cleanup of every capability
-  returned by its methods. Compose cleanup so one failure does not skip the remaining resources.
-- Worksplit awaits a promise returned by lifecycle `dispose`, and a completed `close` reports
-  `cleanupErrors`. Imperative unregister returns `void`; its cleanup failures go to the host's
-  `onIssue`. A local `stub[Symbol.dispose]()` call is not an acknowledgement that asynchronous
-  server cleanup has finished. If that acknowledgement matters, define and await a domain method
-  in the lifecycle disposer, releasing the stub in `finally`.
-- The example releases a pending open's result when it arrives; closing does not wait for that
-  result. Errors from this late work are reported by the example's error handler. Cancellation,
-  acquisition timeouts and whether a close must wait are application contracts. The leave
-  decision's `signal` belongs to that decision, not the content's whole lifetime.
-- Keep the shared transport under the host owner. A tab only releases its own resources. Browser
-  termination cannot guarantee that React cleanup runs; session termination provides RPC cleanup
-  once the transport detects it. Disposal does not itself guarantee cancellation of running work.
+  stub and its duplicates are released; GC is not the resource contract. A separate owner retaining
+  a borrowed stub uses `dup()` and releases that duplicate, which can outlive the tab.
+- Register separately acquired child stubs, subscription handles and retained callbacks with their
+  actual owner. Releasing a root does not recursively release every capability returned by methods.
+- Calling `stub[Symbol.dispose]()` is not acknowledgement of asynchronous server cleanup. If an
+  acknowledgement matters, await the domain release method in one deferred cleanup, and release
+  the stub in `finally`. Preserve protocol order inside that cleanup or the same effect.
+- A pending open's late result is released on arrival. Close does not wait for that acquisition.
+  To wait for a business task to exit, explicitly defer the task's business-defined exit Promise.
+  The leave decision's signal belongs to that decision, not to a resource effect.
+- The host owns the shared transport. Browser termination cannot guarantee React cleanup;
+  session termination provides RPC cleanup once the transport detects it. Stub disposal alone does
+  not guarantee cancellation of running server work.
 
 See [Cap’n Web disposal](https://capnweb.com/concepts/disposal/) for stub ownership, returned-result
-cleanup, retained callbacks and session termination. In particular, repeatedly exporting the same
-raw `RpcTarget` can produce multiple disposal notifications; use fresh per-open targets for this
-pattern, and follow the upstream rules when intentionally sharing targets.
+cleanup, retained callbacks and session termination. Re-exporting the same raw `RpcTarget` can
+produce multiple disposal notifications; use fresh per-open targets for this example and follow
+the upstream sharing rules when intentionally retaining targets.

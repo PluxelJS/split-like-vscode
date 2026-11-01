@@ -6,6 +6,11 @@ import {
 } from "@worksplit/core";
 import {
   useWorkbenchState,
+  useWorkbenchContent,
+  type WorkbenchContent,
+  type WorkbenchContentEffect,
+  type WorkbenchContentLifecycle,
+  type DispatchResult,
   type NavigationResult,
   type StartResult,
   type CloseResult,
@@ -16,7 +21,8 @@ import {
   type WorkbenchEditingContext,
   type WorkbenchProps,
 } from "@worksplit/react";
-import { DockLocation, Model, type IJsonModel } from "flexlayout-react";
+import { Actions, DockLocation, Model, type IJsonModel } from "flexlayout-react";
+import { useEffect } from "react";
 
 import { workbench } from "./app.js";
 
@@ -43,6 +49,8 @@ export async function routeAndReceiptTypes() {
   };
   void fakeProps;
   const startup: StartResult = await workbench.start("/");
+  const dispatch: DispatchResult = await workbench.dispatch(Actions.renameTab("typed", "Typed"));
+  void dispatch;
   if (startup.status === "empty") {
     const href: string = startup.href;
     void href;
@@ -98,6 +106,35 @@ export async function routeAndReceiptTypes() {
   const panes: PaneConstraints[] = [{ id: "left" }, { id: "right" }];
   const sized: SplitLayout = resizeAtSash(createSplitLayout({ panes, containerSize: 600 }), 0, 20);
   return { model: Model.fromJson(nativeJson), context, renderer, sized };
+}
+
+export function usePublicContentContract(lifecycle?: WorkbenchContentLifecycle) {
+  const content: WorkbenchContent = useWorkbenchContent(lifecycle);
+  useEffect(
+    () =>
+      content.effect(async ({ signal, defer }: WorkbenchContentEffect) => {
+        signal.throwIfAborted();
+        defer(() => {});
+        defer(async () => {});
+        await Promise.resolve();
+      }),
+    [content],
+  );
+  // @ts-expect-error Cleanup is declared through defer, not a returned disposer.
+  content.effect(() => () => {});
+  // @ts-expect-error The editing owner does not own resource disposal.
+  const invalidLifecycle: WorkbenchContentLifecycle = { dispose: () => {} };
+  void invalidLifecycle;
+  const invalidEffect: WorkbenchContentEffect = {
+    signal: new AbortController().signal,
+    defer() {},
+    // @ts-expect-error Resource effects have no nested scope or task API.
+    track() {},
+  };
+  void invalidEffect;
+  // @ts-expect-error Content has no command-style lifecycle registration entry.
+  content.register({});
+  return content;
 }
 
 export function useReadonlyWorkbenchProjection() {

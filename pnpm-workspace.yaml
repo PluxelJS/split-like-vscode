@@ -31,6 +31,7 @@ catalogs:
   build:
     vite-plus: 1.2.0
   dev:
+    capnweb: 0.12.0
     jsdom: ^30.1.2
   frontend:
     flexlayout-react: ^0.11.1

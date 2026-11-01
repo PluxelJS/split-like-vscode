@@ -16,7 +16,6 @@ import {
   Workbench,
   useWorkbenchContent,
   type WorkbenchCommand,
-  type WorkbenchContentLifecycle,
   type WorkbenchProps,
 } from "@worksplit/react";
 import {
@@ -34,7 +33,7 @@ import {
   type Model,
   type TabNode,
 } from "flexlayout-react";
-import { createContext, createRef, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, createRef, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -139,8 +138,7 @@ function fixture(withTool = false, commands: readonly WorkbenchCommand[] = []) {
     string,
     {
       content: ReturnType<typeof useWorkbenchContent>;
-      lifecycle: WorkbenchContentLifecycle;
-      unregister: () => void;
+      stop: () => void;
     }
   >();
   const disposed = vi.fn<(id: string) => void>();
@@ -165,28 +163,24 @@ function fixture(withTool = false, commands: readonly WorkbenchCommand[] = []) {
     const content = useWorkbenchContent();
     const input = useRef<HTMLInputElement>(null);
     const revision = useRef(0);
-    const lifecycle = useMemo<WorkbenchContentLifecycle>(
-      () => ({
-        isDirty: () => Boolean(input.current?.value),
-        getCloseRevision: () => revision.current,
-        beforeLeave: (reason) => decide(content.id, reason),
-        focus: () => input.current?.focus({ preventScroll: true }),
-        save: () => saved(content.id),
-        dispose: () => disposed(content.id),
-      }),
-      [content],
-    );
+    useWorkbenchContent({
+      isDirty: () => Boolean(input.current?.value),
+      getCloseRevision: () => revision.current,
+      beforeLeave: (reason) => decide(content.id, reason),
+      focus: () => input.current?.focus({ preventScroll: true }),
+      save: () => saved(content.id),
+    });
     useEffect(() => {
-      resources.add(content.id);
-      return () => {
-        resources.delete(content.id);
-      };
+      const stop = content.effect(({ defer }) => {
+        resources.add(content.id);
+        defer(() => {
+          resources.delete(content.id);
+          disposed(content.id);
+        });
+      });
+      contents.set(content.id, { content, stop });
+      return stop;
     }, [content]);
-    useEffect(() => {
-      const unregister = content.register(lifecycle);
-      contents.set(content.id, { content, lifecycle, unregister });
-      return unregister;
-    }, [content, lifecycle]);
     return (
       <input
         ref={input}
@@ -868,22 +862,12 @@ describe("public React customization", () => {
     expect(consumer.contents.get("helper")!.content).not.toBe(old.content);
     fireEvent.change(fresh, { target: { value: "Fresh tool draft" } });
     consumer.reject();
-    const lateDispose = vi.fn<() => void>();
-    const lateDecision = vi.fn<() => boolean>(() => true);
-    const rejectedLifecycle = {
-      isDirty: () => false,
-      beforeLeave: lateDecision,
-      dispose: lateDispose,
-    };
-    expect(() => old.content.register(rejectedLifecycle)).toThrow(
-      "Cannot register closed content helper",
-    );
-    expect(lateDispose).not.toHaveBeenCalled();
-    // A failed registration leaves its resource ownership with the application.
-    rejectedLifecycle.dispose();
-    expect(lateDispose).toHaveBeenCalledTimes(1);
+    const lateSetup = vi.fn<() => void>();
+    expect(() => old.content.effect(lateSetup)).toThrow(/closed content helper/);
+    expect(lateSetup).not.toHaveBeenCalled();
+    await expect(old.content.executeCommand("save")).rejects.toThrow(/closed content helper/);
     await act(async () => {
-      old.unregister();
+      old.stop();
     });
     await act(async () => {
       expect(await consumer.workbench.dispatch(Actions.deleteTab("helper"))).toMatchObject({
@@ -891,20 +875,19 @@ describe("public React customization", () => {
         reason: "decision",
       });
     });
-    expect(lateDecision).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Editor tool")).toBe(fresh);
     expect((fresh as HTMLInputElement).value).toBe("Fresh tool draft");
     expect(screen.getByLabelText("Editor A")).toBe(editorA);
     expect(consumer.disposed.mock.calls.filter(([id]) => id === "helper")).toHaveLength(1);
 
-    // Even reusing a lifecycle object cannot make the old node's unregister own the new node.
     const current = consumer.contents.get("helper")!;
-    Object.assign(old.lifecycle, current.lifecycle);
-    await act(async () => {
-      current.unregister();
-      current.content.register(old.lifecycle);
-      old.unregister();
-    });
+    const freshCleanup = vi.fn<() => void>();
+    const stopFresh = current.content.effect(({ defer }) => defer(freshCleanup));
+    old.stop();
+    expect(freshCleanup).not.toHaveBeenCalled();
+    stopFresh();
+    stopFresh();
+    expect(freshCleanup).toHaveBeenCalledTimes(1);
     await act(async () => {
       expect(await consumer.workbench.dispatch(Actions.deleteTab("helper"))).toMatchObject({
         status: "rejected",

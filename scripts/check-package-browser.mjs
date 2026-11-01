@@ -860,7 +860,7 @@ async function checkEmptyHome(page, url, report) {
   assert.equal((await sample(page)).documents.length, 1);
   assert.equal((await sample(page)).editing.activeTabId, retained.id);
   assert.equal((await sample(page)).metrics.loads, beforeHome.metrics.loads);
-  assert.equal((await sample(page)).metrics.lifecycleDisposals, 0);
+  assert.equal((await sample(page)).metrics.disposals, 0);
   await page.goForward();
   await expect(page).toHaveURL(`${url}${retained.href}`);
   assert.equal((await sample(page)).documents.length, 1);
@@ -881,7 +881,7 @@ async function checkEmptyHome(page, url, report) {
   );
   assert.equal(restored.editing.activeTabId, retained.id);
   assert.equal(restored.metrics.loads, 1, "Restoring selected A from home leaves hidden B lazy");
-  assert.equal(restored.metrics.lifecycleDisposals, 0);
+  assert.equal(restored.metrics.disposals, 0);
   await expect(page.getByLabel("Draft B", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Issues", { exact: true })).toHaveText("No issues");
   await page.screenshot({ path: resolve(acceptance, "packed-consumer-empty-home-restored.png") });
@@ -922,10 +922,11 @@ async function checkStrictMode(context, directory, report) {
     assert.equal(initial.metrics.subscriptions, 2);
     assert.equal(initial.metrics.providers, 2);
     assert.equal(
-      initial.metrics.lifecycleDisposals,
-      0,
-      "Effect rehearsal must not dispose Worksplit content resources",
+      initial.metrics.disposals,
+      initial.metrics.editorUnmounts,
+      "Every replayed setup must release its own content resources",
     );
+    const replayDisposals = initial.metrics.disposals;
     const a = await documentNamed(page, "A");
     const b = await documentNamed(page, "B");
     await page.getByLabel("Draft A", { exact: true }).fill("StrictMode still guards this draft");
@@ -935,14 +936,14 @@ async function checkStrictMode(context, directory, report) {
     await expect(page.getByLabel("Draft A", { exact: true })).toHaveValue(
       "StrictMode still guards this draft",
     );
-    assert.equal((await sample(page)).metrics.lifecycleDisposals, 0);
+    assert.equal((await sample(page)).metrics.disposals, replayDisposals);
     await page.locator(`#flexlayout-tabbutton-${b.id}`).click();
     await page.locator(`#flexlayout-tabbutton-${a.id}`).click();
-    assert.equal((await sample(page)).metrics.lifecycleDisposals, 0);
+    assert.equal((await sample(page)).metrics.disposals, replayDisposals);
     acceptNext(page, report);
     await page.locator(`#flexlayout-tabbutton-${a.id} [title=Close]`).click();
     await expect(page.getByLabel("Draft A", { exact: true })).toHaveCount(0);
-    await expect.poll(async () => (await sample(page)).metrics.lifecycleDisposals).toBe(1);
+    await expect.poll(async () => (await sample(page)).metrics.disposals).toBe(replayDisposals + 1);
     assert.equal((await sample(page)).metrics.subscriptions, 1);
     const closed = await sample(page);
     assert.equal(closed.documents[0].id, b.id);
@@ -950,9 +951,9 @@ async function checkStrictMode(context, directory, report) {
     await page.screenshot({ path: resolve(acceptance, "packed-consumer-strict-mode.png") });
     report.screenshots.push("packed-consumer-strict-mode.png");
     assert.deepEqual(await page.evaluate(() => window.packedConsumer.workbench.dispose()), []);
-    await expect.poll(async () => (await sample(page)).metrics.lifecycleDisposals).toBe(2);
+    await expect.poll(async () => (await sample(page)).metrics.disposals).toBe(replayDisposals + 2);
     assert.deepEqual(await page.evaluate(() => window.packedConsumer.workbench.dispose()), []);
-    assert.equal((await sample(page)).metrics.lifecycleDisposals, 2);
+    assert.equal((await sample(page)).metrics.disposals, replayDisposals + 2);
     assert.equal((await sample(page)).metrics.subscriptions, 0);
     report.strictMode = {
       development: true,
@@ -963,7 +964,7 @@ async function checkStrictMode(context, directory, report) {
       disposed: await sample(page),
     };
     report.checks.push(
-      "Real development StrictMode effect replay leaves lifecycle resources live and dirty guards installed; genuine close disposes once, host disposal once, repeat disposal never again",
+      "Real development StrictMode reacquires resources after releasing the replayed setup, retains dirty guards, and releases each remaining setup once on close or shutdown",
     );
   } finally {
     await page.close();

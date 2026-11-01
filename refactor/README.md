@@ -1,7 +1,7 @@
 # Worksplit 架构与维护约束
 
 当前实现使用一个 FlexLayout Model、每文档独立的真实 TanStack Router，以及一个 Worksplit 会话协调实例。
-内部 demo 和独立打包消费者均通过公开入口接入。Pluxel 的 Report Template Studio 先导应用也消费固定提交的包制品；Pluxel 本体仍未迁移。库内证据范围、版本和测量限制见 [验收记录](acceptance.md)，Studio 的业务验收由其项目测试维护。
+内部 demo、独立打包消费者、Pluxel Shell 的 WorkspaceSession 与 Report Template Studio 均通过公开入口接入。根工作区通过 vendor workspace 包解析 Worksplit；打包消费者独立安装公开制品。历史证据范围、版本和测量限制见 [验收记录](acceptance.md)，本次 API 替换的行为见[本轮实施验收](API_REFINEMENT_VALIDATION.md)；Studio 的业务验收由其项目测试维护。
 
 本页维护当前架构及变更约束，不再并列维护原型推荐行为或已完成的实施计划。
 原始设计的演进由 Git 历史及验收记录保存；当前 API 以公开 exports、实现和测试为依据。
@@ -12,7 +12,7 @@
 | 导航、历史、关闭及原生操作的行为边界   | [行为契约](../docs/vscode-workbench-behavior.md) |
 | 模块职责与后续修改约束                 | 本页                                             |
 | 已验证场景、截图、资源成本与未验证范围 | [验收记录](acceptance.md)                        |
-| 评审资源接入与 API 精进方向（未实现）  | [精进提案](API_REFINEMENT_PROPOSAL.md)           |
+| 资源接入与 API 精进的设计依据          | [精进提案](API_REFINEMENT_PROPOSAL.md)           |
 
 ## 单一所有权
 
@@ -79,7 +79,7 @@ FlexLayout 0.11.1 整 TabSet 删除 TabGroup 的兼容处理仅转换为获准�
 动态插件可用性、远程 renderer 撤回与草稿恢复属于应用，当前库没有通用插件生命周期协议。
 
 首次挂载后的内容在切换、移动、pin、最大化与隐藏时保留；原生 render-on-demand 决定未显示内容是否挂载。
-隐藏不暂停业务任务，应用为其连接和后台工作负责。注册结束、关闭与实例释放结算各自拥有的资源，
+原生隐藏不暂停业务任务；React Activity/Suspense 会按原生 effect 规则清理隐藏子区。持续根 owner 保留编辑决策，各 content.effect 在 React cleanup、stop、关闭或实例释放时结算自己拥有的资源，
 共享服务不会随单个文档关闭。dirty 和关闭期间编辑变化使用应用已有修订，不由 Worksplit 创建第二套编辑状态。
 关闭、失败登记与强制 shutdown 的具体归属见 [内容决策与资源](../README.md#content-decisions-commands-and-resources)。
 
@@ -95,6 +95,7 @@ Worksplit 没有手机模式、自动最大化策略或桌面布局覆盖层。�
 | 模块                                                                                      | 职责                                                                                   |
 | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | [integration.ts](../packages/react/src/integration.ts)                                    | 唯一协调实例；文档接纳、身份、操作资格、受控 Actions、关闭与资源释放                   |
+| [content-effects.ts](../packages/react/src/content-effects.ts)                            | signal/defer、单次结束、固定清理集合及单一错误归属                                     |
 | [workbench.tsx](../packages/react/src/workbench.tsx)                                      | 原生 Layout / RouterProvider 接线、内容 context、只读 Store hook、焦点观察与便利快捷键 |
 | [native-layout.ts](../packages/react/src/native-layout.ts)                                | 原生节点和 Actions 遍历；不实现布局算法                                                |
 | [layout-policy.ts](../packages/react/src/layout-policy.ts)                                | 可配置中央拓扑限制；原生临时候选统一校验拖拽与 Action，不触发内容保存                  |
@@ -107,7 +108,7 @@ Worksplit 没有手机模式、自动最大化策略或桌面布局覆盖层。�
 
 ## 后续修改与应用迁移
 
-Studio 先导接入确认了以下边界，后续 Pluxel 本体迁移沿用：
+Pluxel Shell 与 Studio 的接入共同遵循以下边界：
 
 - 项目/工作台会话由宿主持有，React shell 借用；组件 effect 重放不创建或释放整套业务实例。文档 route tree、项目业务操作和 UI 外壳按所有权组织，不按文件行数机械拆分。
 - 工具显隐、分组展开和焦点使用现有 `activate`；移动和重新插入仍提交原生 Actions。旁开文档在 `open` 时给出原生位置，避免先接纳再移动而撤销自己的焦点请求。
@@ -115,7 +116,7 @@ Studio 先导接入确认了以下边界，后续 Pluxel 本体迁移沿用：
 - 多视图共享草稿、输入和编译产物由业务资源所有者维护。视图释放使用权，明确的业务操作才丢弃共享修改；晚到编译结果必须复核实际资源代次。
 - 制品接入校验同一份 React、Router、Store、FlexLayout 和 core 的解析身份及 peer 范围；源码测试通过不能替代独立安装制品的类型、构建和浏览器检查。
 
-Studio 是 Electron 应用，其项目级关闭与文件操作证据不覆盖 Pluxel 外层 Router、浏览器历史和插件撤回。迁移时分别验证这些实际宿主边界，不预先增加通用 adapter、快照迁移器或插件协议。
+Studio 是 Electron 应用，其项目级关闭与文件操作证据不替代 Pluxel Shell 外层 Router、浏览器历史和插件撤回的验收。分别验证实际宿主边界，不增加通用 adapter、快照迁移器或插件协议。
 
 修改前核对 exports、上游锁定版本、实现、调用方和相应测试；正常原生操作不能因包装新增另一套语义。可选 layoutPolicy 在短寿命原生候选上执行 Action 验证结构上限，不保留第二个 Model，也不自写 tidy。
 受保护身份、dirty 与资源移除路径必须在 UI、程序 Actions 和恢复入口保持同一约束。
@@ -125,6 +126,6 @@ Studio 是 Electron 应用，其项目级关闭与文件操作证据不覆盖 Pl
 不因行数更少、隐藏内容未显示或单次采样更快就宣称高效；新的公共能力需从安装后的公开入口验证。
 
 旧 Workbench descriptors、arrangement/grid、自研拖放和旧快照兼容链已移除，独立 SplitView 保留。
-Pluxel 后续迁移须移除手写 pathname 分发和重复的 close/address/grid 接线；插件身份、RPC、远程内容和保存策略仍属 Pluxel。
-破坏性接入点由 [迁移说明](../docs/vscode-workbench-behavior.md#breaking-changes-for-later-pluxel-migration) 维护。
-内部消费与独立 fixture 通过，仍不等于 Pluxel 已兼容或第二个实际应用已验证。
+Pluxel 使用 Worksplit 协调文档与工具；插件身份、RPC、远程内容、共享草稿、修订与保存策略仍属 Pluxel。内容资源使用 content.effect，不能保留另一套通用资源登记层。
+破坏性接入点由 [迁移说明](../docs/vscode-workbench-behavior.md#breaking-contracts-and-host-migration) 维护。
+内部消费与独立 fixture 的结果不替代 Shell 或 Studio 的实际业务与在线验收；历史记录也不证明今天的制品已加载。

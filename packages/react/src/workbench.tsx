@@ -7,6 +7,7 @@ import {
   memo,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   type HTMLAttributes,
@@ -16,36 +17,17 @@ import {
 
 import {
   integrationState,
+  type WorkbenchContent,
   type WorkbenchContentLifecycle,
   type WorkbenchInstance,
   type WorkbenchState,
 } from "./integration";
 
-interface PendingLifecycle {
-  lifecycle: WorkbenchContentLifecycle;
-  unregister: () => void;
-}
-function createContentContext(id: string, instance: WorkbenchInstance<AnyRouter>) {
-  let pending: PendingLifecycle | undefined;
-  return {
-    id,
-    instance,
-    takePendingLifecycle: () => {
-      const previous = pending;
-      pending = undefined;
-      return previous;
-    },
-    deferLifecycle: (teardown: PendingLifecycle) => {
-      pending = teardown;
-      queueMicrotask(() => {
-        if (pending !== teardown) return;
-        pending = undefined;
-        teardown.unregister();
-      });
-    },
-  };
-}
-const ContentContext = createContext<ReturnType<typeof createContentContext> | null>(null);
+const ContentContext = createContext<{
+  content: WorkbenchContent;
+  instance: WorkbenchInstance<AnyRouter>;
+  node: TabNode;
+} | null>(null);
 const defaultEmpty = <p>Open a document to begin.</p>;
 const rejectExternalDrag = () => undefined;
 
@@ -84,51 +66,62 @@ export function useWorkbenchState<T>(
   return useStore(integrationState(workbench).store, selector);
 }
 
-/** Content lifetime registration is independent of route matching or docking position. */
-export function useWorkbenchContent() {
+/** Omitted lifecycle only borrows the handle. An object declares this hook's editing owner. */
+export function useWorkbenchContent(lifecycle?: WorkbenchContentLifecycle): WorkbenchContent {
   const context = useContext(ContentContext);
   if (!context) throw new Error("Content must render inside a Worksplit document or tool");
-  const internal = integrationState(context.instance);
-  return useMemo(() => {
-    const node = internal.model.getNodeById(context.id);
-    return {
-      id: context.id,
-      register: (lifecycle: WorkbenchContentLifecycle) =>
-        internal.register(context.id, lifecycle, node),
-      executeCommand: (id: string) =>
-        context.instance.executeCommand(id, { contentId: context.id }),
-    };
-  }, [context, internal]);
-}
-export function useWorkbenchContentLifecycle(lifecycle: WorkbenchContentLifecycle) {
-  const content = useWorkbenchContent();
-  const context = useContext(ContentContext)!;
+  const { content, instance, node } = context;
+  const internal = integrationState(instance);
+  const committed = useRef(lifecycle);
+  // A discarded concurrent render never changes callbacks. Layout-effect cleanup on Suspense
+  // hiding does not withdraw the separate passive owner registration.
+  useLayoutEffect(() => {
+    committed.current = lifecycle;
+  });
+  const owner = useMemo<WorkbenchContentLifecycle>(
+    () => ({
+      get isDirty() {
+        return committed.current?.isDirty?.bind(committed.current);
+      },
+      get getCloseRevision() {
+        return committed.current?.getCloseRevision?.bind(committed.current);
+      },
+      get beforeLeave() {
+        return committed.current?.beforeLeave?.bind(committed.current);
+      },
+      get save() {
+        return committed.current?.save?.bind(committed.current);
+      },
+      get focus() {
+        return committed.current?.focus?.bind(committed.current);
+      },
+    }),
+    [],
+  );
+  const ownsEditor = lifecycle !== undefined;
   useEffect(() => {
-    const pending = context.takePendingLifecycle();
-    // Replaying the same effect retains its live resources. A genuinely new owner first
-    // releases the old registration; a second still-mounted owner remains an error.
-    const reconnect = pending?.lifecycle === lifecycle;
-    if (pending && !reconnect) pending.unregister();
-    const unregister = reconnect ? pending.unregister : content.register(lifecycle);
-    return () => {
-      context.deferLifecycle({ lifecycle, unregister });
-    };
-  }, [content, context, lifecycle]);
+    if (ownsEditor) return internal.registerOwner(content.id, owner, node);
+  }, [content, internal, node, owner, ownsEditor]);
+  return content;
 }
 
 const Content = memo(function Content({
-  id,
+  node,
   instance,
 }: {
-  id: string;
+  node: TabNode;
   instance: WorkbenchInstance<AnyRouter>;
 }) {
+  const id = node.getId();
   const internal = integrationState(instance);
   const router = useStore(internal.store, () => internal.documents.get(id)?.router);
   const tool = internal.tools.get(id);
-  const context = useMemo(() => createContentContext(id, instance), [id, instance]);
+  const context = useMemo(
+    () => ({ content: internal.content(id, node), instance, node }),
+    [id, instance, internal, node],
+  );
   useEffect(() => {
-    if (!tool) void internal.loadDocument(id);
+    if (!tool) void internal.loadDocument(id).catch(internal.report);
   }, [id, internal, tool]);
   return (
     <ContentContext.Provider value={context}>
@@ -199,7 +192,7 @@ export function Workbench({
   const internal = integrationState(workbench);
   const root = useRef<HTMLDivElement>(null);
   const factory = useMemo(
-    () => (node: TabNode) => <Content id={node.getId()} instance={workbench} />,
+    () => (node: TabNode) => <Content node={node} instance={workbench} />,
     [workbench],
   );
   const placeholder = useMemo(() => () => <div className="worksplit-empty">{empty}</div>, [empty]);

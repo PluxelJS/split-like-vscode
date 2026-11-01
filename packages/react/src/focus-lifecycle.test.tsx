@@ -1,15 +1,10 @@
 import { createRootRoute, createRoute, createRouter, type AnyRouter } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Actions, DockLocation, Model } from "flexlayout-react";
-import { useMemo, useRef } from "react";
+import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createWorkbench,
-  useWorkbenchContentLifecycle,
-  Workbench,
-  type WorkbenchInstance,
-} from "./index";
+import { createWorkbench, useWorkbenchContent, Workbench, type WorkbenchInstance } from "./index";
 import { integrationState } from "./integration";
 
 const instances: WorkbenchInstance<AnyRouter>[] = [];
@@ -37,8 +32,7 @@ afterEach(async () => {
 });
 function Editor() {
   const input = useRef<HTMLInputElement>(null);
-  const lifecycle = useMemo(() => ({ focus: () => input.current?.focus() }), []);
-  useWorkbenchContentLifecycle(lifecycle);
+  useWorkbenchContent({ focus: () => input.current?.focus() });
   return <input ref={input} aria-label="Document editor" />;
 }
 function setup() {
@@ -81,7 +75,7 @@ describe("document focus and lifecycle ownership", () => {
       if (reason === "blur") internal.setWindowFocus(false);
       if (reason === "activate") await open("B");
       const focus = vi.fn<() => void>();
-      internal.register(id, { focus });
+      internal.registerOwner(id, { focus });
       await Promise.resolve();
       expect(focus).not.toHaveBeenCalled();
     },
@@ -95,7 +89,7 @@ describe("document focus and lifecycle ownership", () => {
       if (reason === "close") await workbench.close(id);
       else await workbench.dispose();
       const focus = vi.fn<() => void>();
-      expect(() => internal.register(id, { focus })).toThrow("closed content");
+      expect(() => internal.registerOwner(id, { focus })).toThrow("closed content");
       await Promise.resolve();
       expect(focus).not.toHaveBeenCalled();
     },
@@ -107,7 +101,7 @@ describe("document focus and lifecycle ownership", () => {
     const id = await open("A");
     fireEvent.pointerDown(document.body);
     const focus = vi.fn<() => void>();
-    internal.register(id, { focus });
+    internal.registerOwner(id, { focus });
     await Promise.resolve();
     expect(focus).not.toHaveBeenCalled();
   });
@@ -129,22 +123,26 @@ describe("document focus and lifecycle ownership", () => {
     expect(workbench.getLayout().layout.children).toHaveLength(2);
   });
 
-  it("rejects a second lifecycle owner without taking its resources or replacing the guard", async () => {
+  it("refuses a second editing owner while independent resource effects keep their ownership", async () => {
     const { workbench, open, internal } = setup();
     const id = await open("A");
-    const disposeOwner = vi.fn<() => void>();
-    const disposeRejected = vi.fn<() => void>();
-    const release = internal.register(id, { isDirty: () => true, dispose: disposeOwner });
-    expect(() => internal.register(id, { dispose: disposeRejected })).toThrow(
-      "already has a lifecycle owner",
-    );
+    const disposeFirst = vi.fn<() => void>();
+    const disposeSecond = vi.fn<() => void>();
+    const releaseOwner = internal.registerOwner(id, { isDirty: () => true });
+    const content = internal.content(id);
+    const stopFirst = content.effect(({ defer }) => defer(disposeFirst));
+    content.effect(({ defer }) => defer(disposeSecond));
+    expect(() => internal.registerOwner(id, {})).toThrow("already has a lifecycle owner");
     expect(await workbench.close(id)).toEqual({ status: "rejected", reason: "decision" });
-    release();
-    release();
-    expect(disposeOwner).toHaveBeenCalledTimes(1);
-    expect(disposeRejected).not.toHaveBeenCalled();
-    internal.register(id, { dispose: disposeRejected });
+    releaseOwner();
+    releaseOwner();
+    expect(disposeFirst).not.toHaveBeenCalled();
+    expect(disposeSecond).not.toHaveBeenCalled();
+    stopFirst();
+    stopFirst();
+    expect(disposeFirst).toHaveBeenCalledTimes(1);
     await workbench.close(id);
-    expect(disposeRejected).toHaveBeenCalledTimes(1);
+    expect(disposeFirst).toHaveBeenCalledTimes(1);
+    expect(disposeSecond).toHaveBeenCalledTimes(1);
   });
 });

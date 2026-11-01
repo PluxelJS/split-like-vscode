@@ -41,6 +41,7 @@
     "@testing-library/react": "catalog:test",
     "@types/react": "catalog:frontend",
     "@types/react-dom": "catalog:frontend",
+    "capnweb": "catalog:dev",
     "flexlayout-react": "catalog:frontend",
     "jsdom": "catalog:dev",
     "react": "catalog:frontend",

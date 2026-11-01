@@ -62,7 +62,7 @@ async function setup() {
     options: { roleIds: ["staff"], closesAt: "2026-12-31T00:00:00Z" },
   };
   const lifetime = { decisions: 0, saves: 0, disposals: 0 };
-  internal.register(b.id, {
+  internal.registerOwner(b.id, {
     isDirty: () => true,
     getCloseRevision: () => draft.revision,
     beforeLeave: () => {
@@ -72,9 +72,11 @@ async function setup() {
     save: () => {
       lifetime.saves += 1;
     },
-    dispose: () => {
+  });
+  internal.content(b.id).effect(({ defer }) => {
+    defer(() => {
       lifetime.disposals += 1;
-    },
+    });
   });
   return { workbench, a, b, internal, model: internal.model, draft, lifetime };
 }

@@ -13,19 +13,15 @@ import {
   Workbench,
   SplitView,
   Pane,
-  useWorkbenchContentLifecycle,
+  useWorkbenchContent,
 } from "@worksplit/react";
+import * as worksplit from "@worksplit/react";
 import { Actions, DockLocation, Model, TabGroupNode, TabNode } from "flexlayout-react";
 import { createElement } from "react";
 
-for (const value of [
-  Workbench,
-  SplitView,
-  Pane,
-  useWorkbenchContentLifecycle,
-  HotkeysProvider,
-  useHotkey,
-])
+assert.equal("useWorkbenchContentLifecycle" in worksplit, false);
+
+for (const value of [Workbench, SplitView, Pane, useWorkbenchContent, HotkeysProvider, useHotkey])
   assert.ok(value);
 for (const name of ["core", "react"]) {
   const specifier = "@worksplit/" + name;

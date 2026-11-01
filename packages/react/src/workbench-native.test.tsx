@@ -7,16 +7,10 @@ import {
 } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Actions, DockLocation, Layout, Model, type ILayoutProps } from "flexlayout-react";
-import { useMemo, useRef } from "react";
+import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createWorkbench,
-  Workbench,
-  useWorkbenchContent,
-  useWorkbenchContentLifecycle,
-  type WorkbenchOptions,
-} from "./index";
+import { createWorkbench, Workbench, useWorkbenchContent, type WorkbenchOptions } from "./index";
 
 const disposals: (() => Promise<unknown>)[] = [];
 const resizeObservers: { callback: ResizeObserverCallback; observer: ResizeObserver }[] = [];
@@ -65,10 +59,8 @@ afterEach(async () => {
 });
 
 function Editor() {
-  const { id } = useWorkbenchContent();
   const input = useRef<HTMLInputElement>(null);
-  const lifecycle = useMemo(() => ({ focus: () => input.current?.focus() }), []);
-  useWorkbenchContentLifecycle(lifecycle);
+  const { id } = useWorkbenchContent({ focus: () => input.current?.focus() });
   return (
     <input ref={input} aria-label={`Editor ${id}`} data-testid={`editor-${id}`} defaultValue={id} />
   );
