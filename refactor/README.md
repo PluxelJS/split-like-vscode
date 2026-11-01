@@ -6,13 +6,15 @@
 本页维护当前架构及变更约束，不再并列维护原型推荐行为或已完成的实施计划。
 原始设计的演进由 Git 历史及验收记录保存；当前 API 以公开 exports、实现和测试为依据。
 
-| 要解决的问题                           | 权威入口                                         |
-| -------------------------------------- | ------------------------------------------------ |
-| 安装、初始化、内容与宿主定制           | [公开用法](../README.md)                         |
-| 导航、历史、关闭及原生操作的行为边界   | [行为契约](../docs/vscode-workbench-behavior.md) |
-| 模块职责与后续修改约束                 | 本页                                             |
-| 已验证场景、截图、资源成本与未验证范围 | [验收记录](acceptance.md)                        |
-| 资源接入与 API 精进的设计依据          | [精进提案](API_REFINEMENT_PROPOSAL.md)           |
+| 要解决的问题                          | 权威入口                                         |
+| ------------------------------------- | ------------------------------------------------ |
+| 安装、初始化、内容与宿主定制          | [公开用法](../README.md)                         |
+| 导航、历史、关闭及原生操作的行为边界  | [行为契约](../docs/vscode-workbench-behavior.md) |
+| 模块职责与后续修改约束                | 本页                                             |
+| 资源所有权、关闭结算和 React 隐藏边界 | [资源契约](../docs/resource-lifetimes.md)        |
+| 内容 API、实际制品及宿主在线验收      | [实施验收](API_REFINEMENT_VALIDATION.md)         |
+| 历史场景、截图与资源成本              | [历史验收记录](acceptance.md)                    |
+| 内容 API 的设计理由                   | [设计决策](API_REFINEMENT_PROPOSAL.md)           |
 
 ## 单一所有权
 
@@ -106,7 +108,7 @@ Worksplit 没有手机模式、自动最大化策略或桌面布局覆盖层。�
 内部模块分工不要求增加公共控制器或新包。只在有独立不变量、实际消费阻碍或明确资源寿命时增加公共能力。
 真实消费入口是 [demo](../packages/demo/src/main.tsx) 与 [独立安装 fixture](../scripts/fixtures/packed-consumer/app.tsx)，均通过公开包入口使用库的协调。
 
-## 后续修改与应用迁移
+## 应用接入与修改边界
 
 Pluxel Shell 与 Studio 的接入共同遵循以下边界：
 
@@ -125,7 +127,6 @@ Studio 是 Electron 应用，其项目级关闭与文件操作证据不替代 Pl
 资源成本应记录真实请求、提交渲染、业务/history 订阅和关闭清理，说明样本、环境与 GC 限制。
 不因行数更少、隐藏内容未显示或单次采样更快就宣称高效；新的公共能力需从安装后的公开入口验证。
 
-旧 Workbench descriptors、arrangement/grid、自研拖放和旧快照兼容链已移除，独立 SplitView 保留。
 Pluxel 使用 Worksplit 协调文档与工具；插件身份、RPC、远程内容、共享草稿、修订与保存策略仍属 Pluxel。内容资源使用 content.effect，不能保留另一套通用资源登记层。
-破坏性接入点由 [迁移说明](../docs/vscode-workbench-behavior.md#breaking-contracts-and-host-migration) 维护。
+实际宿主组合由[接入边界](../docs/vscode-workbench-behavior.md#host-integration-boundaries)维护。
 内部消费与独立 fixture 的结果不替代 Shell 或 Studio 的实际业务与在线验收；历史记录也不证明今天的制品已加载。

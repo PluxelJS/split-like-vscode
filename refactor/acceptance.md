@@ -19,7 +19,7 @@
 
 原 Pluxel 的 ` M vendor/split-like-vscode` 和其已偏离记录的子模块位置 `+e607932…` 保持原状。
 没有改 Pluxel 源码、依赖、索引或子模块指针。内部验收阶段未推送、合并或发布；后续独立项目试用的
-checkout、打包与安装入口维护在 [公开试用步骤](../README.md#try-this-branch-in-another-project)。
+checkout、打包与安装入口维护在 [公开试用步骤](../README.md#install-from-source)。
 
 ## 实施结果与版本证据
 

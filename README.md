@@ -9,20 +9,20 @@ one native Model, with no parallel docking tree or pathname renderer dispatcher.
 - `@worksplit/core`: the DOM-free pane sizing/resize calculations used by `SplitView`.
 - `packages/demo`: the complete internal consumer, using public package exports without source aliases.
 
-This is a breaking replacement of the old Workbench descriptors, arrangement/grid helpers, part
-state and snapshots. Pluxel consumes the native Workbench API. Applications that only need independent panes use
-`SplitView` without creating a document workspace. See
-[behavior and migration](docs/vscode-workbench-behavior.md) and [acceptance evidence](refactor/acceptance.md).
+Pluxel Shell and Report Template Studio consume the native Workbench API. Applications that only
+need independent panes use `SplitView` without creating a document workspace. See the
+[behavior contract](docs/vscode-workbench-behavior.md) and
+[content API acceptance evidence](refactor/API_REFINEMENT_VALIDATION.md).
 
-| Task                                         | Start here                                                                                                            |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Install in another React application         | [Source checkout](#install-from-source)                                                                               |
-| Create a routed workspace                    | [Initialization](#a-complete-routed-workspace)                                                                        |
-| Guard edits and own resource cleanup         | [Content decisions](#content-decisions-commands-and-resources)                                                        |
-| Attach RPC capabilities and other resources  | [Resource ownership and Cap’n Web](docs/resource-lifetimes.md)                                                        |
-| Customize shell, providers and native Layout | [Host customization](#customize-the-host-with-native-apis)                                                            |
-| Use application stores and dynamic shortcuts | [Store and Hotkeys](#host-shortcuts-and-frontend-stores)                                                              |
-| Change the integration or assess its limits  | [Architecture](refactor/README.md), [behavior](docs/vscode-workbench-behavior.md), [evidence](refactor/acceptance.md) |
+| Task                                         | Start here                                                                                                                           |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Install in another React application         | [Source checkout](#install-from-source)                                                                                              |
+| Create a routed workspace                    | [Initialization](#a-complete-routed-workspace)                                                                                       |
+| Guard edits and own resource cleanup         | [Content decisions](#content-decisions-commands-and-resources)                                                                       |
+| Attach RPC capabilities and other resources  | [Resource ownership and Cap’n Web](docs/resource-lifetimes.md)                                                                       |
+| Customize shell, providers and native Layout | [Host customization](#customize-the-host-with-native-apis)                                                                           |
+| Use application stores and dynamic shortcuts | [Store and Hotkeys](#host-shortcuts-and-frontend-stores)                                                                             |
+| Change the integration or assess its limits  | [Architecture](refactor/README.md), [behavior](docs/vscode-workbench-behavior.md), [evidence](refactor/API_REFINEMENT_VALIDATION.md) |
 
 ## Install from source
 

@@ -1,8 +1,9 @@
-# Workbench behavior and migration
+# Workbench behavior
 
 Current Worksplit uses one native FlexLayout Model and one TanStack Router per document. This page
-owns behavior rules; [README](../README.md) owns installation and API use, and
-[acceptance](../refactor/acceptance.md) records the tested versions/scenarios.
+owns behavior rules; [README](../README.md) owns installation and API use.
+[Content API acceptance](../refactor/API_REFINEMENT_VALIDATION.md) records the API replacement and
+actual host checks; [historical acceptance](../refactor/acceptance.md) retains earlier scenarios and measurements.
 
 ## State owners
 
@@ -212,26 +213,12 @@ FlexLayout isolates non-Router render failures per tab and provides Retry; TanSt
 failures. Desktop Workbench does not subscribe to the catalogue revision for rendering, preserving
 native adjusting-resize behavior.
 
-## Breaking contracts and host migration
+## Host integration boundaries
 
-The old Workbench component name remains, with an instance from createWorkbench, optional
-navigation/empty content, native Layout props, native `layoutRef` and standard root DOM props.
-Its prior value/layout/editor/view props and Worksplit imperative ref contract are removed.
-Tool registrations contain only `id` and `render`; native JSON `name` supplies their titles.
-The host supplies compatible React Router, Store and Hotkeys adapters, React/React DOM and
-FlexLayout as peers. For application-owned stores, runtime keybinding preferences and native
-Hotkeys providers/hooks, use the [host shortcuts and stores](../README.md#host-shortcuts-and-frontend-stores)
-entry. Command execution keeps Worksplit's target/lifetime coordination.
-Use native providers, presentation slots and the upstream `ILayoutApi` as documented in
-[host customization](../README.md#customize-the-host-with-native-apis), including its intercepted
-insertion-return limitation. Editing context now records document/tool/shell focus
-separately from active document/group and window focus.
-
-Removed public contracts include WorkbenchValue, WorkbenchLayout, WorkbenchHandle, WorkbenchView,
-WorkbenchEditorArrangement, recursive editor-grid/arrangement helpers, WORKBENCH_PARTS and the
-custom editor drag engine. Old snapshots are not read or migrated at startup. Provide a one-time
-explicit conversion/reset when migrating actual local data. SplitView, Pane, pane sizing and
-independent Pane Kit uses remain.
+The host supplies compatible peers, providers and presentation through the public
+[initialization](../README.md#a-complete-routed-workspace) and
+[host customization](../README.md#customize-the-host-with-native-apis) contracts.
+Editing context records document/tool/shell focus separately from active document/group and window focus.
 
 Pluxel Shell uses WorkspaceSession and native Worksplit document/tool instances; Report Template
 Studio uses the same integration. Plugin identity, remote renderers, RPC, editing revisions, shared
