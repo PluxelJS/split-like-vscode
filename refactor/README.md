@@ -6,15 +6,21 @@
 本页维护当前架构及变更约束，不再并列维护原型推荐行为或已完成的实施计划。
 原始设计的演进由 Git 历史及验收记录保存；当前 API 以公开 exports、实现和测试为依据。
 
-| 要解决的问题                          | 权威入口                                         |
-| ------------------------------------- | ------------------------------------------------ |
-| 安装、初始化、内容与宿主定制          | [公开用法](../README.md)                         |
-| 导航、历史、关闭及原生操作的行为边界  | [行为契约](../docs/vscode-workbench-behavior.md) |
-| 模块职责与后续修改约束                | 本页                                             |
-| 资源所有权、关闭结算和 React 隐藏边界 | [资源契约](../docs/resource-lifetimes.md)        |
-| 内容 API、实际制品及宿主在线验收      | [实施验收](API_REFINEMENT_VALIDATION.md)         |
-| 历史场景、截图与资源成本              | [历史验收记录](acceptance.md)                    |
-| 内容 API 的设计理由                   | [设计决策](API_REFINEMENT_PROPOSAL.md)           |
+2026-11-03 确定的[设计原则](../docs/design-principles.md)是后续演进的共同约束。
+[整体重构提案](../docs/proposals/worksplit-redesign.md)定义新的目标架构、默认菜单与公共 API，明确彻底替换且不留兼容；
+它尚未实施。本页后文记录当前实现，包括将被迁出的自动放置政策和将被替换的内容 API。
+实施者从[实施说明](../docs/proposals/worksplit-redesign-implementation.md)进入，不把历史验收当作新设计完成证明。
+
+| 要解决的问题                          | 权威入口                                                                                      |
+| ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 安装、初始化、内容与宿主定制          | [公开用法](../README.md)                                                                      |
+| 导航、历史、关闭及原生操作的行为边界  | [行为契约](../docs/vscode-workbench-behavior.md)                                              |
+| 模块职责与后续修改约束                | 本页                                                                                          |
+| 资源所有权、关闭结算和 React 隐藏边界 | [资源契约](../docs/resource-lifetimes.md)                                                     |
+| 内容 API、实际制品及宿主在线验收      | [实施验收](API_REFINEMENT_VALIDATION.md)                                                      |
+| 历史场景、截图与资源成本              | [历史验收记录](acceptance.md)                                                                 |
+| 内容 API 的设计理由                   | [设计决策](API_REFINEMENT_PROPOSAL.md)                                                        |
+| 长期设计原则与下一代完整目标          | [设计原则](../docs/design-principles.md)、[整体重构](../docs/proposals/worksplit-redesign.md) |
 
 ## 单一所有权
 

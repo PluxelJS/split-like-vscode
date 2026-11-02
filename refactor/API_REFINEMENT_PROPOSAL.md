@@ -3,6 +3,9 @@
 2026-11-01 复核的内容 API 已实施，Worksplit 与 Pluxel Shell、Report Template Studio 的已知消费者已迁移。
 本页只保留设计理由；已完成的迁移过程由 Git 历史保存。
 
+2026-11-03 的[整体重构提案](../docs/proposals/worksplit-redesign.md)重新设计整个公开接口与默认工作台体验。
+本页记录已实施内容 API 的理由；下一代接口的目标以新提案为准，当前运行行为仍以源码和现行契约为准。
+
 | 要查的事实                                      | 权威入口                                                                                                        |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | 公开 API、编辑决策和命令                        | [README](../README.md#content-decisions-commands-and-resources)与[公开 exports](../packages/react/src/index.ts) |
