@@ -23,6 +23,8 @@ import {
 import type { ReactNode } from "react";
 
 import { BrowserHistoryCoordinator } from "./browser-history";
+import { ContentEffects, type WorkbenchContentEffect } from "./content-effects";
+export type { WorkbenchContentEffect } from "./content-effects";
 import { createDocumentHistory, navigateDocument } from "./document-history";
 import {
   DocumentLinkController,
@@ -99,6 +101,8 @@ export type CloseResult =
     }
   | { status: "superseded" }
   | { status: "failed"; error: unknown };
+/** Native actions retain their existing close receipts and ordinary admission result. */
+export type DispatchResult = CloseResult | { status: "applied" | "rejected" };
 export interface WorkbenchLeaveContext {
   id: string;
   from?: string;
@@ -107,17 +111,22 @@ export interface WorkbenchLeaveContext {
   signal?: AbortSignal;
 }
 export interface WorkbenchContentLifecycle {
-  isDirty?: () => boolean;
+  isDirty?: (() => boolean) | undefined;
   /** Existing application editing revision. Dirty multi-content close requires this token. */
-  getCloseRevision?: () => string | number;
+  getCloseRevision?: (() => string | number) | undefined;
   /** The application must recheck its editing revision/save receipt before approving. */
-  beforeLeave?: (
-    reason: "close" | "navigate",
-    context: WorkbenchLeaveContext,
-  ) => boolean | Promise<boolean>;
-  focus?: () => void;
-  save?: () => void | Promise<void>;
-  dispose?: () => void | Promise<void>;
+  beforeLeave?:
+    | ((reason: "close" | "navigate", context: WorkbenchLeaveContext) => boolean | Promise<boolean>)
+    | undefined;
+  focus?: (() => void) | undefined;
+  save?: (() => void | Promise<void>) | undefined;
+}
+/** A stable handle bound to one content instance, including after its id is reused. */
+export interface WorkbenchContent {
+  readonly id: string;
+  executeCommand(id: string): Promise<void>;
+  /** Start from useEffect or an event. The returned synchronous stop is React cleanup. */
+  effect(setup: (effect: WorkbenchContentEffect) => void | Promise<void>): () => void;
 }
 export interface WorkbenchTool {
   id: string;
@@ -178,6 +187,7 @@ export interface OpenDocumentOptions {
   preview?: boolean;
 }
 
+type EditorOwner = { lifecycle: WorkbenchContentLifecycle };
 type DocumentSession = {
   id: string;
   href: string;
@@ -187,7 +197,7 @@ type DocumentSession = {
   preview: boolean;
   operation: number;
   contentVersion: number;
-  lifecycle?: WorkbenchContentLifecycle | undefined;
+  owner?: EditorOwner | undefined;
   release: (() => void)[];
 };
 class FocusConflict extends Error {}
@@ -208,7 +218,12 @@ type Internal = {
   tools: Map<string, WorkbenchTool>;
   commands: readonly WorkbenchCommand[];
   loadDocument: (id: string) => Promise<void>;
-  register: (id: string, lifecycle: WorkbenchContentLifecycle, expectedNode?: Node) => () => void;
+  registerOwner: (
+    id: string,
+    lifecycle: WorkbenchContentLifecycle,
+    expectedNode?: Node,
+  ) => () => void;
+  content: (id: string, expectedNode?: Node) => WorkbenchContent;
   focus: (id: string | null, area: WorkbenchState["focusedArea"]) => void;
   setWindowFocus: (focused: boolean) => void;
   modelAction: (action: Action) => undefined;
@@ -270,12 +285,22 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     { key: string; promise: Promise<CloseActionResult>; signal?: AbortSignal }
   >();
   private disposePromise: Promise<readonly unknown[]> | undefined;
+  private readonly contents = new Map<
+    TabNode,
+    { handle: WorkbenchContent; effects: ContentEffects }
+  >();
+  private readonly nativeOperations = new WeakSet<Promise<DispatchResult>>();
+  // Native Model has no public global-attribute reader. Retain its explicit inputs for
+  // detached ADD candidates; native change notifications keep direct global Actions current.
+  // Node structure/configuration is always read from the live Model, never cached here.
+  private readonly admissionGlobals: NonNullable<IJsonModel["global"]>;
 
   constructor(private readonly options: WorkbenchOptions<TRouter>) {
     const layout =
       options.snapshot === undefined
         ? structuredClone(options.layout ?? defaultWorkbenchLayout())
         : this.validateSnapshot(options.snapshot);
+    this.admissionGlobals = structuredClone(layout.global ?? {});
     this.validateLayout(layout, options.snapshot !== undefined);
     const model = Model.fromJson(layout);
     const documents = new Map<string, DocumentSession>();
@@ -305,7 +330,9 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         windowFocused: typeof document !== "undefined" && document.hasFocus(),
       }),
       loadDocument: (id) => this.loadDocument(id),
-      register: (id, lifecycle, expectedNode) => this.register(id, lifecycle, expectedNode),
+      registerOwner: (id, lifecycle, expectedNode) =>
+        this.registerOwner(id, lifecycle, expectedNode),
+      content: (id, expectedNode) => this.content(id, expectedNode),
       focus: (id, area) => this.observeFocus(id, area),
       setWindowFocus: (windowFocused) => {
         if (!windowFocused) this.cancelContentFocus();
@@ -317,7 +344,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       },
       modelAction: (action) => {
         if (documentLinks.consume(action)) return undefined;
-        void this.dispatch(action).catch((error: unknown) => this.issue("operation-failed", error));
+        this.reportNative(this.dispatch(action));
         return undefined;
       },
       report: (error) => this.issue("operation-failed", error),
@@ -387,6 +414,9 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       createMemoryHistory({ initialEntries: [options.home ?? "/"] }),
     );
     this.modelListener = (action) => {
+      for (const leaf of actionsIn(action))
+        if (leaf.type === Actions.UPDATE_MODEL_ATTRIBUTES)
+          Object.assign(this.admissionGlobals, structuredClone(leaf.data.json));
       this.changed();
       const id =
         typeof action.data.tabNode === "string"
@@ -503,15 +533,17 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
 
   getDocument(id: string): WorkbenchDocument | null {
     const session = this.state.documents.get(id);
-    if (!session) return null;
+    const node = this.state.model.getNodeById(id);
+    const container = tabContainer(node);
+    if (this.disposed || !session || !(node instanceof TabNode) || !container) return null;
     const metadata = [...(session.router?.state.matches ?? [])]
       .toReversed()
       .find((m) => m.staticData?.worksplit)?.staticData.worksplit;
     return {
       id,
       href: session.href,
-      containerId: tabContainer(this.state.model.getNodeById(id))!.getId(),
-      title: (this.state.model.getNodeById(id) as TabNode).getName(),
+      containerId: container.getId(),
+      title: node.getName(),
       preview: session.preview,
       navigationKey: metadata?.navigationKey ?? null,
     };
@@ -524,7 +556,10 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     this.changed();
   }
   getDocuments(): readonly WorkbenchDocument[] {
-    return [...this.state.documents.keys()].map((id) => this.getDocument(id)!);
+    return [...this.state.documents.keys()].flatMap((id) => {
+      const document = this.getDocument(id);
+      return document ? [document] : [];
+    });
   }
   getActiveDocument(): WorkbenchDocument | null {
     const id = this.state.store.get().activeDocumentId;
@@ -640,11 +675,11 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   }
 
   /** Close actions may preserve the current browser entry when handing off to the host. */
-  async dispatch(
+  dispatch(
     action: Action,
     options: { history?: boolean; signal?: AbortSignal } = {},
-  ): Promise<CloseResult | { status: "applied" | "rejected" }> {
-    if (this.disposed) return { status: "rejected" };
+  ): Promise<DispatchResult> {
+    if (this.disposed) return Promise.resolve({ status: "rejected" });
     const actions = actionsIn(action);
     const removals = actions.filter(
       (a) => a.type === Actions.DELETE_TAB || a.type === Actions.DELETE_TABSET,
@@ -652,9 +687,15 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     if (removals.length > 0)
       return removals.length === actions.length
         ? this.closeAction(action, options.history !== false, options.signal)
-        : { status: "rejected" };
-    if (!this.canDispatch(action)) return { status: "rejected" };
-    return { status: this.applyLayoutAction(action, actions) ? "applied" : "rejected" };
+        : Promise.resolve({ status: "rejected" });
+    try {
+      if (!this.canDispatch(action)) return Promise.resolve({ status: "rejected" });
+      return Promise.resolve({
+        status: this.applyLayoutAction(action, actions) ? "applied" : "rejected",
+      });
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   private resolveTool(tab: IJsonTabNode): WorkbenchTool | undefined {
@@ -710,7 +751,13 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     if (!live) return false;
     if (this.options.allowDrop) {
       // Validate a detached candidate before publishing insertion or mounting resources.
-      const candidate = Model.fromJson(model.toJson());
+      const candidate = Model.fromJson(
+        structuredClone({
+          global: this.admissionGlobals,
+          layout: model.getRootRow()!.toJson(),
+          borders: model.getBorderSet().toJson(),
+        }),
+      );
       candidate.doAction(action);
       const tab = candidate.getNodeById(json.id);
       const destination = candidate.getNodeById(target.getId());
@@ -922,7 +969,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   }
   async save(id: string) {
     const session = this.state.documents.get(id);
-    if (session && !this.disposed) await session.lifecycle?.save?.();
+    if (session && !this.disposed) await session.owner?.lifecycle.save?.();
   }
 
   /** Explicitly attach to a browser workspace; returns the listener cleanup. */
@@ -948,6 +995,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           : this.isEmptyHome(href)
             ? await this.startHome(current, true)
             : await this.openHref(href, {}, false, current, true);
+        if (result.status === "failed") this.issue("history", result.error);
         return result.status === "committed"
           ? { id: result.document.id, href: result.document.href }
           : result.status === "empty"
@@ -1017,7 +1065,6 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       return { status: "committed", document: this.getDocument(session.id)!, reused: true };
     } catch (error) {
       if (!valid()) return { status: "superseded" };
-      this.issue("operation-failed", error, session.id);
       return { status: "failed", stage: "load", error };
     }
   }
@@ -1057,6 +1104,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     });
     this.disposed = true;
     this.state.documentLinks.dispose();
+    const contentCleanup = this.closeContents([...this.contents.keys()]);
     this.cancelContentFocus();
     ++this.openEpoch;
     const errors: unknown[] = [];
@@ -1073,12 +1121,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       errors.push(error);
     }
     const sessions = [...this.state.documents.values()];
-    const sessionIds = new Set(sessions.map((session) => session.id));
-    const otherCleanupIds = new Set(
-      [...this.toolLifecycles.keys(), ...this.cleanupTasks.keys()].filter(
-        (id) => !sessionIds.has(id),
-      ),
-    );
+    const toolIds = [...this.state.tools.keys()];
     this.state.documents.clear();
     const pending = [...this.pending];
     this.pending.clear();
@@ -1096,8 +1139,9 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       errors.push(error);
     }
     void Promise.allSettled([
+      contentCleanup,
       ...sessions.map((s) => this.releaseSession(s)),
-      ...[...otherCleanupIds].map((id) => this.releaseTool(id)),
+      ...toolIds.map((id) => this.releaseTool(id)),
     ]).then((results) => {
       return finish([
         ...errors,
@@ -1657,10 +1701,10 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           if (
             previousNode instanceof TabNode &&
             previousNode.isCloseable() &&
-            !previousPreview.lifecycle?.isDirty?.() &&
+            !previousPreview.owner?.lifecycle.isDirty?.() &&
             !this.closing.has(previousPreview.id)
           )
-            void this.close(previousPreview.id);
+            this.reportNative(this.close(previousPreview.id));
         } catch (error) {
           // Retirement is post-admission cleanup. Keep the old document and preserve the
           // committed receipt even if an application getter cannot establish safe removal.
@@ -1671,7 +1715,6 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     } catch (error) {
       if (error instanceof PlacementChanged) return { status: "superseded" };
       if (error instanceof FocusConflict) return { status: "rejected", reason: "focus-conflict" };
-      this.issue("operation-failed", error);
       return { status: "failed", stage: "load", error };
     } finally {
       if (router && this.pending.delete(router))
@@ -1736,7 +1779,6 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       }
       return { status: "committed", document: this.getDocument(session.id)!, reused: true };
     } catch (error) {
-      this.issue("operation-failed", error, session.id);
       return { status: "failed", stage: "navigate", error };
     } finally {
       this.approved.delete(session.id);
@@ -1843,9 +1885,9 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     if (this.state.documents.get(id) === session) this.acceptRouter(session);
   }
   private async decide(session: DocumentSession, reason: "close" | "navigate", to?: string) {
-    if (!session.lifecycle?.isDirty?.()) return true;
-    return session.lifecycle.beforeLeave
-      ? await session.lifecycle.beforeLeave(reason, {
+    if (!session.owner?.lifecycle.isDirty?.()) return true;
+    return session.owner.lifecycle.beforeLeave
+      ? await session.owner.lifecycle.beforeLeave(reason, {
           id: session.id,
           from: session.href,
           ...(to ? { to } : {}),
@@ -1916,9 +1958,6 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       for (const id of reserved)
         if (this.closing.get(id)?.promise === promise) this.closing.delete(id);
       finish(result);
-      if (result.status === "failed") this.issue("operation-failed", result.error);
-      if (result.status === "closed")
-        result.cleanupErrors.forEach((error) => this.issue("operation-failed", error, result.id));
       return undefined;
     });
     return promise;
@@ -1935,13 +1974,14 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       return session ? [session] : [];
     });
     const versions = sessions.map((s) => s.contentVersion);
-    const lifecycles = sessions.map((s) => s.lifecycle);
+    const owners = sessions.map((s) => s.owner);
     const tools = tabs.filter((tab) => this.state.tools.has(tab.getId()));
-    const toolLifecycles = tools.map((tab) => this.toolLifecycles.get(tab.getId()));
+    const toolOwners = tools.map((tab) => this.toolOwners.get(tab.getId()));
     try {
       const contentLifecycles = tabs.map(
         (tab) =>
-          this.state.documents.get(tab.getId())?.lifecycle ?? this.toolLifecycles.get(tab.getId()),
+          (this.state.documents.get(tab.getId())?.owner ?? this.toolOwners.get(tab.getId()))
+            ?.lifecycle,
       );
       const dirty = contentLifecycles.map((lifecycle) => lifecycle?.isDirty?.() ?? false);
       const revisionReaders = contentLifecycles.map((lifecycle) => lifecycle?.getCloseRevision);
@@ -1993,10 +2033,8 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       )
         return { status: "superseded" };
       if (
-        sessions.some(
-          (s, i) => s.contentVersion !== versions[i] || s.lifecycle !== lifecycles[i],
-        ) ||
-        tools.some((tab, i) => this.toolLifecycles.get(tab.getId()) !== toolLifecycles[i]) ||
+        sessions.some((s, i) => s.contentVersion !== versions[i] || s.owner !== owners[i]) ||
+        tools.some((tab, i) => this.toolOwners.get(tab.getId()) !== toolOwners[i]) ||
         contentLifecycles.some((lifecycle, i) => {
           const read = lifecycle?.getCloseRevision;
           // Withdrawing a revision provider cannot disable an already approved member's recheck.
@@ -2069,6 +2107,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
           this.state.documents.delete(session.id);
           ++session.operation;
         }
+      const contentCleanup = this.closeContents(removed);
       try {
         for (let i = this.mru.length - 1; i >= 0; --i)
           if (ids.has(this.mru[i]!)) this.mru.splice(i, 1);
@@ -2093,6 +2132,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       }
       const cleanupErrors = (
         await Promise.all([
+          contentCleanup,
           ...sessions.filter((s) => ids.has(s.id)).map((s) => this.releaseSession(s)),
           ...tools
             .filter((tab) => ids.has(tab.getId()))
@@ -2115,68 +2155,84 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
       return { status: "failed", error };
     }
   }
-  private toolLifecycles = new Map<string, WorkbenchContentLifecycle>();
-  private readonly cleanupTasks = new Map<string, Set<Promise<unknown[]>>>();
-  private settleLifecycle(
-    id: string,
-    lifecycle: WorkbenchContentLifecycle | undefined,
-  ): Promise<unknown[]> {
-    const task = (async () => {
-      try {
-        await lifecycle?.dispose?.();
-        return [];
-      } catch (error) {
-        return [error];
-      }
-    })();
-    let tasks = this.cleanupTasks.get(id);
-    if (!tasks) {
-      tasks = new Set();
-      this.cleanupTasks.set(id, tasks);
-    }
-    tasks.add(task);
-    void task.then(() => {
-      tasks.delete(task);
-      if (tasks.size === 0) this.cleanupTasks.delete(id);
-      return undefined;
-    });
-    return task;
-  }
-  private register(id: string, lifecycle: WorkbenchContentLifecycle, expectedNode?: Node) {
+  private readonly toolOwners = new Map<string, EditorOwner>();
+
+  private content(id: string, expectedNode?: Node): WorkbenchContent {
     const node = this.state.model.getNodeById(id);
-    if (
-      this.disposed ||
-      !(node instanceof TabNode) ||
-      (expectedNode !== undefined && expectedNode !== node)
-    )
-      throw new Error(`Cannot register closed content ${id}`);
+    const assertCurrent = () => {
+      if (
+        this.disposed ||
+        !(node instanceof TabNode) ||
+        this.state.model.getNodeById(id) !== node ||
+        (expectedNode !== undefined && node !== expectedNode) ||
+        (!this.state.documents.has(id) && !this.state.tools.has(id))
+      )
+        throw new Error(`Cannot use closed content ${id}`);
+    };
+    assertCurrent();
+    const tab = node as TabNode;
+    const existing = this.contents.get(tab);
+    if (existing) return existing.handle;
+    const effects = new ContentEffects(assertCurrent, (error) =>
+      this.issue("operation-failed", error, id),
+    );
+    const handle: WorkbenchContent = {
+      id,
+      effect: (setup) => effects.effect(setup),
+      executeCommand: async (command) => {
+        assertCurrent();
+        await this.executeCommand(command, { contentId: id });
+      },
+    };
+    this.contents.set(tab, { handle, effects });
+    return handle;
+  }
+
+  /** Invalidate every closing instance and freeze all tasks before running application code. */
+  private closeContents(nodes: readonly TabNode[]): Promise<unknown[]> {
+    const owner = {};
+    const plans = nodes.flatMap((node) => {
+      const record = this.contents.get(node);
+      if (!record) return [];
+      const plan = record.effects.prepareClose(owner);
+      void plan.result.then(() => this.contents.delete(node));
+      return [plan];
+    });
+    plans.forEach((plan) => plan.stop());
+    return Promise.all(plans.map((plan) => plan.result)).then((results) => results.flat());
+  }
+
+  private registerOwner(id: string, lifecycle: WorkbenchContentLifecycle, expectedNode?: Node) {
+    // The handle check also rejects a suspended old tree after the same id was reopened.
+    this.content(id, expectedNode);
+    const node = this.state.model.getNodeById(id)!;
     const session = this.state.documents.get(id);
-    if (session?.lifecycle || this.toolLifecycles.has(id))
+    if (session?.owner || this.toolOwners.has(id))
       throw new Error(`Content ${id} already has a lifecycle owner`);
-    if (session) session.lifecycle = lifecycle;
-    else if (this.state.tools.has(id)) this.toolLifecycles.set(id, lifecycle);
-    else throw new Error(`Cannot register closed content ${id}`);
+    // Registration identity is distinct from the callback object. Withdrawing and registering
+    // the same object must invalidate an approval already waiting for an application decision.
+    const owner = { lifecycle };
+    if (session) session.owner = owner;
+    else this.toolOwners.set(id, owner);
     this.restoreContentFocus(id);
     return () => {
       if (this.state.model.getNodeById(id) !== node) return;
-      if (session?.lifecycle !== lifecycle && this.toolLifecycles.get(id) !== lifecycle) return;
-      if (session?.lifecycle === lifecycle) session.lifecycle = undefined;
-      if (this.toolLifecycles.get(id) === lifecycle) this.toolLifecycles.delete(id);
-      void this.settleLifecycle(id, lifecycle).then((errors) => {
-        errors.forEach((error) => this.issue("operation-failed", error, id));
-        return undefined;
-      });
+      if (session?.owner === owner) session.owner = undefined;
+      if (this.toolOwners.get(id) === owner) this.toolOwners.delete(id);
     };
   }
-  private async releaseTool(id: string): Promise<unknown[]> {
-    const lifecycle = this.toolLifecycles.get(id);
-    this.toolLifecycles.delete(id);
+
+  private releaseTool(id: string): unknown[] {
+    this.toolOwners.delete(id);
     if (!this.options.tools?.some((tool) => tool.id === id)) this.state.tools.delete(id);
-    const previous = [...(this.cleanupTasks.get(id) ?? [])];
-    return (await Promise.all([...previous, this.settleLifecycle(id, lifecycle)])).flat();
+    return [];
   }
-  private async releaseSession(session: DocumentSession): Promise<unknown[]> {
+
+  private releaseSession(session: DocumentSession): unknown[] {
     const errors: unknown[] = [];
+    const router = session.router;
+    session.router = undefined;
+    session.owner = undefined;
     session.release.splice(0).forEach((release) => {
       try {
         release();
@@ -2184,14 +2240,22 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
         errors.push(error);
       }
     });
-    if (session.router) errors.push(...this.releaseRouter(session.router));
-    const lifecycle = session.lifecycle;
-    session.lifecycle = undefined;
-    const previous = [...(this.cleanupTasks.get(session.id) ?? [])];
-    errors.push(
-      ...(await Promise.all([...previous, this.settleLifecycle(session.id, lifecycle)])).flat(),
-    );
+    if (router) errors.push(...this.releaseRouter(router));
     return errors;
+  }
+
+  private reportNative(promise: Promise<DispatchResult>): void {
+    if (this.nativeOperations.has(promise)) return;
+    this.nativeOperations.add(promise);
+    void promise.then(
+      (result) => {
+        if (result.status === "failed") this.issue("operation-failed", result.error);
+        if (result.status === "closed")
+          result.cleanupErrors.forEach((error) => this.issue("operation-failed", error, result.id));
+        return undefined;
+      },
+      (error: unknown) => this.issue("operation-failed", error),
+    );
   }
   private releaseRouter(router: AnyRouter): unknown[] {
     const errors: unknown[] = [];
@@ -2226,7 +2290,7 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
   private restoreContentFocus(id: string) {
     const request = this.pendingFocus;
     const session = this.state.documents.get(id);
-    const lifecycle = () => session?.lifecycle ?? this.toolLifecycles.get(id);
+    const lifecycle = () => (session?.owner ?? this.toolOwners.get(id))?.lifecycle;
     if (!request || request.id !== id || !lifecycle()?.focus) return;
     // Native Layout applies panel visibility during its render. Mounted content
     // must wait for the next frame before a browser can accept DOM focus.
@@ -2359,7 +2423,21 @@ export class WorkbenchInstance<TRouter extends AnyRouter> {
     error: unknown,
     id?: string,
   ) {
-    this.options.onIssue?.({ code, error, ...(id ? { id } : {}) });
+    const issue = { code, error, ...(id ? { id } : {}) };
+    if (!this.options.onIssue) {
+      // eslint-disable-next-line no-console -- Unclaimed failures need a default diagnostic sink.
+      console.error("Worksplit issue", issue);
+      return;
+    }
+    try {
+      this.options.onIssue(issue);
+    } catch (reporterError) {
+      // eslint-disable-next-line no-console -- A broken host reporter must not hide the original issue.
+      console.error("Worksplit issue reporter failed", {
+        ...issue,
+        error: new AggregateError([error, reporterError], "Worksplit issue reporter failed"),
+      });
+    }
   }
   private validateSnapshot(candidate: unknown): IJsonModel {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))

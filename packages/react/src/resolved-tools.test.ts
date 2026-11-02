@@ -1,5 +1,12 @@
 import { createRootRoute, createRoute, createRouter, type AnyRouter } from "@tanstack/react-router";
-import { Actions, DockLocation, TabNode, type IJsonTabNode, type Action } from "flexlayout-react";
+import {
+  Actions,
+  BorderNode,
+  DockLocation,
+  TabNode,
+  type IJsonTabNode,
+  type Action,
+} from "flexlayout-react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { createWorkbench, type WorkbenchInstance, type WorkbenchOptions } from "./index";
@@ -54,7 +61,10 @@ it("resolves fresh native tools without creating a Router, guards close, release
   const internal = integrationState(workbench);
   const dispose = vi.fn<() => void>();
   const beforeLeave = vi.fn<() => Promise<boolean>>(async () => false);
-  internal.register(tab.id, { isDirty: () => true, beforeLeave, dispose });
+  internal.registerOwner(tab.id, { isDirty: () => true, beforeLeave });
+  internal.content(tab.id).effect(({ defer }) => {
+    defer(dispose);
+  });
   expect(await workbench.close(tab.id)).toMatchObject({ status: "rejected", reason: "decision" });
   expect(internal.tools.has(tab.id)).toBe(true);
   expect(dispose).not.toHaveBeenCalled();
@@ -117,4 +127,67 @@ it("keeps rejected candidates out of the live model and renderer registry", asyn
   expect(workbench.getLayout()).toEqual(before);
   expect(internal.tools.has(tab.id)).toBe(false);
   expect(observer).not.toHaveBeenCalled();
+});
+
+it.each([true, false])(
+  "preflights tool admission without save/change side effects (allowed=%s)",
+  async (allowed) => {
+    const policy = vi.fn<() => boolean>(() => allowed);
+    const workbench = setup({
+      layout: {
+        global: { tabEnableClose: false },
+        borders: [
+          {
+            type: "border",
+            location: "bottom",
+            selected: -1,
+            config: { area: "tools" },
+            children: [],
+          },
+        ],
+        layout: { type: "row", children: [{ type: "tabset", id: "main", children: [] }] },
+      },
+      allowDrop: (tabs, target) => {
+        if (tabs[0]?.getId() !== tab.id) return true;
+        expect(tabs[0]?.getConfig()).toEqual(tab.config);
+        expect(tabs[0]?.isEnableClose()).toBe(false);
+        expect(target).toBeInstanceOf(BorderNode);
+        if (!(target instanceof BorderNode)) throw new Error("Expected the tools Border");
+        expect(target.getConfig()).toEqual({ area: "tools" });
+        return policy();
+      },
+    });
+    const opened = await workbench.open({ to: "/$id", params: { id: "A" } });
+    if (opened.status !== "committed") throw new Error(opened.status);
+    const model = integrationState(workbench).model;
+    const save = vi.fn<() => void>();
+    const change = vi.fn<() => void>();
+    model.getNodeById(opened.document.id)!.setEventListener("save", save);
+    model.addChangeListener(change);
+    expect(workbench.canDispatch(add())).toBe(allowed);
+    expect(save).not.toHaveBeenCalled();
+    expect(change).not.toHaveBeenCalled();
+    expect(model.getNodeById(tab.id)).toBeUndefined();
+    expect(policy).toHaveBeenCalledOnce();
+    workbench.snapshot();
+    expect(save).toHaveBeenCalledOnce();
+  },
+);
+
+it("keeps candidate global inheritance current after direct native global actions", () => {
+  let enableClose = true;
+  const workbench = setup({
+    allowDrop: (tabs) => {
+      expect(tabs[0]!.isEnableClose()).toBe(enableClose);
+      return true;
+    },
+  });
+  const model = integrationState(workbench).model;
+  expect(workbench.canDispatch(add())).toBe(true);
+  enableClose = false;
+  model.doAction(Actions.updateModelAttributes({ tabEnableClose: false }));
+  expect(workbench.canDispatch(add())).toBe(true);
+  enableClose = true;
+  model.doAction(Actions.updateModelAttributes({ tabEnableClose: true }));
+  expect(workbench.canDispatch(add())).toBe(true);
 });

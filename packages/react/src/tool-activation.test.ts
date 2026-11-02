@@ -44,7 +44,7 @@ describe("explicit tool activation", () => {
     vi.spyOn(window, "requestAnimationFrame").mockReturnValue(123);
     const cancel = vi.spyOn(window, "cancelAnimationFrame");
     const focus = vi.fn<() => void>();
-    internal.register("inspector", { focus });
+    internal.registerOwner("inspector", { focus });
     workbench.activate("inspector");
     expect(cancel).not.toHaveBeenCalled();
     await workbench.close("inspector");
@@ -65,7 +65,7 @@ describe("explicit tool activation", () => {
       expect(border.isShowing()).toBe(true);
       expect(border.getSelectedNode()?.getId()).toBe("inspector");
     });
-    internal.register("inspector", { focus });
+    internal.registerOwner("inspector", { focus });
     expect(workbench.activate("inspector")).toBe(true);
     await Promise.resolve();
     expect(focus).toHaveBeenCalledOnce();
@@ -89,7 +89,9 @@ describe("explicit tool activation", () => {
     await workbench.dispatch(Actions.updateNodeAttributes(group.getId(), { opened: false }));
     await workbench.dispatch(Actions.maximizeToggle(main));
     const dispose = vi.fn<() => void>();
-    internal.register("inspector", { dispose });
+    internal.content("inspector").effect(({ defer }) => {
+      defer(dispose);
+    });
     expect(workbench.activate("inspector", { focus: false })).toBe(true);
     expect(group.isOpened()).toBe(true);
     expect(internal.model.getMaximizedTabset()?.getId()).toBe(container);
@@ -101,7 +103,7 @@ describe("explicit tool activation", () => {
     instances.push(workbench);
     expect(workbench.activate("inspector")).toBe(true);
     const focus = vi.fn<() => void>();
-    const unregister = internal.register("inspector", { focus });
+    const unregister = internal.registerOwner("inspector", { focus });
     await Promise.resolve();
     expect(focus).toHaveBeenCalledOnce();
     unregister();
@@ -117,7 +119,7 @@ describe("explicit tool activation", () => {
         -1,
       ),
     );
-    internal.register("inspector", { focus });
+    internal.registerOwner("inspector", { focus });
     await Promise.resolve();
     expect(focus).not.toHaveBeenCalled();
     expect(workbench.getDocuments()).toEqual([]);

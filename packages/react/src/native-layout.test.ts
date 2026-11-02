@@ -327,8 +327,8 @@ describe("native FlexLayout ownership", () => {
     expect(native(workbench).getActiveTabset()?.getSelectedNode()?.getId()).toBe(b);
     const focusA = vi.fn<() => void>();
     const focusB = vi.fn<() => void>();
-    integrationState(workbench).register(a, { focus: focusA });
-    integrationState(workbench).register(b, { focus: focusB });
+    integrationState(workbench).registerOwner(a, { focus: focusA });
+    integrationState(workbench).registerOwner(b, { focus: focusB });
     expect(await workbench.dispatch(Actions.selectTab("inspector"))).toEqual({ status: "applied" });
     expect(
       (native(workbench).getNodeById("border_bottom") as BorderNode).getSelectedNode()?.getId(),
@@ -355,8 +355,8 @@ describe("native FlexLayout ownership", () => {
     const b = await open("B", "other");
     const focusA = vi.fn<() => void>();
     const focusB = vi.fn<() => void>();
-    integrationState(workbench).register(a, { focus: focusA });
-    integrationState(workbench).register(b, { focus: focusB });
+    integrationState(workbench).registerOwner(a, { focus: focusA });
+    integrationState(workbench).registerOwner(b, { focus: focusB });
     await workbench.dispatch(Actions.selectTab(a));
     await Promise.resolve();
     expect(workbench.getActiveDocument()?.id).toBe(a);
@@ -390,7 +390,7 @@ describe("native FlexLayout ownership", () => {
       });
       const a = await open("A", "main");
       const focus = vi.fn<() => void>();
-      integrationState(workbench).register(a, { focus });
+      integrationState(workbench).registerOwner(a, { focus });
       workbench.activate(a);
       if (interaction === "native tool selection") {
         await workbench.dispatch(Actions.selectTab("inspector"));
@@ -428,7 +428,7 @@ describe("native FlexLayout ownership", () => {
     workbench.activate(a);
     await Promise.resolve();
     const focus = vi.fn<() => void>();
-    integrationState(workbench).register(b, { focus });
+    integrationState(workbench).registerOwner(b, { focus });
     const model = native(workbench);
     const action = Actions.group([
       Actions.selectTab("inspector"),
@@ -481,7 +481,7 @@ describe("native FlexLayout ownership", () => {
       workbench.activate(a);
       await Promise.resolve();
       const focus = vi.fn<() => void>();
-      integrationState(workbench).register(a, { focus });
+      integrationState(workbench).registerOwner(a, { focus });
       const model = native(workbench);
       const leaf = Actions.moveNode(moving, "border_bottom", DockLocation.CENTER, -1);
       const action =
@@ -521,7 +521,7 @@ describe("native FlexLayout ownership", () => {
       expect((native(workbench).getNodeById("border_bottom") as BorderNode).getSelected()).toBe(-1);
       expect(workbench.getActiveDocument()?.id).toBe(b);
       const focus = vi.fn<() => void>();
-      integrationState(workbench).register(c, { focus });
+      integrationState(workbench).registerOwner(c, { focus });
       const leaf = Actions.selectTab(c);
       const action = Actions.group([wrapper === "singleton" ? leaf : Actions.group([leaf])]);
       const expected = native(workbench);
@@ -1330,17 +1330,18 @@ describe("registered native tool admission", () => {
     const cleanup = vi.fn<() => void>();
     const decision = vi.fn<() => boolean>(() => false);
     let dirty = false;
-    const originalLifecycle = { isDirty: () => dirty, beforeLeave: decision, dispose: cleanup };
+    const originalLifecycle = { isDirty: () => dirty, beforeLeave: decision };
     const retainedRegister = (lifecycle: WorkbenchContentLifecycle) =>
-      internal.register("outline", lifecycle, originalNode);
+      internal.registerOwner("outline", lifecycle, originalNode);
     const retainedUnregister = retainedRegister(originalLifecycle);
+    internal.content("outline", originalNode).effect(({ defer }) => defer(cleanup));
     expect(await workbench.close("outline")).toEqual({
       status: "closed",
       id: "outline",
       cleanupErrors: [],
     });
     expect(cleanup).toHaveBeenCalledTimes(1);
-    expect(() => retainedRegister({})).toThrow("Cannot register closed content");
+    expect(() => retainedRegister({})).toThrow(/closed content/);
 
     expect(await workbench.dispatch(insert("other", "Reopened outline"))).toEqual({
       status: "applied",
@@ -1348,8 +1349,9 @@ describe("registered native tool admission", () => {
     const reopenedNode = internal.model.getNodeById("outline");
     expect(reopenedNode).toBeInstanceOf(TabNode);
     expect(reopenedNode).not.toBe(originalNode);
-    expect(() => retainedRegister({})).toThrow("Cannot register closed content");
-    const releaseReopened = internal.register("outline", originalLifecycle, reopenedNode);
+    expect(() => retainedRegister({})).toThrow(/closed content/);
+    const releaseReopened = internal.registerOwner("outline", originalLifecycle, reopenedNode);
+    internal.content("outline", reopenedNode).effect(({ defer }) => defer(cleanup));
     dirty = true;
     retainedUnregister();
     expect(await workbench.close("outline")).toEqual({ status: "rejected", reason: "decision" });
@@ -1359,7 +1361,9 @@ describe("registered native tool admission", () => {
 
     const nextCleanup = vi.fn<() => void>();
     releaseReopened();
-    internal.register("outline", { dispose: nextCleanup }, reopenedNode);
+    internal.content("outline", reopenedNode).effect(({ defer }) => {
+      defer(nextCleanup);
+    });
     expect(await workbench.close("outline")).toMatchObject({ status: "closed", cleanupErrors: [] });
     expect(nextCleanup).toHaveBeenCalledTimes(1);
     expect(cleanup).toHaveBeenCalledTimes(2);
@@ -1382,7 +1386,11 @@ describe("registered native tool admission", () => {
     expect(await workbench.dispatch(add)).toEqual({ status: "applied" });
     const cleanup = deferred<void>(undefined);
     const dispose = vi.fn<() => Promise<void>>(() => cleanup.promise);
-    integrationState(workbench).register("search", { dispose });
+    integrationState(workbench)
+      .content("search")
+      .effect(({ defer }) => {
+        defer(dispose);
+      });
     const closing = workbench.close("search");
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(integrationState(workbench).model.getNodeById("search")).toBeUndefined();
@@ -1391,7 +1399,11 @@ describe("registered native tool admission", () => {
     expect(await closing).toMatchObject({ status: "closed" });
     expect(await workbench.dispatch(add)).toEqual({ status: "applied" });
     const nextCleanup = vi.fn<() => void>();
-    integrationState(workbench).register("search", { dispose: nextCleanup });
+    integrationState(workbench)
+      .content("search")
+      .effect(({ defer }) => {
+        defer(nextCleanup);
+      });
     expect(await workbench.close("search")).toMatchObject({ status: "closed" });
     expect(nextCleanup).toHaveBeenCalledTimes(1);
     expect(dispose).toHaveBeenCalledTimes(1);
@@ -1413,7 +1425,11 @@ describe("registered native tool admission", () => {
       ),
     ).toEqual({ status: "applied" });
     const cleanup = vi.fn<() => void>();
-    integrationState(workbench).register("search", { dispose: cleanup });
+    integrationState(workbench)
+      .content("search")
+      .effect(({ defer }) => {
+        defer(cleanup);
+      });
     expect(await workbench.close("search")).toEqual({
       status: "rejected",
       reason: "not-closeable",
@@ -1599,7 +1615,7 @@ describe("registered native tool admission", () => {
     await workbench.dispatch(Actions.selectTab(b));
     const model = integrationState(workbench).model;
     const focus = vi.fn<() => void>();
-    integrationState(workbench).register(b, { focus });
+    integrationState(workbench).registerOwner(b, { focus });
     const before = workbench.getLayout();
     const refusal = await workbench.open(
       { to: "/documents/$id", params: { id: "D" }, search: { view: "edit" } },
@@ -1661,7 +1677,7 @@ describe("registered native tool admission", () => {
       { target: "other" },
     );
     expect(result).toEqual({ status: "failed", stage: "load", error: policyError });
-    expect(onIssue).toHaveBeenCalledWith({ code: "operation-failed", error: policyError });
+    expect(onIssue).not.toHaveBeenCalled();
     expect(workbench.getLayout()).toEqual(before);
     expect(workbench.getDocuments().map((document) => document.id)).toEqual([a]);
     expect(integrationState(workbench).model.getActiveTabset()?.getId()).toBe("main");
@@ -1855,7 +1871,11 @@ describe("native close coordination", () => {
     const { workbench, open } = setup();
     const a = await open("A");
     const cleanup = vi.fn<() => void>();
-    integrationState(workbench).register(a, { dispose: cleanup });
+    integrationState(workbench)
+      .content(a)
+      .effect(({ defer }) => {
+        defer(cleanup);
+      });
     const router = integrationState(workbench).documents.get(a)?.router;
     if (!router) throw new Error("Missing document Router");
     const destroy = vi.spyOn(router.history, "destroy");
@@ -1883,7 +1903,11 @@ describe("native close coordination", () => {
     const { workbench, open } = setup();
     const a = await open("A");
     const cleanup = vi.fn<() => void>();
-    integrationState(workbench).register(a, { dispose: cleanup });
+    integrationState(workbench)
+      .content(a)
+      .effect(({ defer }) => {
+        defer(cleanup);
+      });
     const router = integrationState(workbench).documents.get(a)?.router;
     if (!router) throw new Error("Missing document Router");
     const destroy = vi.spyOn(router.history, "destroy");
@@ -1908,7 +1932,7 @@ describe("native close coordination", () => {
     expect(cleanup).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects a retained lifecycle registration callback after the native tool closes", async () => {
+  it("rejects a retained content handle after the native tool closes", async () => {
     const tool = { id: "search", render: () => null };
     const { workbench } = setup({
       tools: [tool],
@@ -1930,18 +1954,17 @@ describe("native close coordination", () => {
         ],
       },
     });
-    const register = (lifecycle: WorkbenchContentLifecycle) =>
-      integrationState(workbench).register(tool.id, lifecycle);
+    const content = integrationState(workbench).content(tool.id);
     const cleanup = vi.fn<() => void>();
     const lateCleanup = vi.fn<() => void>();
-    const unregister = register({ dispose: cleanup });
+    const stop = content.effect(({ defer }) => defer(cleanup));
     expect(await workbench.dispatch(Actions.deleteTab(tool.id))).toMatchObject({
       status: "closed",
     });
     expect(native(workbench).getNodeById(tool.id)).toBeUndefined();
     expect(cleanup).toHaveBeenCalledTimes(1);
-    expect(() => register({ dispose: lateCleanup })).toThrow("Cannot register closed content");
-    unregister();
+    expect(() => content.effect(({ defer }) => defer(lateCleanup))).toThrow(/closed content/);
+    stop();
     await workbench.dispose();
     expect(cleanup).toHaveBeenCalledTimes(1);
     expect(lateCleanup).not.toHaveBeenCalled();
@@ -1959,9 +1982,21 @@ describe("native close coordination", () => {
     const cleanupA = vi.fn<() => void>();
     const cleanupB = vi.fn<() => void>();
     const cleanupD = vi.fn<() => void>();
-    integrationState(workbench).register(a, { dispose: cleanupA });
-    integrationState(workbench).register(b, { dispose: cleanupB });
-    integrationState(workbench).register(d, { dispose: cleanupD });
+    integrationState(workbench)
+      .content(a)
+      .effect(({ defer }) => {
+        defer(cleanupA);
+      });
+    integrationState(workbench)
+      .content(b)
+      .effect(({ defer }) => {
+        defer(cleanupB);
+      });
+    integrationState(workbench)
+      .content(d)
+      .effect(({ defer }) => {
+        defer(cleanupD);
+      });
     expect(await workbench.dispatch(Actions.deleteTabset("main"))).toMatchObject({
       status: "closed",
       cleanupErrors: [],
@@ -1987,8 +2022,8 @@ describe("native close coordination", () => {
       await workbench.dispatch(Actions.updateNodeAttributes(a, { enableClose: false })),
     ).toEqual({ status: "applied" });
     const decision = vi.fn<() => boolean>(() => false);
-    integrationState(workbench).register(a, { isDirty: () => true, beforeLeave: decision });
-    integrationState(workbench).register(b, { isDirty: () => true, beforeLeave: decision });
+    integrationState(workbench).registerOwner(a, { isDirty: () => true, beforeLeave: decision });
+    integrationState(workbench).registerOwner(b, { isDirty: () => true, beforeLeave: decision });
     expect(native(workbench).getNodeById(groupId)?.isCloseable()).toBe(false);
     expect(await workbench.dispatch(Actions.deleteTabset("main"))).toMatchObject({
       status: "closed",
@@ -2013,18 +2048,26 @@ describe("native close coordination", () => {
     const approve = vi.fn<() => boolean>(() => true);
     const reject = vi.fn<() => boolean>(() => false);
     const cleanup = vi.fn<() => void>();
-    integrationState(workbench).register(a, {
+    integrationState(workbench).registerOwner(a, {
       isDirty: () => true,
       getCloseRevision: () => 0,
       beforeLeave: approve,
-      dispose: cleanup,
     });
-    integrationState(workbench).register(b, {
+    integrationState(workbench)
+      .content(a)
+      .effect(({ defer }) => {
+        defer(cleanup);
+      });
+    integrationState(workbench).registerOwner(b, {
       isDirty: () => true,
       getCloseRevision: () => 0,
       beforeLeave: reject,
-      dispose: cleanup,
     });
+    integrationState(workbench)
+      .content(b)
+      .effect(({ defer }) => {
+        defer(cleanup);
+      });
     const before = workbench.getLayout();
     expect(
       await workbench.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)])),
@@ -2047,7 +2090,7 @@ describe("native close coordination", () => {
     const b = await open("B");
     const approval = deferred(true);
     let editingRevision = 0;
-    integrationState(workbench).register(a, {
+    integrationState(workbench).registerOwner(a, {
       isDirty: () => true,
       getCloseRevision: () => editingRevision,
       beforeLeave: () => {
@@ -2071,18 +2114,26 @@ describe("native close coordination", () => {
     const decideA = vi.fn<() => boolean>(() => true);
     const decideB = vi.fn<() => Promise<boolean>>(() => approvalB.promise);
     const cleanup = vi.fn<() => void>();
-    integrationState(workbench).register(a, {
+    integrationState(workbench).registerOwner(a, {
       isDirty: () => true,
       getCloseRevision: () => revisionA,
       beforeLeave: decideA,
-      dispose: cleanup,
     });
-    integrationState(workbench).register(b, {
+    integrationState(workbench)
+      .content(a)
+      .effect(({ defer }) => {
+        defer(cleanup);
+      });
+    integrationState(workbench).registerOwner(b, {
       isDirty: () => true,
       getCloseRevision: () => 0,
       beforeLeave: decideB,
-      dispose: cleanup,
     });
+    integrationState(workbench)
+      .content(b)
+      .effect(({ defer }) => {
+        defer(cleanup);
+      });
     const closing = workbench.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)]));
     await vi.waitFor(() => expect(decideB).toHaveBeenCalledTimes(1));
     expect(decideA).toHaveBeenCalledTimes(1);
@@ -2100,7 +2151,7 @@ describe("native close coordination", () => {
     const a = await open("A");
     const b = await open("B");
     const decide = vi.fn<() => boolean>(() => true);
-    integrationState(workbench).register(a, { isDirty: () => true, beforeLeave: decide });
+    integrationState(workbench).registerOwner(a, { isDirty: () => true, beforeLeave: decide });
     expect(
       await workbench.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)])),
     ).toEqual({
@@ -2126,15 +2177,21 @@ describe("native close coordination", () => {
       isDirty: () => true,
       getCloseRevision: () => 0,
       beforeLeave: decideA,
-      dispose: cleanup,
     };
-    integrationState(workbench).register(a, lifecycleA);
-    integrationState(workbench).register(b, {
+    integrationState(workbench).registerOwner(a, lifecycleA);
+    integrationState(workbench)
+      .content(a)
+      .effect(({ defer }) => defer(cleanup));
+    integrationState(workbench).registerOwner(b, {
       isDirty: () => true,
       getCloseRevision: () => 0,
       beforeLeave: decideB,
-      dispose: cleanup,
     });
+    integrationState(workbench)
+      .content(b)
+      .effect(({ defer }) => {
+        defer(cleanup);
+      });
     const before = workbench.getLayout();
     const closing = workbench.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)]));
     await vi.waitFor(() => expect(decideB).toHaveBeenCalledTimes(1));
@@ -2157,8 +2214,8 @@ describe("native close coordination", () => {
     const approvalB = deferred(true);
     const decideA = vi.fn<() => boolean>(() => true);
     const decideB = vi.fn<() => Promise<boolean>>(() => approvalB.promise);
-    integrationState(workbench).register(a, { isDirty: () => dirtyA, beforeLeave: decideA });
-    integrationState(workbench).register(b, {
+    integrationState(workbench).registerOwner(a, { isDirty: () => dirtyA, beforeLeave: decideA });
+    integrationState(workbench).registerOwner(b, {
       isDirty: () => true,
       getCloseRevision: () => 0,
       beforeLeave: decideB,
@@ -2179,14 +2236,18 @@ describe("native close coordination", () => {
     const error = new Error("Application revision unavailable");
     const decide = vi.fn<() => boolean>(() => true);
     const cleanup = vi.fn<() => void>();
-    integrationState(workbench).register(a, {
+    integrationState(workbench).registerOwner(a, {
       isDirty: () => true,
       getCloseRevision: () => {
         throw error;
       },
       beforeLeave: decide,
-      dispose: cleanup,
     });
+    integrationState(workbench)
+      .content(a)
+      .effect(({ defer }) => {
+        defer(cleanup);
+      });
     expect(
       await workbench.dispatch(Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)])),
     ).toEqual({
@@ -2204,7 +2265,7 @@ describe("native close coordination", () => {
     const a = await open("A");
     const b = await open("B");
     const approval = deferred(true);
-    integrationState(workbench).register(a, {
+    integrationState(workbench).registerOwner(a, {
       isDirty: () => true,
       getCloseRevision: () => 0,
       beforeLeave: (reason) => (reason === "close" ? approval.promise : true),
@@ -2224,7 +2285,7 @@ describe("native close coordination", () => {
     const a = await open("A", "main");
     await open("B", "main");
     const approval = deferred(true);
-    integrationState(workbench).register(a, {
+    integrationState(workbench).registerOwner(a, {
       isDirty: () => true,
       getCloseRevision: () => 0,
       beforeLeave: () => approval.promise,
@@ -2244,7 +2305,7 @@ describe("native close coordination", () => {
       const { workbench, open } = setup();
       const a = await open("A");
       const approval = deferred(true);
-      integrationState(workbench).register(a, {
+      integrationState(workbench).registerOwner(a, {
         isDirty: () => true,
         beforeLeave: () => approval.promise,
       });
@@ -2268,8 +2329,8 @@ describe("native close coordination", () => {
     const a = await open("A");
     const b = await open("B");
     const decide = vi.fn<() => boolean>(() => false);
-    integrationState(workbench).register(a, { isDirty: () => true, beforeLeave: decide });
-    integrationState(workbench).register(b, { isDirty: () => true, beforeLeave: decide });
+    integrationState(workbench).registerOwner(a, { isDirty: () => true, beforeLeave: decide });
+    integrationState(workbench).registerOwner(b, { isDirty: () => true, beforeLeave: decide });
     await workbench.dispatch(Actions.setTabPinned(a, true));
     await workbench.dispatch(Actions.updateNodeAttributes(b, { enableClose: false }));
     expect(await workbench.close(a)).toEqual({ status: "rejected", reason: "not-closeable" });
@@ -2293,18 +2354,26 @@ describe("native close coordination", () => {
     const decideB = vi.fn<() => Promise<boolean>>(() => approvalB.promise);
     const cleanupA = vi.fn<() => Promise<void>>(() => releaseA.promise);
     const cleanupB = vi.fn<() => Promise<void>>(() => releaseB.promise);
-    integrationState(workbench).register(a, {
+    integrationState(workbench).registerOwner(a, {
       isDirty: () => true,
       getCloseRevision: () => 0,
       beforeLeave: decideA,
-      dispose: cleanupA,
     });
-    integrationState(workbench).register(b, {
+    integrationState(workbench)
+      .content(a)
+      .effect(({ defer }) => {
+        defer(cleanupA);
+      });
+    integrationState(workbench).registerOwner(b, {
       isDirty: () => true,
       getCloseRevision: () => 0,
       beforeLeave: decideB,
-      dispose: cleanupB,
     });
+    integrationState(workbench)
+      .content(b)
+      .effect(({ defer }) => {
+        defer(cleanupB);
+      });
     const batch = () => Actions.group([Actions.deleteTab(a), Actions.deleteTab(b)]);
     const first = workbench.dispatch(batch());
     const duplicate = workbench.dispatch(batch());
@@ -2351,7 +2420,11 @@ describe("native close coordination", () => {
     const restored = createWorkbench({ createRouter: makeRouter, snapshot });
     disposals.push(() => restored.dispose());
     const cleanup = vi.fn<() => void>();
-    integrationState(restored).register(a, { dispose: cleanup });
+    integrationState(restored)
+      .content(a)
+      .effect(({ defer }) => {
+        defer(cleanup);
+      });
     restored.activate(a);
     await vi.waitFor(() =>
       expect(integrationState(restored).documents.get(a)?.router?.state.isLoading).toBe(true),

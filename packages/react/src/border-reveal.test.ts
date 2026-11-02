@@ -46,7 +46,7 @@ describe("document reveal in native Borders", () => {
         expect(border.isShowing()).toBe(true);
         expect(border.getSelectedNode()?.getId()).toBe(id);
       });
-      internal.register(id, { focus });
+      internal.registerOwner(id, { focus });
       workbench.activate(id);
       await Promise.resolve();
       expect(border.isShowing()).toBe(true);
@@ -65,7 +65,7 @@ describe("document reveal in native Borders", () => {
     workbench.activate(source, { focus: false });
     internal.focus(source, "document");
     const focus = vi.fn<() => void>();
-    internal.register(detail, { focus });
+    internal.registerOwner(detail, { focus });
     expect((await workbench.open(nav("detail"), { preserveFocus: true })).status).toBe("committed");
     await Promise.resolve();
     expect(border.isShowing()).toBe(true);

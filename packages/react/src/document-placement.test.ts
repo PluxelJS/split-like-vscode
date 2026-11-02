@@ -100,7 +100,7 @@ describe("routed document placement", () => {
     const { workbench, open, internal } = setup();
     const a = await open("A");
     const preview = await open("B", { preview: true, location: DockLocation.RIGHT });
-    internal.register(preview.id, { isDirty: () => true });
+    internal.registerOwner(preview.id, { isDirty: () => true });
     const recent = await open("C", { target: preview.containerId, location: DockLocation.BOTTOM });
     workbench.activate(a.id);
     const next = await open("D", {
@@ -372,7 +372,7 @@ describe("routed document placement", () => {
     workbench.connectBrowser();
     const a = await open("A", { preview: true });
     const focus = vi.fn<() => void>();
-    internal.register(a.id, { focus });
+    internal.registerOwner(a.id, { focus });
     await Promise.resolve();
     focus.mockClear();
     await workbench.dispatch(Actions.maximizeToggle(a.containerId));
@@ -443,7 +443,7 @@ describe("routed document placement", () => {
     const d = await open("D");
     workbench.activate(a.id);
     let approved = false;
-    internal.register(b.id, { isDirty: () => true, beforeLeave: () => approved });
+    internal.registerOwner(b.id, { isDirty: () => true, beforeLeave: () => approved });
     const before = workbench.getLayout();
     const href = window.location.href;
     expect(await workbench.open(nav("B", "compare"), { preserveFocus: true })).toEqual({
@@ -484,7 +484,7 @@ describe("routed document placement", () => {
   it("uses the active container for an explicit center preview instead of inheriting the previous preview placement", async () => {
     const { workbench, open, internal } = setup();
     const a = await open("A", { preview: true });
-    internal.register(a.id, { isDirty: () => true });
+    internal.registerOwner(a.id, { isDirty: () => true });
     const b = await open("B", { location: DockLocation.RIGHT });
     const c = await open("C", { preview: true, location: DockLocation.CENTER });
     expect(c.containerId).toBe(b.containerId);

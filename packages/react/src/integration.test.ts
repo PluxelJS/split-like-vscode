@@ -8,12 +8,12 @@ import {
 } from "@tanstack/react-router";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { Actions, DockLocation, Model } from "flexlayout-react";
-import { createElement } from "react";
+import { createElement, useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createWorkbench,
-  useWorkbenchContentLifecycle,
+  useWorkbenchContent,
   Workbench,
   type WorkbenchContentLifecycle,
   type WorkbenchOptions,
@@ -80,7 +80,7 @@ describe("real Router session coordination", () => {
     expect(b.status).toBe("committed");
     if (a.status !== "committed" || b.status !== "committed") return;
     const decision = vi.fn<() => boolean>(() => false);
-    integrationState(workbench).register(a.document.id, {
+    integrationState(workbench).registerOwner(a.document.id, {
       isDirty: () => true,
       beforeLeave: decision,
     });
@@ -100,7 +100,7 @@ describe("real Router session coordination", () => {
     const { workbench, open } = setup();
     const result = await open("A");
     if (result.status !== "committed") throw new Error("Fixture open failed");
-    integrationState(workbench).register(result.document.id, {
+    integrationState(workbench).registerOwner(result.document.id, {
       isDirty: () => true,
       beforeLeave: () => false,
     });
@@ -140,13 +140,17 @@ describe("real Router session coordination", () => {
           approve = resolve;
         }),
     );
-    integrationState(workbench).register(result.document.id, {
+    integrationState(workbench).registerOwner(result.document.id, {
       isDirty: () => true,
       beforeLeave: decision,
-      dispose: () => {
-        throw new Error("cleanup failed");
-      },
     });
+    integrationState(workbench)
+      .content(result.document.id)
+      .effect(({ defer }) => {
+        defer(() => {
+          throw new Error("cleanup failed");
+        });
+      });
     integrationState(workbench).focus(result.document.id, "document");
     const first = workbench.close(result.document.id);
     const second = workbench.close(result.document.id);
@@ -312,7 +316,7 @@ describe("real Router session coordination", () => {
     expect(factory).not.toHaveBeenCalled();
   });
 
-  it("awaits unregister cleanup exactly once through close and idempotent shutdown", async () => {
+  it("awaits stopped effect cleanup exactly once through close and idempotent shutdown", async () => {
     const { workbench, open } = setup();
     const a = await open("A");
     if (a.status !== "committed") throw new Error("Fixture open failed");
@@ -323,11 +327,13 @@ describe("real Router session coordination", () => {
           finish = resolve;
         }),
     );
-    const unregister = integrationState(workbench).register(a.document.id, {
-      dispose: disposeResource,
-    });
-    unregister();
-    unregister();
+    const stop = integrationState(workbench)
+      .content(a.document.id)
+      .effect(({ defer }) => {
+        defer(disposeResource);
+      });
+    stop();
+    stop();
     const closing = workbench.close(a.document.id);
     await Promise.resolve();
     expect(disposeResource).toHaveBeenCalledTimes(1);
@@ -364,9 +370,10 @@ describe("owned Router teardown failures", () => {
     const isDirty = vi.fn<NonNullable<WorkbenchContentLifecycle["isDirty"]>>(() => true);
     const beforeLeave = vi.fn<NonNullable<WorkbenchContentLifecycle["beforeLeave"]>>(() => false);
     const save = vi.fn<NonNullable<WorkbenchContentLifecycle["save"]>>();
-    const lifecycle = { isDirty, beforeLeave, save, dispose: disposeResource };
+    const lifecycle = { isDirty, beforeLeave, save };
     function ResourceTool() {
-      useWorkbenchContentLifecycle(lifecycle);
+      const content = useWorkbenchContent(lifecycle);
+      useEffect(() => content.effect(({ defer }) => defer(disposeResource)), [content]);
       return createElement("span", null, "Registered async resource");
     }
     const workbench = createWorkbench({
@@ -574,16 +581,7 @@ describe("owned Router teardown failures", () => {
       id: a.document.id,
       cleanupErrors: [abortError, clearError],
     });
-    expect(issues).toHaveBeenCalledWith({
-      code: "operation-failed",
-      error: abortError,
-      id: a.document.id,
-    });
-    expect(issues).toHaveBeenCalledWith({
-      code: "operation-failed",
-      error: clearError,
-      id: a.document.id,
-    });
+    expect(issues).not.toHaveBeenCalled();
     expect(vi.mocked(routers[1]!.history.destroy)).toHaveBeenCalledTimes(1);
     expect(await workbench.dispose()).toEqual([]);
     expect(vi.mocked(routers[1]!.history.destroy)).toHaveBeenCalledTimes(1);

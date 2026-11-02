@@ -1,5 +1,21 @@
 # Worksplit 内部重构验收
 
+## 内容 API 与文档链接整合（2026-11-02）
+
+统一 `useWorkbenchContent`／`content.effect` 与声明式文档链接、可配置放置共用同一 Workbench。
+原生动作先识别链接落点，其余动作使用统一关闭回执报告；dispose 同时取消原生拖拽并等待已登记内容清理。
+组合回归覆盖仍在清理时链接已不可再打开、拖拽只结束一次、旧 content handle 不可复用。
+
+从整合树独立安装后的 `pnpm verify` 通过：core **5**、React **323**、浏览器 **44**，
+严格类型、JS／CSS／声明构建、实际 tarball 默认／development 消费均通过。
+同一 tarball 的生产预览另经 Playwright WebSocket 完成 **29** 项检查，页面错误为空。
+干净验证补齐工具类型检查对 React 声明构建的任务依赖，以及严格可选属性下的 Playwright server 配置。
+`PLAYWRIGHT_WS_ENDPOINT` 可复用已有浏览器服务；未设置时保留本地浏览器入口。
+
+财务消费者另通过 **89** 项定向回归；真实宿主在1440×900、1366×768下用菜单建立两列／2×2，
+四文档保留业务 scope、键盘焦点和滚动，关闭后全部释放。
+这些证据支持本次组合与被测消费者，不证明其他宿主、跨窗口、SSR 或生产性能。
+
 后续 2026-10-11 的财务消费者设计精进（preserve/preview/duplicate、拓扑政策、焦点与 lifecycle）见[独立记录](acceptance/financial-first-consumer/README.md)。下文保留本次精进前的验证范围及计数。
 页面内旁开文档的后续精进（原生 location、来源容器、preserveFocus、结构化放置拒绝）见[程序打开验收](acceptance/api-driven-placement/README.md)，保留前轮证据。
 

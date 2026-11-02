@@ -68,7 +68,10 @@ describe("document entrances and replaceable previews", () => {
     const initial = await workbench.open(nav("A", "cash"));
     if (initial.status !== "committed") throw new Error(initial.status);
     const beforeLeave = vi.fn<() => boolean>(() => false);
-    integrationState(workbench).register(initial.document.id, { isDirty: () => true, beforeLeave });
+    integrationState(workbench).registerOwner(initial.document.id, {
+      isDirty: () => true,
+      beforeLeave,
+    });
     const count = load.mock.calls.length;
     const result = await workbench.open(nav("A"), { reuse: "preserve" });
     expect(result).toMatchObject({
@@ -101,7 +104,11 @@ describe("document entrances and replaceable previews", () => {
     const permanent = await open("A");
     const b = await open("B", true);
     const disposed = vi.fn<() => void>();
-    integrationState(workbench).register(b, { dispose: disposed });
+    integrationState(workbench)
+      .content(b)
+      .effect(({ defer }) => {
+        defer(disposed);
+      });
     const c = await open("C", true);
     expect(c).not.toBe(b);
     expect(workbench.getDocument(b)).toBeNull();
@@ -119,7 +126,7 @@ describe("document entrances and replaceable previews", () => {
     const { workbench, open } = setup();
     const a = await open("A", true);
     const beforeLeave = vi.fn<() => boolean>(() => false);
-    integrationState(workbench).register(a, { isDirty: () => true, beforeLeave });
+    integrationState(workbench).registerOwner(a, { isDirty: () => true, beforeLeave });
     const b = await open("B", true);
     expect(workbench.getDocument(a)?.preview).toBe(false);
     expect(beforeLeave).not.toHaveBeenCalled();
@@ -178,7 +185,7 @@ describe("document entrances and replaceable previews", () => {
       (reason, context) =>
         reason === "navigate" && context.from?.split("?")[0] === context.to?.split("?")[0],
     );
-    integrationState(workbench).register(a, { isDirty: () => true, beforeLeave });
+    integrationState(workbench).registerOwner(a, { isDirty: () => true, beforeLeave });
     const result = await workbench.open(nav("A", "cash"));
     expect(result.status).toBe("committed");
     expect(beforeLeave).toHaveBeenCalledWith(

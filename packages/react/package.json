@@ -41,6 +41,7 @@
     "@testing-library/react": "catalog:test",
     "@types/react": "catalog:frontend",
     "@types/react-dom": "catalog:frontend",
+    "capnweb": "catalog:dev",
     "flexlayout-react": "catalog:frontend",
     "jsdom": "catalog:dev",
     "react": "catalog:frontend",
@@ -48,7 +49,7 @@
     "vite-plus": "catalog:build"
   },
   "peerDependencies": {
-    "@tanstack/react-hotkeys": "^0.13.0",
+    "@tanstack/react-hotkeys": "^0.13.0 || ^0.16.0",
     "@tanstack/react-router": "^1.170.42",
     "@tanstack/react-store": "^0.11.2",
     "flexlayout-react": "^0.11.1",

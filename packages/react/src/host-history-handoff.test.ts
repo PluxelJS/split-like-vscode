@@ -250,11 +250,13 @@ describe("browser history handoff to the containing Router", () => {
       const nativeState = structuredClone(window.history.state);
       const releases = new Map(documents.map((document) => [document.id, 0]));
       for (const document of documents)
-        integrationState(workbench).register(document.id, {
-          dispose: () => {
-            releases.set(document.id, releases.get(document.id)! + 1);
-          },
-        });
+        integrationState(workbench)
+          .content(document.id)
+          .effect(({ defer }) => {
+            defer(() => {
+              releases.set(document.id, releases.get(document.id)! + 1);
+            });
+          });
 
       const closed: { result: unknown; href: string; state: unknown }[] = [];
       if (mode === "batch") {
@@ -311,13 +313,18 @@ describe("browser history handoff to the containing Router", () => {
     const documents = workbench.getDocuments();
     const released = vi.fn<() => void>();
     const beforeLeave = vi.fn<() => Promise<boolean>>(() => approval.promise);
-    for (const document of documents)
-      integrationState(workbench).register(document.id, {
+    for (const document of documents) {
+      integrationState(workbench).registerOwner(document.id, {
         isDirty: () => true,
         getCloseRevision: () => 1,
         beforeLeave,
-        dispose: released,
       });
+      integrationState(workbench)
+        .content(document.id)
+        .effect(({ defer }) => {
+          defer(released);
+        });
+    }
     window.history.go(-3);
     await vi.waitFor(() => expect(beforeLeave).toHaveBeenCalledTimes(1));
     expect(signal?.aborted).toBe(false);
@@ -344,11 +351,13 @@ describe("browser history handoff to the containing Router", () => {
     const nativeState = structuredClone(window.history.state);
     let releases = 0;
     for (const document of workbench.getDocuments())
-      integrationState(workbench).register(document.id, {
-        dispose: () => {
-          releases += 1;
-        },
-      });
+      integrationState(workbench)
+        .content(document.id)
+        .effect(({ defer }) => {
+          defer(() => {
+            releases += 1;
+          });
+        });
     const leave = async () => {
       const outsideState = structuredClone(window.history.state);
       const result = await workbench.dispatch(

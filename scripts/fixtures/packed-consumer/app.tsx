@@ -14,10 +14,10 @@ import {
   Workbench,
   useWorkbenchState,
   useWorkbenchContent,
-  useWorkbenchContentLifecycle,
-  type WorkbenchContentLifecycle,
   type WorkbenchProps,
   type WorkbenchSnapshot,
+  type NavigationResult,
+  type DispatchResult,
 } from "@worksplit/react";
 import {
   Actions,
@@ -55,7 +55,6 @@ const services = {
     editorUnmounts: 0,
     subscriptions: 0,
     disposals: 0,
-    lifecycleDisposals: 0,
     startStatus: "",
     providerMounts: 0,
     providerUnmounts: 0,
@@ -77,6 +76,12 @@ const ServiceContext = createContext<{
 } | null>(null);
 let nextProviderToken = 0;
 const issues = createStore<string[]>([]);
+function reportReceipt<T extends NavigationResult | DispatchResult>(result: T): T {
+  if (result.status === "failed") issues.setState((state) => [...state, String(result.error)]);
+  if (result.status === "closed" && result.cleanupErrors.length)
+    issues.setState((state) => [...state, ...result.cleanupErrors.map(String)]);
+  return result;
+}
 const rootRoute = createRootRouteWithContext<{ services: typeof services }>()({
   component: Outlet,
 });
@@ -248,7 +253,6 @@ function Editor() {
   const input = useRef<HTMLTextAreaElement>(null);
   const dirty = useRef(false);
   const revision = useRef(0);
-  const release = useRef<(() => void) | null>(null);
   const [saveReceipt, setSaveReceipt] = useState(services.metrics.get().saves);
   const [navigation, setNavigation] = useState("");
   const [placement, setPlacement] = useState("");
@@ -266,6 +270,7 @@ function Editor() {
         },
         { target: source.containerId, location, preserveFocus, preview: true },
       )
+      .then(reportReceipt)
       .then((result) =>
         setPlacement(
           result.status === "rejected" ? `${result.status}:${result.reason}` : result.status,
@@ -277,63 +282,47 @@ function Editor() {
     target: input,
     ignoreInputs: false,
   });
-  useEffect(() => {
-    const subscription = services.metrics.subscribe((state) => setSaveReceipt(state.saves));
-    services.metrics.setState((state) => ({
-      ...state,
-      editorMounts: state.editorMounts + 1,
-      subscriptions: state.subscriptions + 1,
-    }));
-    let disposed = false;
-    release.current = () => {
-      if (disposed) return;
-      disposed = true;
-      subscription.unsubscribe();
-      services.metrics.setState((state) => ({
-        ...state,
-        subscriptions: state.subscriptions - 1,
-        disposals: state.disposals + 1,
-      }));
-    };
-    return () => {
-      release.current?.();
-      services.metrics.setState((state) => ({
-        ...state,
-        editorUnmounts: state.editorUnmounts + 1,
-      }));
-    };
-  }, []);
-  const lifecycle = useMemo<WorkbenchContentLifecycle>(
-    () => ({
-      isDirty: () => dirty.current,
-      getCloseRevision: () => revision.current,
-      beforeLeave: (reason, context) => {
+  useEffect(
+    () =>
+      content.effect(({ defer }) => {
+        const subscription = services.metrics.subscribe((state) => setSaveReceipt(state.saves));
         services.metrics.setState((state) => ({
           ...state,
-          lastLeave: JSON.stringify({ reason, ...context }),
+          editorMounts: state.editorMounts + 1,
+          subscriptions: state.subscriptions + 1,
         }));
-        return !dirty.current || window.confirm("Discard this unsaved draft?");
-      },
-      focus: () => input.current?.focus(),
-      save: () => {
-        dirty.current = false;
-        services.metrics.setState((state) => ({
-          ...state,
-          saves: state.saves + 1,
-          lastSavedId: content.id,
-        }));
-      },
-      dispose: () => {
-        services.metrics.setState((state) => ({
-          ...state,
-          lifecycleDisposals: state.lifecycleDisposals + 1,
-        }));
-        release.current?.();
-      },
-    }),
-    [content.id],
+        defer(() => {
+          subscription.unsubscribe();
+          services.metrics.setState((state) => ({
+            ...state,
+            subscriptions: state.subscriptions - 1,
+            disposals: state.disposals + 1,
+            editorUnmounts: state.editorUnmounts + 1,
+          }));
+        });
+      }),
+    [content],
   );
-  useWorkbenchContentLifecycle(lifecycle);
+  useWorkbenchContent({
+    isDirty: () => dirty.current,
+    getCloseRevision: () => revision.current,
+    beforeLeave: (reason, context) => {
+      services.metrics.setState((state) => ({
+        ...state,
+        lastLeave: JSON.stringify({ reason, ...context }),
+      }));
+      return !dirty.current || window.confirm("Discard this unsaved draft?");
+    },
+    focus: () => input.current?.focus(),
+    save: () => {
+      dirty.current = false;
+      services.metrics.setState((state) => ({
+        ...state,
+        saves: state.saves + 1,
+        lastSavedId: content.id,
+      }));
+    },
+  });
   return (
     <article className="editor" data-document-id={content.id}>
       <h2>Document {data.id}</h2>
@@ -363,6 +352,7 @@ function Editor() {
                 params: { id: `Slow-${data.id}` },
                 search: { view: "edit" },
               })
+              .then(reportReceipt)
               .then((result) => setPlacement(result.status));
           }}
         >
@@ -398,6 +388,7 @@ function Editor() {
         onClick={() => {
           void workbench
             .open({ to: "/documents/$id", params: { id: data.id }, search: { view: "preview" } })
+            .then(reportReceipt)
             .then((result) => setNavigation(result.status));
         }}
       >
@@ -411,7 +402,7 @@ function Editor() {
 
 function Tool({ id }: { id: string }) {
   const input = useRef<HTMLTextAreaElement>(null);
-  useWorkbenchContentLifecycle(useMemo(() => ({ focus: () => input.current?.focus() }), []));
+  useWorkbenchContent({ focus: () => input.current?.focus() });
   return (
     <article className="tool">
       <h2>{id === "inspector" ? "Inspector" : "Outline"}</h2>
@@ -443,7 +434,10 @@ const renderTabSet: NonNullable<ILayoutProps["onRenderTabSet"]> = (node, values)
         key="native-maximize"
         type="button"
         onClick={() => {
-          void workbench.dispatch(Actions.maximizeToggle(node.getId()));
+          void workbench
+            .dispatch(Actions.maximizeToggle(node.getId()))
+            .then(reportReceipt)
+            .catch((error: unknown) => issues.setState((state) => [...state, String(error)]));
         }}
       >
         Maximize group
@@ -503,9 +497,13 @@ function App() {
   );
   const nativeSlotTypes: Pick<ILayoutProps, "onRenderTab" | "onRenderTabSet"> = native;
   void nativeSlotTypes;
-  const run = (operation: () => Promise<unknown>) => {
+  const run = (operation: () => Promise<NavigationResult | DispatchResult>) => {
     void operation()
-      .then((result) => setStatus(JSON.stringify(result)))
+      .then(reportReceipt)
+      .then((result) => {
+        setStatus(JSON.stringify(result));
+        return undefined;
+      })
       .catch((error: unknown) => setStatus(String(error)));
   };
   return (
@@ -785,7 +783,13 @@ window.addEventListener(
   "pagehide",
   () => {
     disconnect();
-    void workbench.dispose().finally(() => root.unmount());
+    void workbench
+      .dispose()
+      .then((errors) => {
+        if (errors.length) issues.setState((state) => [...state, ...errors.map(String)]);
+        return undefined;
+      })
+      .finally(() => root.unmount());
   },
   { once: true },
 );

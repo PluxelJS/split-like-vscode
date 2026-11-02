@@ -4,9 +4,10 @@ import {
   Component,
   createContext,
   StrictMode,
+  Suspense,
+  startTransition,
   useContext,
   useEffect,
-  useMemo,
   type ReactNode,
 } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,20 +15,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkbench,
   useWorkbenchContent,
-  useWorkbenchContentLifecycle,
   Workbench,
+  type WorkbenchContent,
+  type WorkbenchContentEffect,
   type WorkbenchContentLifecycle,
   type WorkbenchInstance,
 } from "./index";
 
 const instances: WorkbenchInstance<AnyRouter>[] = [];
 interface OwnerConfig {
-  lifecycle: WorkbenchContentLifecycle;
+  lifecycle: WorkbenchContentLifecycle | undefined;
   owner: string;
   show: boolean;
-  manual?: boolean;
+  resource: (effect: WorkbenchContentEffect) => void | Promise<void>;
   second?: WorkbenchContentLifecycle;
   onDuplicate?: (error: Error) => void;
+  pending?: Promise<void>;
 }
 const OwnerContext = createContext<OwnerConfig | null>(null);
 
@@ -54,15 +57,19 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-function HookOwner({ lifecycle }: { lifecycle: WorkbenchContentLifecycle }) {
-  const stable = useMemo(() => lifecycle, [lifecycle]);
-  useWorkbenchContentLifecycle(stable);
+function Owner({ capture }: { capture: (content: WorkbenchContent) => void }) {
+  const config = useContext(OwnerContext)!;
+  const content = useWorkbenchContent(config.lifecycle);
+  useEffect(() => {
+    capture(content);
+    return content.effect(config.resource);
+  }, [content, config.resource, capture]);
+  if (config.pending) throw config.pending;
   return <input aria-label="Live editor" />;
 }
-function ManualOwner({ lifecycle }: { lifecycle: WorkbenchContentLifecycle }) {
-  const content = useWorkbenchContent();
-  useEffect(() => content.register(lifecycle), [content, lifecycle]);
-  return <input aria-label="Manual editor" />;
+function SecondOwner({ lifecycle }: { lifecycle: WorkbenchContentLifecycle }) {
+  useWorkbenchContent(lifecycle);
+  return null;
 }
 class OwnerErrorBoundary extends Component<
   { children: ReactNode; onError: (error: Error) => void },
@@ -79,42 +86,36 @@ class OwnerErrorBoundary extends Component<
     return this.state.failed ? <p>Duplicate owner refused</p> : this.props.children;
   }
 }
-function Tool() {
-  const config = useContext(OwnerContext)!;
-  if (!config.show) return <p>Owner removed</p>;
-  const Owner = config.manual ? ManualOwner : HookOwner;
-  return (
-    <>
-      <Owner key={config.owner} lifecycle={config.lifecycle} />
-      {config.second && config.onDuplicate && (
-        <OwnerErrorBoundary onError={config.onDuplicate}>
-          <HookOwner lifecycle={config.second} />
-        </OwnerErrorBoundary>
-      )}
-    </>
-  );
-}
-function TestWorkbench({
-  workbench,
-  config,
-}: {
-  workbench: WorkbenchInstance<AnyRouter>;
-  config: OwnerConfig;
-}) {
-  const value = useMemo(() => config, [config]);
-  return (
-    <OwnerContext.Provider value={value}>
-      <Workbench workbench={workbench} />
-    </OwnerContext.Provider>
-  );
-}
-function setup(lifecycle: WorkbenchContentLifecycle, strict = true) {
+function setup(
+  lifecycle: WorkbenchContentLifecycle | undefined,
+  resource: OwnerConfig["resource"] = () => {},
+  strict = true,
+) {
+  let content!: WorkbenchContent;
+  const capture = (value: WorkbenchContent) => {
+    content = value;
+  };
+  function Tool() {
+    const config = useContext(OwnerContext)!;
+    if (!config.show) return <p>Owner removed</p>;
+    return (
+      <>
+        <Owner key={config.owner} capture={capture} />
+        {config.second && config.onDuplicate && (
+          <OwnerErrorBoundary onError={config.onDuplicate}>
+            <SecondOwner lifecycle={config.second} />
+          </OwnerErrorBoundary>
+        )}
+      </>
+    );
+  }
   const root = createRootRoute();
+  const onIssue = vi.fn<(issue: unknown) => void>();
   const workbench = createWorkbench({
     createRouter: (history) => createRouter({ routeTree: root, history }),
+    onIssue,
     tools: [{ id: "editor", render: () => <Tool /> }],
     layout: {
-      global: { tabEnableFloat: false, tabEnablePopout: false },
       layout: {
         children: [
           {
@@ -126,126 +127,183 @@ function setup(lifecycle: WorkbenchContentLifecycle, strict = true) {
     },
   });
   instances.push(workbench);
-  let config: OwnerConfig = { lifecycle, owner: "A", show: true, manual: false };
-  const element = () => {
-    const child = <TestWorkbench workbench={workbench} config={config} />;
+  let config: OwnerConfig = { lifecycle, resource, owner: "A", show: true };
+  const element = (value: OwnerConfig) => {
+    const child = (
+      <OwnerContext.Provider value={value}>
+        <Suspense fallback={<p>Pending editor</p>}>
+          <Workbench workbench={workbench} />
+        </Suspense>
+      </OwnerContext.Provider>
+    );
     return strict ? <StrictMode>{child}</StrictMode> : child;
   };
-  const view = render(element());
-  const update = (next: Partial<typeof config>) => {
+  const view = render(element(config));
+  const update = (next: Partial<OwnerConfig>) => {
     config = { ...config, ...next };
-    view.rerender(element());
+    view.rerender(element(config));
   };
-  return { workbench, view, update };
+  return { workbench, view, update, onIssue, getContent: () => content };
 }
 
-describe("content lifecycle effect replay", () => {
-  it("keeps a stable memoized owner alive through StrictMode replay and disposes once at shutdown", async () => {
-    const dispose = vi.fn<() => void>();
+function approval() {
+  let resolve!: (value: boolean) => void;
+  const promise = new Promise<boolean>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+describe("committed content owners and React effect replay", () => {
+  it("reacquires after StrictMode replay and releases every setup once", async () => {
+    const signals: AbortSignal[] = [];
+    const released = vi.fn<(index: number) => void>();
     const beforeLeave = vi.fn<() => boolean>(() => false);
-    const { workbench, view } = setup({ dispose, isDirty: () => true, beforeLeave });
+    const { workbench, view } = setup({ isDirty: () => true, beforeLeave }, ({ signal, defer }) => {
+      const index = signals.push(signal) - 1;
+      defer(() => released(index));
+    });
     await screen.findByRole("textbox", { name: "Live editor" });
-    expect(dispose).not.toHaveBeenCalled();
+    expect(signals).toHaveLength(2);
+    expect(signals.map((signal) => signal.aborted)).toEqual([true, false]);
+    expect(released.mock.calls).toEqual([[0]]);
     expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
     expect(beforeLeave).toHaveBeenCalledTimes(1);
+    expect(released.mock.calls).toEqual([[0]]);
     await act(async () => {
       await workbench.dispose();
     });
     view.unmount();
-    await Promise.resolve();
-    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(released.mock.calls).toEqual([[0], [1]]);
   });
 
-  it("unregisters a genuine unmount on the next microtask", async () => {
-    const dispose = vi.fn<() => void>();
-    const { view, workbench } = setup({ dispose });
+  it("uses inline latest committed callbacks without replacing owner or resource effects", async () => {
+    const request = approval();
+    const resource = vi.fn<(effect: WorkbenchContentEffect) => void>();
+    const { workbench, update, getContent } = setup(
+      {
+        isDirty: () => true,
+        getCloseRevision: () => 3,
+        beforeLeave: () => request.promise,
+      },
+      resource,
+      false,
+    );
     await screen.findByRole("textbox", { name: "Live editor" });
-    view.unmount();
-    expect(dispose).not.toHaveBeenCalled();
-    await Promise.resolve();
-    expect(dispose).toHaveBeenCalledTimes(1);
-    await workbench.dispose();
-    expect(dispose).toHaveBeenCalledTimes(1);
+    const content = getContent();
+    const closing = workbench.close("editor");
+    update({
+      lifecycle: {
+        isDirty: () => true,
+        getCloseRevision: () => 3,
+        beforeLeave: () => false,
+      },
+    });
+    expect(getContent()).toBe(content);
+    expect(resource).toHaveBeenCalledTimes(1);
+    request.resolve(true);
+    await act(async () => {
+      expect(await closing).toMatchObject({ status: "closed" });
+    });
   });
 
-  it("reconnects the same lifecycle across a content-local component replacement", async () => {
-    const dispose = vi.fn<() => void>();
-    const { update, view } = setup({ dispose });
+  it("reads a changed close callback from the latest committed render", async () => {
+    const first = vi.fn<() => boolean>(() => false);
+    const second = vi.fn<() => boolean>(() => false);
+    const { workbench, update } = setup(
+      { isDirty: () => true, beforeLeave: first },
+      undefined,
+      false,
+    );
     await screen.findByRole("textbox", { name: "Live editor" });
-    update({ owner: "B" });
-    await Promise.resolve();
-    expect(dispose).not.toHaveBeenCalled();
-    view.unmount();
-    await Promise.resolve();
-    expect(dispose).toHaveBeenCalledTimes(1);
+    update({ lifecycle: { isDirty: () => true, beforeLeave: second } });
+    expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
   });
 
-  it("still refuses a second live hook without taking its resources", async () => {
+  it("does not publish callbacks from a suspended, discarded render", async () => {
+    const first = vi.fn<() => boolean>(() => false);
+    const uncommitted = vi.fn<() => boolean>(() => true);
+    const { workbench, update } = setup(
+      { isDirty: () => true, beforeLeave: first },
+      undefined,
+      false,
+    );
+    await screen.findByRole("textbox", { name: "Live editor" });
+    const never = new Promise<void>(() => {});
+    await act(async () => {
+      startTransition(() => {
+        update({ lifecycle: { isDirty: () => true, beforeLeave: uncommitted }, pending: never });
+      });
+    });
+    expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(uncommitted).not.toHaveBeenCalled();
+  });
+
+  it("invalidates approval after withdrawing and declaring an owner again without stopping resources", async () => {
+    const request = approval();
+    const released = vi.fn<() => void>();
+    const lifecycle = {
+      isDirty: () => true,
+      getCloseRevision: () => 0,
+      beforeLeave: () => request.promise,
+    };
+    const { workbench, update } = setup(lifecycle, ({ defer }) => defer(released), false);
+    await screen.findByRole("textbox", { name: "Live editor" });
+    const closing = workbench.close("editor");
+    update({ lifecycle: undefined });
+    update({ lifecycle });
+    request.resolve(true);
+    expect(await closing).toEqual({ status: "rejected", reason: "changed" });
+    expect(released).not.toHaveBeenCalled();
+  });
+
+  it("invalidates approval when a keyed editor replaces another editor with the same revision", async () => {
+    const request = approval();
+    const released = vi.fn<() => void>();
+    const { workbench, update } = setup(
+      { isDirty: () => true, getCloseRevision: () => 0, beforeLeave: () => request.promise },
+      ({ defer }) => defer(released),
+      false,
+    );
+    await screen.findByRole("textbox", { name: "Live editor" });
+    const closing = workbench.close("editor");
+    update({
+      owner: "B",
+      lifecycle: { isDirty: () => true, getCloseRevision: () => 0, beforeLeave: () => false },
+    });
+    request.resolve(true);
+    expect(await closing).toEqual({ status: "rejected", reason: "changed" });
+    expect(released).toHaveBeenCalledTimes(1);
+    expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
+  });
+
+  it("refuses a second editing owner while allowing independent resource effects", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const dispose = vi.fn<() => void>();
-    const rejectedDispose = vi.fn<() => void>();
     const onDuplicate = vi.fn<(error: Error) => void>();
-    const { workbench, update } = setup({ dispose, isDirty: () => true });
+    const releasedA = vi.fn<() => void>();
+    const releasedB = vi.fn<() => void>();
+    const { workbench, update, getContent } = setup(
+      { isDirty: () => true },
+      ({ defer }) => defer(releasedA),
+      false,
+    );
     await screen.findByRole("textbox", { name: "Live editor" });
-    update({ second: { dispose: rejectedDispose }, onDuplicate });
+    getContent().effect(({ defer }) => defer(releasedB));
+    update({ second: {}, onDuplicate });
     expect(screen.getByText("Duplicate owner refused")).toBeDefined();
     expect(onDuplicate).toHaveBeenCalledWith(
       expect.objectContaining({ message: "Content editor already has a lifecycle owner" }),
     );
     expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
-    expect(dispose).not.toHaveBeenCalled();
-    expect(rejectedDispose).not.toHaveBeenCalled();
-  });
-
-  it.each([false, true])(
-    "releases changed owners before registration (component replacement: %s)",
-    async (replaceComponent) => {
-      const disposeA = vi.fn<() => void>();
-      const disposeB = vi.fn<() => void>();
-      const { update, view } = setup({ dispose: disposeA });
-      await screen.findByRole("textbox", { name: "Live editor" });
-      update({ lifecycle: { dispose: disposeB }, ...(replaceComponent ? { owner: "B" } : {}) });
-      expect(disposeA).toHaveBeenCalledTimes(1);
-      expect(disposeB).not.toHaveBeenCalled();
-      await Promise.resolve();
-      expect(disposeA).toHaveBeenCalledTimes(1);
-      expect(disposeB).not.toHaveBeenCalled();
-      view.unmount();
-      await Promise.resolve();
-      expect(disposeB).toHaveBeenCalledTimes(1);
-    },
-  );
-
-  it.each(["before", "after"] as const)(
-    "cleans up once when content closes %s queued hook teardown",
-    async (order) => {
-      const dispose = vi.fn<() => void>();
-      const { workbench, update } = setup({ dispose });
-      await screen.findByRole("textbox", { name: "Live editor" });
-      await act(async () => {
-        if (order === "before") await workbench.close("editor");
-        else {
-          update({ show: false });
-          await workbench.close("editor");
-        }
-      });
-      await Promise.resolve();
-      expect(dispose).toHaveBeenCalledTimes(1);
+    expect(releasedA).not.toHaveBeenCalled();
+    expect(releasedB).not.toHaveBeenCalled();
+    await act(async () => {
       await workbench.dispose();
-      expect(dispose).toHaveBeenCalledTimes(1);
-    },
-  );
-
-  it("keeps explicit registration cleanup immediate", async () => {
-    const oldDispose = vi.fn<() => void>();
-    const dispose = vi.fn<() => void>();
-    const { update } = setup({ dispose: oldDispose }, false);
-    await screen.findByRole("textbox", { name: "Live editor" });
-    update({ show: false });
-    await Promise.resolve();
-    update({ show: true, manual: true, lifecycle: { dispose } });
-    await screen.findByRole("textbox", { name: "Manual editor" });
-    update({ show: false });
-    expect(dispose).toHaveBeenCalledTimes(1);
+    });
+    expect(releasedA).toHaveBeenCalledTimes(1);
+    expect(releasedB).toHaveBeenCalledTimes(1);
   });
 });

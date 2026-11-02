@@ -21,6 +21,8 @@
     "react-dom": "catalog:frontend"
   },
   "devDependencies": {
+    "@types/react": "catalog:frontend",
+    "@types/react-dom": "catalog:frontend",
     "@vitejs/plugin-react": "catalog:tooling",
     "typescript": "catalog:tooling",
     "vite": "catalog:tooling",

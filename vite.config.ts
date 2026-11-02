@@ -45,7 +45,11 @@ export default defineConfig({
         command: [],
         dependsOn: ["@worksplit/core#check-tests", "@worksplit/react#check-tests"],
       },
-      "check-tools": { command: "tsc -p tsconfig.typecheck.json --noEmit", cache: false },
+      "check-tools": {
+        command: "tsc -p tsconfig.typecheck.json --noEmit",
+        dependsOn: ["@worksplit/react#compile"],
+        cache: false,
+      },
       "workspace:types": {
         command: [],
         dependsOn: [

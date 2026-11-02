@@ -13,10 +13,9 @@ import {
   createWorkbench,
   Workbench,
   useWorkbenchContent,
-  useWorkbenchContentLifecycle,
   useWorkbenchState,
   type NavigationResult,
-  type WorkbenchContentLifecycle,
+  type DispatchResult,
   type WorkbenchInstance,
 } from "@worksplit/react";
 import {
@@ -29,7 +28,7 @@ import {
   type IJsonRowNode,
   type IJsonTabSetNode,
 } from "flexlayout-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 
@@ -195,47 +194,43 @@ function DocumentPage() {
   const search = documentRoute.useSearch();
   const data = documentRoute.useLoaderData();
   const { service: shared } = documentRoute.useRouteContext();
-  const content = useWorkbenchContent();
   const [draft, setDraft] = useState("");
   const [guard, setGuard] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const editing = useRef({ version: 0, saved: "", draft: "" });
-  useEffect(() => {
-    ++metrics.mounts;
-    const off = shared.subscribe(() => {});
-    return () => {
-      ++metrics.unmounts;
-      off();
-    };
-  }, [shared]);
   useBlocker({ shouldBlockFn: () => guard, enableBeforeUnload: false });
-  const lifecycle = useMemo<WorkbenchContentLifecycle>(
-    () => ({
-      isDirty: () => editing.current.draft !== editing.current.saved,
-      getCloseRevision: () => editing.current.version,
-      beforeLeave: async (reason) => {
-        const version = editing.current.version;
-        const allowed = await confirmLeave(id, reason);
-        return allowed && version === editing.current.version;
-      },
-      focus: () => input.current?.focus({ preventScroll: true }),
-      save: async () => {
-        const version = editing.current.version;
-        const text = editing.current.draft;
-        await new Promise((resolve) => setTimeout(resolve, 60));
-        if (id === "save-error") throw new Error("Deliberate save failure");
-        if (version === editing.current.version) {
-          editing.current.saved = text;
-          message(`Saved ${id}`);
-        }
-      },
-      dispose: () => {
-        ++metrics.disposed;
-      },
-    }),
-    [id],
+  const content = useWorkbenchContent({
+    isDirty: () => editing.current.draft !== editing.current.saved,
+    getCloseRevision: () => editing.current.version,
+    beforeLeave: async (reason) => {
+      const version = editing.current.version;
+      const allowed = await confirmLeave(id, reason);
+      return allowed && version === editing.current.version;
+    },
+    focus: () => input.current?.focus({ preventScroll: true }),
+    save: async () => {
+      const version = editing.current.version;
+      const text = editing.current.draft;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      if (id === "save-error") throw new Error("Deliberate save failure");
+      if (version === editing.current.version) {
+        editing.current.saved = text;
+        message(`Saved ${id}`);
+      }
+    },
+  });
+  useEffect(
+    () =>
+      content.effect(({ defer }) => {
+        ++metrics.mounts;
+        defer(shared.subscribe(() => {}));
+        defer(() => {
+          ++metrics.unmounts;
+          ++metrics.disposed;
+        });
+      }),
+    [content, shared],
   );
-  useWorkbenchContentLifecycle(lifecycle);
   if (id === "long")
     return (
       <article data-testid="native-long-content">
@@ -281,9 +276,11 @@ function DocumentPage() {
         </button>
         <button
           onClick={() =>
-            void workbench
-              .close(content.id)
-              .then((result) => message(`Close ${id}: ${result.status}`))
+            void workbench.close(content.id).then((result) => {
+              reportAction(result);
+              message(`Close ${id}: ${result.status}`);
+              return undefined;
+            })
           }
         >
           Close document
@@ -481,6 +478,7 @@ function buildWorkbench(): WorkbenchInstance<DemoRouter> {
         hotkey: "Alt+W",
         execute: async ({ id }) => {
           const result = await workbench.close(id);
+          reportAction(result);
           message(`Close: ${result.status}`);
         },
       },
@@ -495,9 +493,15 @@ try {
   startupError = error;
 }
 function report(result: NavigationResult) {
+  if (result.status === "failed") message(`Navigation failed: ${String(result.error)}`);
   message(
     `Navigation: ${result.status}${result.status === "rejected" ? ` (${result.reason})` : ""}`,
   );
+}
+function reportAction(result: DispatchResult) {
+  if (result.status === "failed") message(`Operation failed: ${String(result.error)}`);
+  if (result.status === "closed")
+    result.cleanupErrors.forEach((error) => message(`Cleanup failed: ${String(error)}`));
 }
 function open(id: string, target?: string, delay = 0) {
   return workbench
@@ -535,7 +539,11 @@ function moveActive(location: DockLocation) {
   if (target?.id)
     void workbench
       .dispatch(Actions.moveNode(active.id, target.id, location, -1))
-      .then((result) => message(`Layout: ${result.status}`))
+      .then((result) => {
+        reportAction(result);
+        message(`Layout: ${result.status}`);
+        return undefined;
+      })
       .catch((error: unknown) => message(`Layout failed: ${String(error)}`));
 }
 function Navigation() {
@@ -651,15 +659,23 @@ function App() {
         <button
           onClick={() =>
             active &&
-            void workbench.dispatch(
-              Actions.moveNode(active, "border_bottom", DockLocation.CENTER, -1),
-            )
+            void workbench
+              .dispatch(Actions.moveNode(active, "border_bottom", DockLocation.CENTER, -1))
+              .then(reportAction)
+              .catch((error: unknown) => message(String(error)))
           }
         >
           Move to Border
         </button>
         <button onClick={() => moveActive(DockLocation.CENTER)}>Move to center</button>
-        <button onClick={() => void workbench.dispatch(Actions.selectTab("inspector"))}>
+        <button
+          onClick={() =>
+            void workbench
+              .dispatch(Actions.selectTab("inspector"))
+              .then(reportAction)
+              .catch((error: unknown) => message(String(error)))
+          }
+        >
           Toggle Inspector
         </button>
         <button
@@ -698,7 +714,11 @@ function App() {
                 onAction: (action) => {
                   void workbench
                     .dispatch(action)
-                    .then((result) => message(`Layout: ${result.status}`))
+                    .then((result) => {
+                      reportAction(result);
+                      message(`Layout: ${result.status}`);
+                      return undefined;
+                    })
                     .catch((error: unknown) => message(`Layout failed: ${String(error)}`));
                 },
                 closeMenu,

@@ -95,6 +95,35 @@ function dragEvent() {
 }
 
 describe("routed document links", () => {
+  it("ends native dragging while disposal waits for content cleanup", async () => {
+    const { workbench, internal, open, endDrag } = setup();
+    const source = await open("A");
+    const cleanup = deferred();
+    const release = vi.fn<() => Promise<void>>(() => cleanup.promise);
+    const content = internal.content(source.id);
+    content.effect(({ defer }) => defer(release));
+    const link = workbench.createLink(nav("B"));
+    link.dragStart(dragEvent());
+
+    let settled = false;
+    const disposing = workbench.dispose().then((errors) => {
+      settled = true;
+      return errors;
+    });
+    try {
+      expect(endDrag).toHaveBeenCalledOnce();
+      expect(release).toHaveBeenCalledOnce();
+      expect(await link.open()).toEqual({ status: "rejected", reason: "closed" });
+      expect(settled).toBe(false);
+      expect(() => content.effect(() => {})).toThrow(`Cannot use closed content ${source.id}`);
+      link.dragEnd();
+      expect(endDrag).toHaveBeenCalledOnce();
+    } finally {
+      cleanup.resolve();
+      expect(await disposing).toEqual([]);
+    }
+  });
+
   it("captures immutable options and resolves a deferred URL only on activation", async () => {
     const { workbench, open } = setup();
     const source = await open("A");

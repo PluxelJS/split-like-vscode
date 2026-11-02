@@ -134,10 +134,10 @@ describe("preview admission boundaries", () => {
     const a = await open("A");
     if (a.status !== "committed") throw new Error(a.status);
     const cleanupError = new Error("cleanup failed");
-    internal.register(a.document.id, {
-      dispose: async () => {
+    internal.content(a.document.id).effect(({ defer }) => {
+      defer(async () => {
         throw cleanupError;
-      },
+      });
     });
     const b = await open("B");
     expect(b.status).toBe("committed");
@@ -159,7 +159,7 @@ describe("preview admission boundaries", () => {
     const a = await open("A");
     if (a.status !== "committed") throw new Error(a.status);
     const guardError = new Error("guard read failed");
-    internal.register(a.document.id, {
+    internal.registerOwner(a.document.id, {
       isDirty: () => {
         throw guardError;
       },
@@ -178,7 +178,7 @@ describe("preview admission boundaries", () => {
     const a = await open("A");
     if (a.status !== "committed") throw new Error(a.status);
     const beforeLeave = vi.fn<() => boolean>(() => true);
-    internal.register(a.document.id, { isDirty: () => true, beforeLeave });
+    internal.registerOwner(a.document.id, { isDirty: () => true, beforeLeave });
     await internal.documents
       .get(a.document.id)!
       .router!.navigate({ href: "/documents/A?view=compare" });
