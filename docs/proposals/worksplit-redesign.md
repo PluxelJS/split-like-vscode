@@ -8,6 +8,7 @@
 同日明确以库的中性、组合能力和 FlexLayout 知识复用为目标，将上游升级成本纳入设计取舍。
 随后进一步明确：常用组合也是库的责任，不能把“不含业务假设”写成“所有选择都由下游重做”。
 整体复查以无旧 API 兼容负担为前提，重新选择内容所有权、导航路径、竞争范围、启动和包边界；现有提案同样可以被证据修正。
+同日依赖探针进一步暴露重载重定向绕过 blocker、旧异步 blocker 晚提交及索引失配；本版据此补齐导航提交、两类历史的对应和退出快照。
 先用[场景预演](worksplit-redesign-scenarios.md)理解需求怎样组合，再读本文的目标契约、迁移与验收。
 共同约束在[设计原则](../design-principles.md)，执行顺序在[实施说明](worksplit-redesign-implementation.md)。
 预演页拥有需求证据和取舍推导，本文是目标接口与行为的唯一权威。当前实现见[架构](../../refactor/README.md)、
@@ -31,30 +32,31 @@
 
 ## 调查基线与证据边界
 
-| 对象        | 本次读取基线                                    | 结论的范围                                                       |
-| ----------- | ----------------------------------------------- | ---------------------------------------------------------------- |
-| Worksplit   | 原始运行基线 `265bbed1`；本轮读取 `6b36680`     | 后者只增加设计文档；公开导出、实现与测试仍为原运行基线           |
-| 财务工作台  | 本轮 `0ce93ea4`，替代初审的 `48558515`          | 同标签下探/返回、右侧预览、菜单、可见读取、业务 scope 与内容接入 |
-| 初审 Pluxel | 11 月 3 日读取 `0ca9e13a`，gitlink 为 `cd4104e` | 当时 Shell/Studio 有较早 hook；本轮未复查，不代表消费者最新状态  |
-| 原生布局    | FlexLayout `0.11.1` 加仓库固定补丁              | 所有原生能力判断以该版本为基线；实施时如升级需重新验收           |
+| 对象        | 本次读取基线                                    | 结论的范围                                                      |
+| ----------- | ----------------------------------------------- | --------------------------------------------------------------- |
+| Worksplit   | 原始运行基线 `265bbed1`；本轮读取 `bdd1ca9`     | 后续只增加设计文档；公开导出、实现与测试仍为原运行基线          |
+| 财务工作台  | 场景基线 `0ce93ea4`；本轮复核 `39721c93`        | 同标签下探/返回、业务 scope、浏览器接管与退出前快照 writer      |
+| 初审 Pluxel | 11 月 3 日读取 `0ca9e13a`，gitlink 为 `cd4104e` | 当时 Shell/Studio 有较早 hook；本轮未复查，不代表消费者最新状态 |
+| 原生布局    | FlexLayout `0.11.1` 加仓库固定补丁              | 所有原生能力判断以该版本为基线；实施时如升级需重新验收          |
 
-本次是源码与文档设计审查，另做了原生 history 的最小拒绝探针，范围见[预演证据](worksplit-redesign-scenarios.md#证据与阅读边界)。没有重新执行历史浏览器或宿主验收。
+本次是源码与文档设计审查，另做了真实 Router/history 的隔离探针，范围见[预演证据](worksplit-redesign-scenarios.md#证据与阅读边界)。没有重新执行历史浏览器或宿主验收。
+探针证明当前依赖的缺口，不证明新适配已经可用；尤其不能把公开 createHistory backend 接口的存在，当作转换关联与拒绝结算均已可行。
 历史的 323 项库测试、宿主迁移与截图证明各自记录时点，不证明本提案已实施，也不证明另一 checkout 已加载相同制品。
 财务源码路径以该仓库根为基准；Shell/Studio 路径以 Pluxel 仓库根为基准，实施者须核对实际 checkout。
 
 ### 重构必须消除的实际负担
 
-| 现有负担                                                           | 目标边界与依据                                                                               |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| dirty 混合未保存与写入未知，保存改变 revision 后批准含义不清       | [内容决定](#内容-controller-与离开决策)区分事实、许可和实际保存依据，文档与工具一致          |
-| 同标签下探、筛选和返回需要组合，现有 memory traversal 未经 blocker | [导航层次](#四种导航及阅读返回)保持原生 Router API，有限 history 适配补足受保护遍历          |
-| 库内两/四窗格选位与 35% 绑住财务旧政策                             | [中性放置](#中性放置与应用策略)保留通用旁开组合，产品选择归应用，共用明确目的地接纳          |
-| 多个宿主重复关闭范围、菜单键盘和工具揭示                           | [默认菜单](#默认菜单与键盘入口)与 activate 统一接线，原生条目和 Actions 可直接定制           |
-| getLayout 深复制整个模型，宿主解析工具位置及每个窗格可见性         | [查询](#查询活动状态与焦点)提供原生事实，快照仅用于显式持久化                                |
-| 文档实例、URL key、业务资源和阅读依据容易被混同                    | [术语](#公开术语)与[身份](#身份与原生导航)分别限定，不用 URL 变化推断草稿应销毁              |
-| drop 丢失原生 index/组目标，异步操作易命中已替换的对象             | [链接](#文档链接与拖放)保留原生命中，接纳复核真实实例与插入位置                              |
-| 浏览器接管、关闭决定、资源清理有重复或模糊完成点                   | [历史](#浏览器历史与工作台退出)、[资源](#内容资源工具与会话寿命)共享必要协调，分别定义提交点 |
-| 通用命令体系、shell、SplitView 与 Workbench 依赖相互牵连           | [快捷键](#快捷键不再是一套命令平台)直接调用操作，[包边界](#包边界)只按独立消费者拆分         |
+| 现有负担                                                     | 目标边界与依据                                                                              |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| dirty 混合未保存与写入未知，保存改变 revision 后批准含义不清 | [内容决定](#内容-controller-与离开决策)区分事实、许可和实际保存依据，文档与工具一致         |
+| 遍历绕过 blocker、重载无批准重定向、旧 blocker 晚提交        | [导航批准](#导航批准与转换寿命)与[文档 history](#文档-history-提交边界)覆盖许可、提交及结算 |
+| 库内两/四窗格选位与 35% 绑住财务旧政策                       | [中性放置](#中性放置与应用策略)保留通用旁开组合，产品选择归应用，共用明确目的地接纳         |
+| 多个宿主重复关闭范围、菜单键盘和工具揭示                     | [默认菜单](#默认菜单与键盘入口)与 activate 统一接线，原生条目和 Actions 可直接定制          |
+| getLayout 深复制整个模型，宿主解析工具位置及每个窗格可见性   | [查询](#查询活动状态与焦点)提供原生事实，快照仅用于显式持久化                               |
+| 文档实例、URL key、业务资源和阅读依据容易被混同              | [术语](#公开术语)与[身份](#身份与原生导航)分别限定，不用 URL 变化推断草稿应销毁             |
+| drop 丢失原生 index/组目标，异步操作易命中已替换的对象       | [链接](#文档链接与拖放)保留原生命中，接纳复核真实实例与插入位置                             |
+| 浏览器返回丢失文档 entry，终止后 writer 无法取得最后快照     | [历史对应](#浏览器条目与文档-entry)、[退出快照](#受保护退出的最后快照)固定恢复和交接时点    |
+| 通用命令体系、shell、SplitView 与 Workbench 依赖相互牵连     | [快捷键](#快捷键不再是一套命令平台)直接调用操作，[包边界](#包边界)只按独立消费者拆分        |
 
 这些改变服务既有用户路径；不以新增公共模块、统一所有时序或删除有效保护来证明重构完成。
 
@@ -157,27 +159,27 @@ dispatch 是内容生命周期的集成入口，不是另一套布局解释器�
 以下是目标命名和语义，不是现有用法。具体泛型必须沿用实际 TanStack 类型并在独立消费者中证明。
 实现时若精确签名不能同时满足上游类型与本文不变量，应在本提案记录证据并同步修改类型、用例和文档；不能增加旧接口兜底。
 
-| 入口                                                                | 责任                                                                |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `createWorkbench(options)` / `<Workbench>`                          | 创建唯一会话、绑定原生布局；宿主拥有实例寿命                        |
-| `useContent()`                                                      | 只借用当前内容的稳定实例句柄，不登记 owner                          |
-| `useContentController(controller)`                                  | 在内容根显式登记唯一 controller；参数必须传入                       |
-| `content.runEffect(setup)`                                          | 立即启动一个内容所有的资源 effect，返回幂等 stop                    |
-| `open(navigation, options)`                                         | 原生路由目标进入统一接纳流程                                        |
-| `beside({ direction, ratio? })`                                     | 返回 destination resolver；只选择通用旁开位置                       |
-| `createLink(navigationOrResolver, options)`                         | 点击和显式拖放共用 open；保留路由类型推导                           |
-| `duplicate(id, options)`                                            | 从已提交 URL 建立新普通文档，不复制草稿                             |
-| `keepOpen(id)`                                                      | 将预览变为普通文档；仍可关闭，不表示 native pin 或永久保存          |
-| `activate(id, options)`                                             | 揭示现有文档/工具，并按显式 presentation 协调焦点                   |
-| `save(id)`                                                          | 调用该内容的宿主 save 能力；文档和工具一致                          |
-| `close(target, options)`                                            | 接受 ID/IDs 或有界原生范围，捕获实际实例后统一决定并关闭            |
-| `closeWorkspace(options)`                                           | 对全体内容取得离开许可，再终止工作台；区别于标签的 pin/不可关闭限制 |
-| `dispatch(action)` / `canDispatch(action)`                          | 提交/预检原生动作；预检不是许可承诺                                 |
-| `getContent` / `getDocument` / `getDocuments` / `getActiveDocument` | 当前只读内容投影；找不到返回 null/空集合                            |
-| `getContainers()` / `getContext()`                                  | 原生容器事实和活动/焦点投影，零序列化                               |
-| `useWorkbenchState(instance, selector)`                             | 只读选择性订阅，不创建另一份可写 store                              |
-| `createSnapshot()`                                                  | 明确导出原生布局和文档恢复信息                                      |
-| `start(options?)` / `dispose()`                                     | 一次初始化快照/URL及可选浏览器连接；强制资源终止                    |
+| 入口                                                                | 责任                                                       |
+| ------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `createWorkbench(options)` / `<Workbench>`                          | 创建唯一会话、绑定原生布局；宿主拥有实例寿命               |
+| `useContent()`                                                      | 只借用当前内容的稳定实例句柄，不登记 owner                 |
+| `useContentController(controller)`                                  | 在内容根显式登记唯一 controller；参数必须传入              |
+| `content.runEffect(setup)`                                          | 立即启动一个内容所有的资源 effect，返回幂等 stop           |
+| `open(navigation, options)`                                         | 原生路由目标进入统一接纳流程                               |
+| `beside({ direction, ratio? })`                                     | 返回 destination resolver；只选择通用旁开位置              |
+| `createLink(navigationOrResolver, options)`                         | 点击和显式拖放共用 open；保留路由类型推导                  |
+| `duplicate(id, options)`                                            | 从已提交 URL 建立新普通文档，不复制草稿                    |
+| `keepOpen(id)`                                                      | 将预览变为普通文档；仍可关闭，不表示 native pin 或永久保存 |
+| `activate(id, options)`                                             | 揭示现有文档/工具，并按显式 presentation 协调焦点          |
+| `save(id)`                                                          | 调用该内容的宿主 save 能力；文档和工具一致                 |
+| `close(target, options)`                                            | 接受 ID/IDs 或有界原生范围，捕获实际实例后统一决定并关闭   |
+| `closeWorkspace(options)`                                           | 对全体内容取得离开许可，按配置捕获最后快照，再终止工作台   |
+| `dispatch(action)` / `canDispatch(action)`                          | 提交/预检原生动作；预检不是许可承诺                        |
+| `getContent` / `getDocument` / `getDocuments` / `getActiveDocument` | 当前只读内容投影；找不到返回 null/空集合                   |
+| `getContainers()` / `getContext()`                                  | 原生容器事实和活动/焦点投影，零序列化                      |
+| `useWorkbenchState(instance, selector)`                             | 只读选择性订阅，不创建另一份可写 store                     |
+| `createSnapshot()`                                                  | 明确导出原生布局和文档恢复信息                             |
+| `start(options?)` / `dispose()`                                     | 一次初始化快照/URL及可选浏览器连接；强制资源终止           |
 
 不继续公开可直接构造的实现 class 和内部状态访问器。`WorkbenchInstance` 可以保留为由 factory 返回的公开类型。
 一般查询不产生 Promise；有完成回执的内容/布局操作统一返回 Promise。命令的成功时点见下表，不能推断 DOM 或业务保存已完成。
@@ -187,7 +189,7 @@ dispatch 是内容生命周期的集成入口，不是另一套布局解释器�
 
 ### 配置归属与最小接入
 
-创建参数只包含 createRouter、初始状态、工具定义、布局政策、预览作用域、home、会话标识、可选 workspaceLeave 和 issue 通知。
+创建参数只包含 createRouter、初始状态、工具定义、布局政策、预览作用域、home、会话标识、可选 workspaceLeave、captureSnapshotOnClose 和 issue 通知。
 `createRouter(history)` 返回真实 Router；它如何提供 route tree、应用 context、Query client 和其他服务由宿主负责。
 `initial` 使用 `{ layout: IJsonModel } | { snapshot: unknown }`，两种输入互斥；不传时使用无业务上限的空中央布局。
 不接受已被其他工作台使用的 mutable Model 作为第二所有者；下游通过原生 JSON 配置、原生 props/ref 和查询获得原生能力。
@@ -195,8 +197,9 @@ dispatch 是内容生命周期的集成入口，不是另一套布局解释器�
 home 使用 `{ mode: "empty" | "route", href: string }`；默认空工作台，涉及浏览器时必须有明确合法 home URL。
 workspaceId 用于恢复和历史归属；需要跨重载恢复的宿主必须提供稳定值，临时嵌入实例可以使用自动生成的会话标识。
 不同实例不能靠默认固定字符串共享历史空间。
+captureSnapshotOnClose 默认 false；持久化宿主设为 true，受保护退出时由库捕获终止前快照，存储仍由宿主负责。精确时点见[退出快照](#受保护退出的最后快照)。
 
-创建时固定会话配置，不通过修改传入对象或 React rerender 更换 createRouter、工具定义/解析器引用、home、布局政策与预览作用域。
+创建时固定会话配置，不通过修改传入对象或 React rerender 更换 createRouter、工具定义/解析器引用、home、布局政策、预览作用域与退出快照配置。
 不提供通用 setOptions。业务偏好需要改变时，普通策略函数可读取应用当前事实；若决定依据改变，相关待提交操作重新复核。
 需要更换项目/路由定义等会话身份时，先受保护退出，再创建新实例。menus/native 呈现参数则随 React 已 commit 的 props 更新，
 controller 也只采用已 commit 的声明。三种生效时机明确分开，不把所有参数做成可热替换服务。
@@ -232,15 +235,16 @@ type OperationResult<T> =
 应用自己的拒绝原因可作为附加信息传递，不进入库的业务分支。`superseded` 表示操作失去接纳/发布其文档结果的资格，
 不证明底层请求已取消，也不保证原生 history 尚未前进或 loader 没有副作用。不能以回滚物理 history 来伪造无效果。
 
-| 操作                   | applied 的精确时点                                                |
-| ---------------------- | ----------------------------------------------------------------- |
-| open / duplicate       | 路由结果已接纳、原生节点已入树、文档身份已登记；内容可能尚未绘制  |
-| activate               | 揭示/选择和活动状态已接纳，焦点请求已登记；不承诺输入框已经挂载   |
-| save                   | 宿主保存回调成功返回；库不据此宣称所有修改已清除或替代业务回执    |
-| close / closeWorkspace | 原生移除/会话终止已发生，固定的已知清理集合已结算                 |
-| dispatch               | 支持的原生 Action 已提交，必要的内容协调已完成                    |
-| start                  | 初始化被接纳，结果明确是文档还是空 home；不是全部恢复文档加载完成 |
-| dispose                | 强制终止已发生，固定的已知清理集合已结算；清理错误随结果返回      |
+| 操作             | applied 的精确时点                                                                |
+| ---------------- | --------------------------------------------------------------------------------- |
+| open / duplicate | 路由结果已接纳、原生节点已入树、文档身份已登记；内容可能尚未绘制                  |
+| activate         | 揭示/选择和活动状态已接纳，焦点请求已登记；不承诺输入框已经挂载                   |
+| save             | 宿主保存回调成功返回；库不据此宣称所有修改已清除或替代业务回执                    |
+| close            | 原生移除已发生，固定的已知清理集合已结算                                          |
+| closeWorkspace   | 会话终止及已知清理集合已结算；value.snapshot 返回可选终止前快照，存储尚由宿主完成 |
+| dispatch         | 支持的原生 Action 已提交，必要的内容协调已完成                                    |
+| start            | 初始化被接纳，结果明确是文档还是空 home；不是全部恢复文档加载完成                 |
+| dispose          | 强制终止已发生，固定的已知清理集合已结算；清理错误随结果返回                      |
 
 预期拒绝和被取代都返回结果，异步运行失败也返回 failed；内容/布局操作的参数错误同样通过结果表达，不能同一失败有时 throw、有时静默。
 配置创建/绑定的无效结构可以在安装资源前同步抛出；createSnapshot 的同步序列化错误由调用者捕获。
@@ -265,13 +269,13 @@ open 的 applied payload 明确返回实际 `presentation`，调用者能区分�
 没有新实例且仅需揭示已有文档时，过时的呈现请求直接 superseded；已发生导航则按实际效果报告。
 显式 reveal 的来源保护仍必须成立，不自动改成 activate/background；预览也不允许后台降级。
 
-| 竞争对象                   | 范围与处理                                               |
-| -------------------------- | -------------------------------------------------------- |
-| 同一文档的导航             | 原生 Router/history 决定取代；库关联该次结果与保护寿命   |
-| 同一预览作用域的新预览     | 后一次选择取代尚未接纳的旧选择；已接纳内容按预览协议处理 |
-| 同一内容/相交关闭范围      | 相同请求复用，其他重叠返回 busy；无关内容仍可操作        |
-| 焦点、活动文档与浏览器地址 | 仅最新有效的前台请求可发布，后台接纳不抢占它             |
-| 关闭工作台或 dispose       | 会话级资格失效；禁止晚到内容重新接纳                     |
+| 竞争对象                   | 范围与处理                                                     |
+| -------------------------- | -------------------------------------------------------------- |
+| 同一文档的导航             | history 提交前复核本请求资格；提交后关联原生 Router 的实际结算 |
+| 同一预览作用域的新预览     | 后一次选择取代尚未接纳的旧选择；已接纳内容按预览协议处理       |
+| 同一内容/相交关闭范围      | 相同请求复用，其他重叠返回 busy；无关内容仍可操作              |
+| 焦点、活动文档与浏览器地址 | 仅最新有效的前台请求可发布，后台接纳不抢占它                   |
+| 关闭工作台或 dispose       | 会话级资格失效；禁止晚到内容重新接纳                           |
 
 不保留一个全局 openEpoch 来取消所有普通打开，也不把 browser 的物理恢复忙碌扩成所有后台读取/布局查询的锁。
 临时保留的实例、目标、范围及代次只覆盖本操作需要的事实；无关文档更新、尺寸变化不应一概使批准失效。
@@ -369,34 +373,58 @@ allow 必须携带应用**实际审核或确认保存成功**的 token。它可�
 单个原生动作内部没有中间 veto；onBeforeAction 等可信扩展不得在该同步提交栈中改写本次批准依据或直接移除受保护内容，
 相关业务反应应延后到提交完成。库不宣称隔离任意原生回调，也不以回滚 Model 伪造事务。
 
-导航复用相同的状态捕获、决定和放行前复核，但由 TanStack blocker/Router 继续。
-所有文档内入口，包括原生 Link/navigate、reuse:navigate、history 遍历和 browser visit，都由真实 history blocker 调用一次离开决定。
-程序入口只关联回执与实例资格，不先调用 decide 再用 approved[href] 让 blocker 跳过；原生其他 blocker 仍可独立拒绝。
-已在早期选定既有实例时，编辑器未获准前不先用另一个 Router 执行其目标 loader；未命中候选的晚匹配代价见打开路径。
-原生 redirect continuation 的 ignoreBlocker 仍按该尝试的批准寿命处理。
-blocker 放行与最终路由接纳是两个时点，中间仍有 loader、redirect、失败或被更新导航取代。
-当前公开 Router 事件是通知，没有可 await/veto 的最终 commit hook；不能把 onLoad 返回 false 当作第二次批准，
-也不能将导航写成与原生删除相同的同步提交事务。
+批次的 all-or-none 保证只针对**决定完成前不删除任何成员**。应用已经保存的内容不会因另一个成员拒绝而回滚。
+原生提交时的异常或同步回调造成的批准失效可能留下部分效果，按共同结果报告并完成必要清理，不能通过重建 Model 抹掉事实。
+
+### 导航批准与转换寿命
+
+导航复用相同的状态捕获与批准协议，但至少有三个不同的时点：应用返回 allow、history 实际改写、Router 最终接纳。
+Worksplit 的 blocker 返回 allow 时，其他原生 blocker 可能仍在等待；history 前进以后，Router 仍可能加载、重定向、失败或被取代。
+不能把其中任一点当作其余两个已经完成。当前公开 Router 事件是通知，没有可 await/veto 的最终 commit hook；onLoad 不能撤回已发生的接纳。
+
+所有改变文档 entry 的普通入口，包括原生 Link/navigate、reuse:navigate、history 遍历和 browser visit，进入同一个 history 提交边界。
+应用决定只由登记的 blocker 发起；程序入口关联回执与实例资格，不先调用 decide，再用 approved[href] 跳过 blocker。
+其他原生 blocker 保留独立决定权。已选定活实例时，获准前不先用候选 Router 执行它的目标 loader。
+
+| 阶段                                 | 必须成立的事实                                                                   | 被新请求取代或失败时                                      |
+| ------------------------------------ | -------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| 捕获与询问                           | 绑定内容/owner、最后已接纳位置、实际目标 entry 和本请求资格                      | 结束该次决定及 defer；位置/state 不变                     |
+| 应用已 allow，其他 blocker 未结束    | 保留批准 token 与暂停引用；尚未获得改写 history 的资格                           | 新请求使旧的待提交资格失效；旧 blocker 晚返回不能继续提交 |
+| 全部 blocker 放行，紧邻 history 提交 | 再核对请求资格、批准、真实来源及目标 entry；无 await 地改写 entries/index 并通知 | 校验失败不改写；不能先移动再回滚                          |
+| history 已提交，Router 处理中        | 关联原生转换和可能的 redirect 链；应用仍以最后已接纳资源为 from                  | 原生终止或后继接纳证实旧转换不再能发布时，才结束旧保护    |
+| Router 最终接纳或确定终止            | 应用按实际接纳更换资源引用；本尝试恰好结算一次                                   | 错误页也是接纳；留在原资源时恢复可编辑性                  |
+
+每文档只保留当前工作必需的请求关联与资格；不建立公共导航队列或操作日志。
+Router.navigate Promise 完成、相同 href、某个全局 onResolved、当前存在一个 allow，都不能单独证明“这次尝试”已经完成或拥有后续 redirect。
+关联必须包含真实内容寿命、原生 entry 身份及已验证的转换事实；不能读写私有 _tx/_commitPromise 来补出一个不可发布的协议。
+精确关联、未进入 pending 的拒绝、原生 Promise 的结算，以及无需挂载 RouterProvider 的后台路径，都属于[实施前置能力](#文档-history-提交边界)。
 
 普通可编辑宿主的跨资源导航采用一条明确路径：应用决定离开资源时，在返回 allow 前冻结该资源的编辑命令入口，
 完成审核/保存并批准实际 token，把冻结释放登记到 request.defer。冻结覆盖所有修改入口，不能仅禁用一个输入框。
-库负责让未进入 Router pending 的失败/取代也结束尝试；已经放行的转换则关联原生结算，
+库负责让未提交 history 的失败/取代也结束尝试；已经提交的转换则关联原生结算，
 在最终接纳或确定终止前保持冻结，不因组件暂时隐藏或回调更新提前结束。
 应用仅在原生已提交的资源转换后更换草稿引用；失败留在旧资源时恢复可编辑性，不提前丢弃状态。
 外部共享编辑若仍可发生，应用必须保留其独立草稿 owner，并通过 workspaceLeave 保护，不能把它作为已批准内容清掉。
 
 同资源筛选可以不冻结，但应用需能证明该路线及其 redirect 不会离开资源；否则按资源离开处理。
-已批准的资源离开覆盖本次 Router redirect 链，不在每个 redirect 另弹确认；loader 的业务副作用由应用负责。
-库不重新实现 loader/redirect、不承诺回滚已发生的路由或业务效果。先用[编辑预演](worksplit-redesign-scenarios.md#编辑保存与路由提交)验证这条时间线，再扩展整套接口。
+确属已批准转换的内部 redirect 沿用本次许可，不另弹确认；许可覆盖的是这次资源离开与原生后续链，不是该 URL 的长期通行权。
 
-相同待处理关闭可共享一次决定；重叠但不同的范围明确返回 busy。新的导航/历史操作撤销尚未放行的旧决定，应用可关闭旧对话框。
-已经放行的旧转换则按原生取消/接纳结算，不用提前 abort 假装它从未发生；后继尝试的保护须连续接管。
-例如 T1 已放行但 loader 未完，T2 被其他 blocker 拒绝；结束 T2 只能释放它自己的暂停引用，T1 的编辑保护仍在。
+**重载不自动拥有离开许可。** 同地址 navigate、router.invalidate/load 和错误重试都可能重新执行 beforeLoad/loader。
+本轮实际版本在同地址 navigate 中直接 load；重载产生的 redirect 使用 ignoreBlocker，已证实可以在 blocker 从未执行时改变资源。
+仅重读且最终仍留在同一资源不要求离开决定；重载要改写位置时，若没有可证明归属的有效批准，必须在改写前进入同一决定链。
+ignoreBlocker 是原生执行选项，不是批准证明，也不能被全局忽略：已批准链继续复用许可，无批准的资源转换重新决定。
+不能把任意正在加载的 Router、相同 from/href 或尚未释放的暂停引用，当作 redirect 归属证据。
+
+如果所选版本的公开能力不能同时证明归属、阻止无批准提交、正常结算被拒绝的 Router 转换，必须先解决该能力缺口，
+再宣称支持这条路径；不能用跳过 guard、手动 resolve 私有 Promise、事后回滚或永久冻结来交付。
+文档 Router 的 reloadDocument/外部 redirect 还涉及整个会话退出，本版不把它们纳入可直接使用的文档导航；
+宿主通过受保护工作台退出后接管页面导航。普通 loader 的业务副作用仍属应用，库不重新实现加载或回滚写入。
+
+相同待处理关闭可共享一次决定；重叠但不同的范围明确返回 busy。新的导航请求撤销尚未提交 history 的旧资格，应用可关闭旧对话框。
+已经提交的旧转换按原生取消/接纳结算；仅开始后继询问不证明旧转换已终止，后继保护须连续接管。
+例如 T1 已提交 history 但 loader 未完，T2 被其他 blocker 拒绝；结束 T2 只能释放它自己的暂停引用，T1 的编辑保护仍在。
 保护引用属于原 editor owner，库负责每次尝试恰好结算；不为这个问题新增公共导航队列或业务锁平台。
 回调不得再次调用当前正在等待它的 close/dispose，不能制造重入等待环。
-
-批次的 all-or-none 保证只针对**决定完成前不删除任何成员**。应用已经保存的内容不会因另一个成员拒绝而回滚。
-原生提交时的异常或同步回调造成的批准失效可能留下部分效果，按共同结果报告并完成必要清理，不能通过重建 Model 抹掉事实。
 
 ### 预览替换与退出
 
@@ -405,7 +433,7 @@ hasUnsavedChanges 为 true 的旧预览直接保留为普通文档，其他有 g
 拒绝或状态改变时保留旧内容为普通文档，新文档接纳成功后才结束旧预览资格；新文档失败不破坏旧预览。
 
 closeWorkspace 覆盖文档和工具，也询问 native pin/enableClose:false 内容的应用决定：这些标记限制标签操作，不能绕过工作台退出保护。
-待决定期间不销毁 Router、资源或浏览器连接；提交时统一终止。结果和批量关闭一致，已失败的宿主保存不隐式重试。
+待决定期间不销毁 Router、资源或浏览器连接；提交前按[退出快照](#受保护退出的最后快照)取得可选导出，再统一终止。已失败的宿主保存不隐式重试。
 宿主如果存在不属于任何打开标签的共享草稿/项目操作，可提供 workspaceLeave，使用相同 getState/decide 与批准 token 协议，
 只接收带外部目的地（如有）的工作台离开请求。它作为同一批次的一个额外参与者，统一最终复核；不另建第二层退出状态机。
 内容关闭不咨询 workspaceLeave，强制 dispose 也不咨询；此入口不能替代每文档导航与关闭保护。
@@ -419,12 +447,12 @@ controller 只采用已 commit 的回调，丢弃的 concurrent render 不得改
 资源 effect 的 React cleanup 不撤回编辑决定。
 同一个 hook 登记的 owner 身份稳定，普通 rerender 更新 committed 回调不会变成新 owner；
 否则保存触发 React 更新就会使所有“保存并关闭”失效。业务决定依据改变由 token 表达，
-真正 owner 重登记、内容实例变化、保护从有到无等结构变化才另外撤销尚未交给原生继续的批准。
-已经放行的导航按原生转换结算，不能因 owner 隐藏而提前结束尝试期保护。
+真正 owner 重登记、内容实例变化、保护从有到无等结构变化才另外撤销尚未提交 history 的批准。
+已经提交 history 的导航按原生转换结算，不能因 owner 隐藏而提前结束尝试期保护。
 
 对已经登记过保护的存活内容，owner cleanup 到重新登记之间必须视为保护暂不可用，拒绝新的离开操作，不能当成 clean。
 StrictMode 的 setup/cleanup/setup 与同 ID 重开使用真实登记身份区分，不用延时猜测“应该还是同一个 owner”。
-显式提交 leave:null 才表示应用主动撤下限制；controller 更换或保护撤回必须使尚未放行的批准失效。
+显式提交 leave:null 才表示应用主动撤下限制；controller 更换或保护撤回必须使尚未提交的批准失效。
 测试必须覆盖完整 owner 暂停，不能仅靠“调用者不应在此时关闭”的文档回避数据保护。
 从未挂载/登记 controller 的恢复项不拥有内存编辑状态，不为关闭它而加载全部后台 Router；关闭仅移除布局项。
 应用不能在 controller 登记之前让内容产生需要保护的编辑，也不能在组件卸载后把共享草稿所有权交给这个空壳标签。
@@ -465,6 +493,8 @@ decide 若选择丢弃共享修改，宿主必须按自己的共享资源语义�
 保留每文档真实 Router 和独立 memory history，共用应用 route tree/context 服务。
 route hooks、Link、navigate、loader、Outlet、Wrap/InnerWrap 与错误边界继续原生。
 跨文档 open/createLink 使用原生 NavigateOptions 泛型；不建立第二套路由注册表或简化 navigate DSL。
+类型与运行边界只接纳工作台内目标，排除 reloadDocument 和调用者用 ignoreBlocker 申请跳过保护；外部地址由宿主退出后处理。
+直接借用文档 Router 仍属于可信扩展，必须遵守同一受支持边界，不能把原生类型可表达等同于库已协调该能力。
 
 ### 打开选项
 
@@ -638,19 +668,37 @@ manualTitle 是一个布尔所有权标记，不保存第二份标题字符串�
 复制、新开和布局恢复只带已提交 URL，不复制整条历史或伪造阅读父层；无父层时的具名返回入口由应用确定。
 滚动、行选择和冻结金额依据也不由 URL/history 的存在自动恢复。
 
-普通文档导航必须在 PUSH、REPLACE、GO、BACK、FORWARD 修改位置前调用同一登记 blocker，
-带实际 from/to；拒绝时位置与应用 state 不变。当前锁定的 history 1.162.5 在 memory traversal 上不调用 blocker，
-现有 document-history 包装只观察拒绝，不能满足该目标。
-已批准尝试的原生 continuation/redirect 仍遵守 ignoreBlocker，不重复询问；宿主不得用该可信原生入口绕过编辑保护。
-实现前先确认所选支持版本能否原生满足同一遍历保护契约；满足则直接复用原生能力，不为文档计划保留额外实现。
-针对已证实有缺口的当前基线，路线是在现有 document-history 内基于上游公开 `createHistory` 提供一个有限 memory backend，
-由它持有唯一 entries/index，使用原生解析、state 和通知协议；遍历先审查真实目标，再改 index 并通知。
-通过公开 backend getLocation/getLength/pushState/replaceState/go/back/forward、getBlockers/setBlockers 与 onBlocked 接线，
-禁用提前的 index-change 通知，获准后才 notify；直接使用原生 RouterHistory 类型，不扩展另一套历史接口。
-不在 createMemoryHistory 旁镜像另一份 entries，不公开第二套 back/navigation API，不复制 Router 的 loader/redirect。
-优先验证拒绝、快速交叉操作、state 保留与导航结算；上游等价能力通过同一回归后删除这一适配。
-最终支持的版本与制品只走选定的一条路径，不按运行时能力探测保留原生/自建双实现，也不扩成通用 history backend 插件协议。
-公开扩展点的可行性已由源码核对，完整 backend 尚未实现验证；这是实施的首个能力验证，不能用无 guard 的返回冒充完成。
+### 文档 history 提交边界
+
+唯一文档 history 拥有 entries/index，公开形态仍是原生 RouterHistory，解析、应用 state 与订阅通知沿用原生协议。
+普通 PUSH、REPLACE、GO、BACK、FORWARD 都在改变位置前审查；拒绝保持原 entry、应用 state 与分支不变。
+跨资源批准、重载与 redirect 的完整寿命由[导航批准](#导航批准与转换寿命)拥有，本节只定义 history 的提交职责。
+
+1. 请求开始时捕获文档实例、当前 entry 身份、真实目标、操作类型及该文档的请求资格。GO 捕获当时实际目标 entry，不能在等待后把旧 delta 应用到新位置。
+2. 按原生登记顺序执行 blocker；Worksplit 的决定参与其中。任何拒绝结束本次待提交请求，后续 blocker 不运行。
+3. 全部异步 blocker 结束后，紧邻改写再次复核请求资格、批准及来源/目标。不能只在 Worksplit 的 blocker 返回前检查，也不能靠把它“登记在最后”保证顺序。
+4. 通过后在同一同步提交段改写唯一 entries/index，再通知一次。PUSH 的索引由实际提交位置确定；PUSH/REPLACE 按原生协议产生新 key，REPLACE 不增长度；遍历保留目标 key/state，分支截断与 entry 消失同时可见。
+5. 失败/取代必须同时结算相应尝试及其公开调用；拒绝不发成功导航通知，也不能只返回 Worksplit denied 却让原生 navigate 永久 pending。
+
+entry key 表示一次历史项身份，index 是当前历史中的位置；二者都不是 href、业务资源或 content 身份。
+同 href 的两个 PUSH 可具有不同 state/key；不能按地址相等合并。请求等待期间发生另一提交后，旧来源/目标已不符的请求失效，
+不能复用提前生成的 index 或重新解释旧操作来“尽量完成”。同步订阅者可能发起后续导航；提交前先完成本次全部内部状态更新，通知后不再用旧捕获覆盖新状态。
+
+当前 history 1.162.5 有两项已证实缺口：memory traversal 不经过 blocker；PUSH/REPLACE 的异步 blocker 完成后直接执行旧 task，
+且索引在询问前分配。原有 document-history 仅观察拒绝，不能提供上述保证。有限适配必须覆盖五类入口和最终提交，不能只替换 go/back/forward。
+
+实施先针对最终支持版本验证公开扩展点。createHistory 的 backend getLocation/getLength/pushState/replaceState/go/back/forward、
+getBlockers/setBlockers 与 onBlocked 可供复用，但其存在不足以证明能控制完整 blocker 链之后的提交或精确结算 Router。
+当前基线也不能只在 pushState 中丢掉旧写入却让外层继续发成功 notify。是否直接复用 createHistory，必须由完整代表路径决定；
+适配仅限 history 的存储/提交/通知和必要转换关联，不复制 Router 的匹配、loader、redirect 或 React 调度。
+
+本提案固定目标契约，但**尚未证明当前公开 API 能完整实现重载 redirect 归属及拒绝结算**。
+实施首步要给出真实 Router 下的最小可执行接线，包括无批准重载、交叉 blocker、相同 href 不同 state、后台 Router 与取消。
+若公开能力不足，先确定一个可分发、可测且带移除条件的最小上游修正，再更新支持版本/补丁与同一提案；不能悄悄转用私有字段或降低保护。
+这是架构前置条件，未通过时不开始大规模迁移，也不把“更换 memory backend”记为已解决全部导航问题。
+
+不在 createMemoryHistory 旁镜像另一份 entries，不公开第二套 back/navigation API。最终制品只走验证后的单一路径，
+不按运行时能力探测保留双实现；上游具备等价能力并通过同一回归后删除相应适配。
 
 ### 预览作用域
 
@@ -882,22 +930,52 @@ Layout 的 ref/drop/菜单清理，以及快照和同一原生对象实例。布
 工作台不连接浏览器也必须完整运行，适用于嵌入、测试和同页多个实例。
 是否占有浏览器由 start 的显式 browser 选项决定，连接属于会话寿命；不再公开独立 connectBrowser/disconnect 的第二套启动次序。
 
-| 操作                                           | 浏览器行为                                                                  |
-| ---------------------------------------------- | --------------------------------------------------------------------------- |
-| 首次 start/恢复                                | 接纳最终 URL 后规范化当前项；不为 loader 重定向额外 push                    |
-| 前台打开新的工作文档                           | push 已接纳最终 URL；相同 href 使用 replace                                 |
-| 激活已有文档                                   | replace 当前项，保留浏览器导航与工作台切换的区别                            |
-| 活动文档内部 navigate                          | 遵守原生 push/replace 意图，在被接受后发布                                  |
-| reveal/background、后台文档 navigate、工具激活 | 不改活动文档地址                                                            |
-| 关闭活动文档                                   | 选取实际可用的后继文档或 workspace home，再 replace                         |
-| Back/Forward                                   | 解析属于该会话的条目；失去原实例时按已提交 URL 接纳，不能复活旧 Router/草稿 |
-| 拒绝/失败的遍历                                | 恢复最后被接受的条目及文档；不把被拒绝 URL 留在地址栏                       |
-| 离开本工作台范围                               | 对整个工作台请求离开决定；全部通过后终止连接并通知宿主接管                  |
+| 操作                                           | 浏览器行为                                                              |
+| ---------------------------------------------- | ----------------------------------------------------------------------- |
+| 首次 start/恢复                                | 接纳最终 URL 后规范化当前项；不为 loader 重定向额外 push                |
+| 前台打开新的工作文档                           | push 已接纳最终 URL；相同 href 使用 replace                             |
+| 激活已有文档                                   | replace 当前项，保留浏览器导航与工作台切换的区别                        |
+| 活动文档内部 PUSH/REPLACE                      | 遵守原生意图，在被接受后发布；同 href 不同 entry/state 的 PUSH 仍为新项 |
+| 页面直接发起文档 GO/BACK/FORWARD               | entry 真正改变并接纳后作为前台访问 push；不把文档 delta 当浏览器 delta  |
+| reveal/background、后台文档 navigate、工具激活 | 不改活动文档地址                                                        |
+| 关闭活动文档                                   | 选取实际可用的后继文档或 workspace home，再 replace                     |
+| 浏览器 Back/Forward                            | 优先恢复原文档实例的原 entry；不可用时按条目 URL 新接纳；不额外 push    |
+| 拒绝/失败的遍历                                | 恢复最后被接受的条目及文档；不把被拒绝 URL 留在地址栏                   |
+| 离开本工作台范围                               | 对整个工作台请求离开决定；全部通过后终止连接并通知宿主接管              |
+
+### 浏览器条目与文档 entry
+
+浏览器记录前台访问顺序，文档 history 保存本实例的阅读顺序；两者索引不相等，也不互相复制 state。
+文档内直接返回会形成一次新的前台访问，浏览器随后 Back 可撤销这次访问；browser visit 触发的文档遍历则只完成该 browser entry 的接纳，不再次 push。
+按请求来源关联发布，不能用全局“正在遍历”布尔值抑制其他有效导航，也不能把所有同 href 发布一律变成 replace。
+同一已接纳 entry 的重复通知、未移动的 GO/边界 BACK/FORWARD 不生成新访问；这与同 href、不同 entry 的真实 PUSH 分开。
+
+浏览器的 Worksplit 命名空间记录所属 workspace/scope、浏览器位置，以及可选的文档 ID、该次内容寿命的非复用标识和原生 entry key。
+内容寿命标识仅用于关联存活实例，不写入布局快照，也不成为业务 ID。entry key 可定位唯一 memory history 中的项目；
+这里只保存引用，不在 browser coordinator 镜像文档的 entries、应用 state 或阅读父层。
+start 仅按已验证的 workspace/scope 协议接管当前浏览器范围；恢复同一 scope 也不会恢复旧内容寿命。无法证明属于当前范围的条目仍交宿主处理。
+
+| 遍历目标的现状                                   | 接纳方式                                                                               |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| 内容寿命相符，entry key 仍在该 history           | 按实际 entry 求当前位置差并走受保护遍历，恢复它自己的完整 state；已在该 entry 则只揭示 |
+| 内容寿命相符，但 entry 被 REPLACE 或分支截断移除 | 按 browser 条目 URL 新建文档；不替换该实例当前 entry，也不拿同 href 的另一项冒充       |
+| 原内容已关闭、同 ID 重开或整个会话已重建         | 按 URL 新建文档，不继承原草稿、history 或 financialReadParent                          |
+| URL 接纳发生原生 redirect                        | 对当前 browser entry 规范化最终 URL，并关联最终接纳的内容寿命/entry key                |
+
+URL 回退明确使用新实例，不按默认 preserve 意外命中同地址的另一阅读上下文。新接纳失败时保留既有内容并恢复被接受的 browser entry；
+成功后更新当前 browser entry 的引用，后续有效遍历可定位新实例，无需每次再创建。仅缺少原 entry 不构成布局损坏。
+已知属于当前工作台但缺少可用 entry 引用，与不属于该工作台的外部历史项分开；后者走工作台退出，不能按 URL 冒领。
+
+A→B→C 后浏览器 Back 到 B，应恢复 B 自己的 parent=A，页面内返回才能回 A；
+相同 URL 的 B1/B2 也必须分别恢复各自 state。快照恢复、复制、新开仍只有 URL，不借此承诺跨会话恢复阅读链。
+拒绝遍历不得改写文档 state；浏览器物理恢复完成后再接受待发布项，避免把暂时显示的外部 URL 当作已接受依据。
+
+### 工作台退出与宿主接管
 
 提供显式 `onOutsideNavigate` 正常通知，不把成功离开包装成 history error。
 浏览器协调与 closeWorkspace 共用同一工作台离开协调，应用不再循环调用每个文档的 beforeLeave 并自己复核 revision。
 通知收到的目的地必须来自仍有效的遍历；不提供可长期复用的 approval ticket。
-终止提交时撤下 Worksplit 的浏览器写入权，并通知宿主接管，同时提供本次已知清理完成的 Promise。
+终止前按[退出快照](#受保护退出的最后快照)捕获可选快照；终止提交时撤下 Worksplit 的浏览器写入权，通知宿主接管，并提供该快照和本次已知清理完成的 Promise。
 宿主可立即处理后续浏览器事件，等待清理后再释放其共享服务；库不能等待一个正在等待该清理的宿主 callback，造成互锁。
 如果宿主接管失败，应报告工作台已经终止的事实，不假装恢复旧资源即可撤销批准。
 
@@ -906,7 +984,7 @@ Layout 的 ref/drop/菜单清理，以及快照和同一原生对象实例。布
 拒绝恢复和新的发布串行结算，不把物理浏览器索引与逻辑接纳项当同一个状态。
 旧 scope、其他工作台 ID、外层 Router 条目和没有 Worksplit metadata 的条目都要有测试。
 
-优先使用公开 history 接口；库内 `__TSR_index` 依赖集中到 history 适配点并记录具体支持版本。
+优先使用公开 history 接口；库内 `__TSR_index`/entry key 协议依赖集中到 history 适配点并记录具体支持版本。
 财务阅读返回也使用该索引，迁移时在宿主自己的小型阅读 helper 中集中版本依赖，不扩散到每个页面或公开业务协议。
 文档遍历保护由[文档 history 边界](#四种导航及阅读返回)拥有，不能只验证 browser popstate 就声称两类返回都安全。
 如果上游没有公开等价能力，可以保留有测试的最小版本适配，不能扩散内部字段或声称任意外层 Router 均兼容。
@@ -966,7 +1044,7 @@ start 是唯一启动入口，参数使用互斥形态 `{ href?: string; browser
 生命周期只有 created → starting → running → disposed。重复同一 start 输入共用那次结果，包括已完成后的 React 重放；
 不同输入拒绝，不隐式 reset。starting 期间视图可显示占位，但不自行 loadDocument；公开 open/dispatch/save/close 等变更返回 not-ready，不排队。
 disposed 是终态；此后 start 明确拒绝，不返回过去的成功来伪装实例已经复活。
-只读查询不启动工作；createSnapshot 仅在 running 导出。运行后才由实际显示触发其他恢复文档的懒加载。
+只读查询不启动工作；createSnapshot 仅在 running 导出，受保护退出的最后快照也在终止前捕获。运行后才由实际显示触发其他恢复文档的懒加载。
 一次文档初始化共享同一个进行中 Promise，不能因 router 字段已经赋值就误判为已加载。
 
 浏览器模式启动时先取得唯一写入权并捕获当前条目，完成接纳才发布；启动期遍历仍经同一协调器，旧加载不能覆盖更新的条目。
@@ -976,12 +1054,36 @@ Router 已接纳的错误页属于正常内容，不触发整个会话启动失�
 dispose 可在任意阶段调用，撤销后续提交资格并幂等结算；受保护退出允许后也进入同一终止路径。
 只有宿主拥有会话销毁权；视图卸载或内容 effect 的 stop 不等于 dispose 工作台，也不提供运行中浏览器重连模式。
 
+### 受保护退出的最后快照
+
+持续 writer 的 snapshotRevision 订阅与节流不能保证退出前已保存最后一次变化；财务现行 stop 因此在 dispose 前 flush。
+新版把“最后一次可导出”放在同一受保护终止路径内，不要求宿主在已经 disposed 的 onOutsideNavigate 回调中调用 createSnapshot，
+也不把导出动作塞进某个内容的 decide，让后续成员拒绝或继续编辑后误用旧快照。
+
+会话配置 captureSnapshotOnClose 默认 false。启用后，运行中 closeWorkspace 和允许的外部历史离开共用以下次序：
+
+1. 完成全部内容与 workspaceLeave 的决定并最终复核；拒绝或失效不做最后导出。
+2. 仍在 running、任何内容终止之前，调用与 createSnapshot 相同的导出实现一次。捕获当前已接纳位置和实际布局，不等待后台 Router，也不序列化待接纳目标。
+3. 导出中的原生 save listener 可能同步重入；再次核对导出一致性、批准与退出资格。失败不继续终止，结束本批尝试，不循环重试导出；已经发生的可信回调效果另按实际结果报告。
+4. 复核后不再 await，提交会话终止并捕获清理集合。普通 closeWorkspace 在 applied.value.snapshot 交付快照；外部离开在接管通知中交付同一快照及 cleanup Promise。
+
+未启用时 snapshot 为 null，退出不增加序列化或 save listener。启动尚未接纳时离开也返回 null，保留宿主原存储输入，不能以半启动布局覆盖它。
+强制 dispose 不执行这项可能失败的导出；宿主在仍 running 时若需尽力保留偏好，可先自行 flush，不能因序列化失败阻塞强制资源终止。
+
+请求了最后导出却序列化失败时，受保护退出返回 failed(prepare)，不销毁会话；若原生同步回调已经造成变化，按实际 changes/affectedIds 报告，不能宣称无效果。
+若可信回调已强制 dispose，尊重已终止事实并报告实际结果，不能再声称会话被保留；也不得等待正等待本导出回调的退出操作。
+导出后批准失效按原有拒绝/部分效果规则结算，不向 writer 交付一个可冒充退出成功的快照。
+成功交付的是脱离运行实例的恢复数据：外部接管可在清理期间存储，普通 closeWorkspace 在已知清理结算后的回执中交付。
+两种退出共用一个 writer 消费点，停止旧节流任务后写入最终快照，
+避免旧定时器或旧异步写入晚到覆盖它。存储顺序、重试和持久化错误归宿主，库不拥有存储驱动。
+存储失败发生在终止提交之后，不回滚为仍在运行；快照导出成功也不等于已落盘。这里不提供跨资源与外部存储的原子退出事务。
+
 ## 快照、包与内部结构
 
 ### 明确导出，严格恢复
 
-`createSnapshot()` 是唯一完整序列化入口，允许原生 Model.toJson() 通知 save listener；
-getContext/getContainers、菜单 disabled、策略预检和 React selector 不得借用它。
+完整序列化只有 createSnapshot 一份实现，显式调用和已启用的终止前导出复用它，允许原生 Model.toJson() 通知 save listener；
+getContext/getContainers、菜单 disabled、策略预检和 React selector 不得借用它。导出数据不得保留指向运行中 config 的可变引用。
 快照格式升级到新版本，拒绝现有 version:1；本次不写转换器、兼容读取器或隐式 reset。
 宿主可以在迁移时明确删除自己的布局偏好，不能让库替应用清空持久化存储或业务草稿。
 
@@ -1039,7 +1141,8 @@ document 分支才有 Router/初始化状态/已接纳位置投影，tool 分支
 | 离开协调          | 决定、批准 token、完整范围、提交前复核、重入           | 内容 controller 和原生移除描述          |
 | 原生桥接与政策    | 唯一 Model、Actions、候选拓扑、节点事实                | 真实节点与受控 dispatch                 |
 | 活动与焦点        | 工作文档、实际焦点、延迟 focus 的资格                  | 原生选择/DOM 观察/内容回调              |
-| 浏览器协调        | 被接受条目、物理遍历、scope、外部接管                  | 文档接纳与工作台离开                    |
+| 文档 history      | 唯一 entries/index、请求资格、最终改写与通知           | 原生 RouterHistory、blocker 与转换事实  |
+| 浏览器协调        | 被接受条目、物理遍历、scope、文档 entry 引用、外部接管 | 文档 history、接纳与工作台离开          |
 | React、链接、菜单 | 挂载接线、原生交互、结果消费                           | 公开操作与少量内部 owner 接口           |
 
 允许按这些责任拆解当前 integration.ts；文件数和行数不是验收目标。
@@ -1066,6 +1169,7 @@ document 分支才有 Router/初始化状态/已接纳位置投影，tool 分支
 | getLayout 用于查询位置/标签                          | getContainers/getContent 或真实 native 节点；只在持久化时 createSnapshot        |
 | snapshot() / snapshot+layout 两份输入                | createSnapshot()；initial 判别输入；旧版本明确拒绝                              |
 | 下游重复快照校验/按任意更新导出                      | 库统一结构校验，writer 订阅 snapshotRevision；存储与产品政策留在应用            |
+| 退出回调中临时 snapshot/flush                        | captureSnapshotOnClose；消费终止前快照，停止旧节流写入，存储失败独立报告        |
 | placement 自动策略                                   | destination 接受明确落点、内置 beside 或应用 resolver；共用真实 canPlace 与接纳 |
 | target/location 分散字段                             | destination 对象，与 source、ratio 一起表达明确接纳                             |
 | preserveFocus/background                             | presentation:reveal/background；非法组合编译或边界拒绝                          |
@@ -1084,6 +1188,8 @@ document 分支才有 Router/初始化状态/已接纳位置投影，tool 分支
 
 `host/web/src/client/financial-project-owner.ts` 保留项目 owner、路由服务、业务保存和 document scope 引用。
 connectBrowser/start 合并为一次显式 start，停止时由同一会话释放；移除 native-identity-conflict 提示与未使用的 core 依赖。
+持久化会话启用 captureSnapshotOnClose；正常退出消费库交付的最终快照，不能等 onOutsideNavigate 时再从已终止实例导出。
+直接 force dispose 的开发/身份终止仍按既有尽力 flush 处理，不变成交互退出。
 pageLink/entryLink 继续作为应用集中组合，内部迁移到 destination，保留 2×2、工作台级预览、首层右侧详情、凭证初始各半。
 普通同方向旁开可用 beside；财务两窗格复用等不同规则仍用一个应用 resolver，页面无需选择策略或重复接结果处理。
 报表金额组成按来源实际宽度优先给右侧 588px，比例限制 25%—65%；既有窗格和用户调整后的尺寸保持。
@@ -1101,6 +1207,7 @@ CAS、requestId、回执未知、共享草稿、丢弃和确认文案全部留�
 不能顺便重设计会计事实、写入保护或共享领域契约；新 API 必须能忠实承接既有保护。
 
 `financial-document.tsx`、`reading-link.ts` 保留普通阅读/另开/拖放的组合，来源 entry 与同层筛选仍写入原生 history.state。
+混用浏览器返回与页面返回时，存活的原 entry 保留 financialReadParent；URL 回退新实例使用现有无父层入口，不伪造来源。
 “当前报告”继续由应用按业务 ID 选择既有文档，普通复用保留全查询身份；库不新增业务打开入口。
 `read-visibility.tsx` 改用内容 visible 投影，删除为查询而解析快照的 `workbench-visibility.ts` 路径；
 页面内可见性、Query/RPC 需求、滚动与旧结果保留仍归应用。具体迁移约束由[真实场景](worksplit-redesign-scenarios.md)推导。
@@ -1109,6 +1216,7 @@ CAS、requestId、回执未知、共享草稿、丢弃和确认文案全部留�
 报表金额、凭证和企业标签的呈现槽只装饰最终 native name，不另选文本覆盖用户改名或造成 aria/overflow 名称不同。
 `workspace-snapshot.ts` 订阅 snapshotRevision 后节流导出，删除与库重复的结构/元数据校验；保留项目/actor 存储键、
 2×2 与必需工具等产品政策、坏输入保留和明确 reset。旧 resultId 不可用继续由页面表达，不以当前数据替换。
+正常退出、外部接管共用最后快照消费；清理旧 timer 和串行化存储由 writer 负责。新设计必须覆盖当前 150ms 节流窗口内退出的场景。
 
 ### Pluxel Shell 与 Studio
 
@@ -1138,6 +1246,7 @@ Studio 的 `projects/report-template-studio/src/renderer/editor-lifecycle.ts`、
 | 10/50/200 标签，多个分组/折叠组          | 菜单构建、查询、原生动作、焦点切换的耗时和 React commit 范围                                     |
 | 批量关闭与反复 open/close                | 决定次数、清理等待集合、保留 Router/监听/handle 数量，dispose 后回到基线                         |
 | 大快照恢复                               | 后台 Router 不提前加载，显式 snapshot 的成本与即时查询分开                                       |
+| 混合返回与终止前快照                     | 不复制文档 entries/state；正常返回按 entry 定位；退出仅按配置导出一次，关闭失败不误写空布局      |
 | 独立 SplitView 安装                      | 不需要或加载 Router/FlexLayout/Hotkeys，CSS 不串入 Workbench                                     |
 | 包消费者与真实宿主                       | 实际依赖树、产物体积、浏览器行为、没有源码私有 import                                            |
 
@@ -1160,52 +1269,55 @@ Studio 的 `projects/report-template-studio/src/renderer/editor-lifecycle.ts`、
 
 ### 公开 API 与接纳
 
-| 编号 | 场景                                                         | 必须观察到的结果                                                                                                        |
-| ---- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| A01  | 原生 route params/search/relative from/basepath 泛型         | 正确目标保留推导；错误参数产生预期类型错误；没有 any 兜底                                                               |
-| A02  | 引用旧 hook、命令入口、旧 placement 选项、旧 SplitView 导出  | 明确编译失败；无 alias、shim、legacy 分支；旁开意图由新 destination 组合保留                                            |
-| A03  | 最小只读工作台首次 open                                      | 无 controller/Hotkeys/自写菜单也能运行，空布局正确接纳                                                                  |
-| A04  | loader 重定向与规范 search                                   | 以最终原生 URL/metadata 确定身份，候选放置不重复 loader                                                                 |
-| A05  | reuse preserve/navigate/new 与 duplicate                     | 不移动复用项；导航受 guard；复制已提交 URL、独立 Router、无复制草稿                                                     |
-| A06  | 原生文档 navigate 到另一个已打开身份                         | 两个实例正常保留，无冲突 issue、偷关页或第二导航流水线                                                                  |
-| A07  | reveal/background 与同容器、隐藏 Border、最大化冲突          | 符合呈现表；不静默偷焦点，不允许 background preview                                                                     |
-| A08  | 未限定窗格、固定右侧、财务 2×2 三个宿主                      | 前者能超过四窗格；后两者遵循各自策略，内核无业务数字分支                                                                |
-| A09  | 同一异步 open 期间源/目标移动、关闭、ID 重用或策略改变       | 最终复核生效；晚到操作不插入错误位置或新实例                                                                            |
-| A10  | 点击/拖拽、取消、重复拖拽、卸载 Layout                       | 统一接纳，显式 drop 位置优先，无残留 overlay/全局 drag 状态                                                             |
-| A11  | workspace/container 两种预览作用域及跨容器拖动               | 可替换资格符合规则；不能隐式删除目标容器的另一预览                                                                      |
-| A12  | 新预览加载/接纳失败、旧预览有草稿/待确认写入                 | 失败保留旧预览；成功接纳后拒绝替换则旧页转普通，资源保持                                                                |
-| A13  | 拖放到标签条中间、折叠/展开的 TabGroup，期间目标重排         | 保留原生 index/组目标；异步位置失效明确拒绝，不改为容器末尾                                                             |
-| A14  | 首层旁开→同标签下探→push 筛选/replace 口径→逐层返回          | content/Router 保持，返回正确来源条件；已有完整地址则按应用政策复用，无额外阅读栈                                       |
-| A15  | 全查询身份、多副本、documentKey 嵌套与“当前报告”入口         | 最近显式 key 声明和 routeId 命名空间正确；恢复可重建；选定具体实例用 activate，不再次按 key 换副本                      |
-| A16  | beside 的空态、同方向候选、新分屏、上限与来源失效            | 初始空态无需宿主分支；按原生顺序选合法候选；无方向外回退；失效不冒充初始空态；复用/drop 不运行 resolver                 |
-| A17  | 点击/程序 link.open/drop 的默认或自定义结果反馈              | 一个执行一次回执；拖拽取消不解析目标；onResult 不重复报告/执行；延迟目标不伪造 href                                     |
-| A18  | 静态 preserve/navigate 命中、未命中与 redirect 晚命中        | 已初始化早命中不加载；懒恢复原实例按保留 URL 初始化一次；真实 blocker 单独决定，新建接纳候选 Router，晚命中成本如实记录 |
-| A19  | 两个独立普通打开、同预览槽竞争、焦点已移走                   | 普通结果能合法后台接纳且报告实际 presentation；无法后台接纳时不改目的地；预览只在自身作用域取代                         |
-| A20  | loader error/not-found、单内容 render 错误、接纳基础设施失败 | 原生错误页保留为文档，其他内容可用；只有协调失败返回 failed，库不重试业务写入                                           |
+| 编号 | 场景                                                           | 必须观察到的结果                                                                                                        |
+| ---- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| A01  | 原生 route params/search/relative from/basepath 泛型           | 正确目标保留推导；错误参数产生预期类型错误；没有 any 兜底                                                               |
+| A02  | 引用旧 hook、命令入口、旧 placement 选项、旧 SplitView 导出    | 明确编译失败；无 alias、shim、legacy 分支；旁开意图由新 destination 组合保留                                            |
+| A03  | 最小只读工作台首次 open                                        | 无 controller/Hotkeys/自写菜单也能运行，空布局正确接纳                                                                  |
+| A04  | loader 重定向与规范 search                                     | 以最终原生 URL/metadata 确定身份，候选放置不重复 loader                                                                 |
+| A05  | reuse preserve/navigate/new 与 duplicate                       | 不移动复用项；导航受 guard；复制已提交 URL、独立 Router、无复制草稿                                                     |
+| A06  | 原生文档 navigate 到另一个已打开身份                           | 两个实例正常保留，无冲突 issue、偷关页或第二导航流水线                                                                  |
+| A07  | reveal/background 与同容器、隐藏 Border、最大化冲突            | 符合呈现表；不静默偷焦点，不允许 background preview                                                                     |
+| A08  | 未限定窗格、固定右侧、财务 2×2 三个宿主                        | 前者能超过四窗格；后两者遵循各自策略，内核无业务数字分支                                                                |
+| A09  | 同一异步 open 期间源/目标移动、关闭、ID 重用或策略改变         | 最终复核生效；晚到操作不插入错误位置或新实例                                                                            |
+| A10  | 点击/拖拽、取消、重复拖拽、卸载 Layout                         | 统一接纳，显式 drop 位置优先，无残留 overlay/全局 drag 状态                                                             |
+| A11  | workspace/container 两种预览作用域及跨容器拖动                 | 可替换资格符合规则；不能隐式删除目标容器的另一预览                                                                      |
+| A12  | 新预览加载/接纳失败、旧预览有草稿/待确认写入                   | 失败保留旧预览；成功接纳后拒绝替换则旧页转普通，资源保持                                                                |
+| A13  | 拖放到标签条中间、折叠/展开的 TabGroup，期间目标重排           | 保留原生 index/组目标；异步位置失效明确拒绝，不改为容器末尾                                                             |
+| A14  | 首层旁开→同标签下探→push 筛选/replace 口径→逐层返回            | content/Router 保持，返回正确来源条件；已有完整地址则按应用政策复用，无额外阅读栈                                       |
+| A15  | 全查询身份、多副本、documentKey 嵌套与“当前报告”入口           | 最近显式 key 声明和 routeId 命名空间正确；恢复可重建；选定具体实例用 activate，不再次按 key 换副本                      |
+| A16  | beside 的空态、同方向候选、新分屏、上限与来源失效              | 初始空态无需宿主分支；按原生顺序选合法候选；无方向外回退；失效不冒充初始空态；复用/drop 不运行 resolver                 |
+| A17  | 点击/程序 link.open/drop 的默认或自定义结果反馈                | 一个执行一次回执；拖拽取消不解析目标；onResult 不重复报告/执行；延迟目标不伪造 href                                     |
+| A18  | 静态 preserve/navigate 命中、未命中与 redirect 晚命中          | 已初始化早命中不加载；懒恢复原实例按保留 URL 初始化一次；真实 blocker 单独决定，新建接纳候选 Router，晚命中成本如实记录 |
+| A19  | 两个独立普通打开、同预览槽竞争、焦点已移走                     | 普通结果能合法后台接纳且报告实际 presentation；无法后台接纳时不改目的地；预览只在自身作用域取代                         |
+| A20  | loader error/not-found、单内容 render 错误、接纳基础设施失败   | 原生错误页保留为文档，其他内容可用；只有协调失败返回 failed，库不重试业务写入                                           |
+| A21  | open/createLink 的外部目标、reloadDocument、显式 ignoreBlocker | 在副作用前明确拒绝不支持的文档目标/选项；外部页面跳转经工作台退出，不以原生参数绕开共享保护                             |
 
 ### 决定、保存与资源
 
-| 编号 | 场景                                                            | 必须观察到的结果                                                                                     |
-| ---- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| L01  | hasUnsavedChanges=false，decide 拒绝 pending write              | 单关、批量、导航、预览替换和退出均不跳过该决定                                                       |
-| L02  | 两内容：第一个 allow，第二个 deny                               | 无任何标签提前删除、无资源提前停止；已成功应用保存不回滚                                             |
-| L03  | 确认期间 t7→t8，或 t7→t8→逻辑相同内容                           | 旧批准失效；token 不能因状态外观相同而复活                                                           |
-| L04  | 保存并关闭成功产生新 token，期间正常 rerender                   | 对实际保存成功 token 的批准可以提交；普通回调更新不换 owner，不因相对初始 token 改变一概拒绝         |
-| L05  | 保存期间新增编辑、回执未知或保存失败                            | 新编辑和内容保留；不把最新 token 当被保存证据                                                        |
-| L06  | 确认期间 controller 更换、owner 完整暂停、同 ID 重开            | 旧批准无效；保护不可用时拒绝，不能视为干净                                                           |
-| L07  | React StrictMode、Suspense、丢弃的 concurrent render            | 只用已 commit owner，资源按真实寿命持有；隐藏不解除保护                                              |
-| L08  | 多个 useContent、重复 controller、多个 runEffect                | 读者不占 owner；双 owner 报错；独立 effect 正常清理                                                  |
-| L09  | 工具 save/focus/leave 与文档同能力                              | 声明能力一致执行；缺能力明确返回，不 silently ignore                                                 |
-| L10  | 相同关闭重复、相交范围、决定取消、回调重入                      | 同请求合并，重叠 busy，signal 有效，无重复弹窗/释放或等待环                                          |
-| L11  | 已批准关闭、其中清理失败                                        | 原生关闭保持，其他清理继续；错误按固定集合返回一次                                                   |
-| L12  | 关闭后异步资源到达，另有同 ID 新实例                            | 晚到资源立即释放，不附着新实例；晚到错误只通知一次                                                   |
-| L13  | 共享草稿/服务被多个文档借用                                     | 关闭只释放当前引用，其他内容与业务事实不受库擅自处置                                                 |
-| L14  | closeWorkspace 包含 pinned/不可关工具、workspaceLeave 拒绝      | 全部统一询问和复核；拒绝保留会话，dispose 则明确强制终止                                             |
-| L15  | 懒恢复的未挂载文档、项目独立状态                                | 不为关闭布局项加载全部 Router；独立状态在 workspaceLeave 仍能阻止退出                                |
-| L16  | 初始化/拖拽/导航/决定/清理期间 dispose                          | 撤销晚到提交，已知资源结算，重复终止无重复业务动作                                                   |
-| L17  | dirty/写入未知时同文档 go/back/forward 与筛选                   | 真实 from/to 经过同一保护；拒绝不移动；允许的同资源路线保留草稿，key 变化不销毁内容                  |
-| L18  | allow 后慢 loader/redirect、失败/取代、owner 隐藏、批次他项拒绝 | 编辑命令入口持续受保护；全部尝试正确结算并幂等释放临时冻结；未进入 pending 也无泄漏，无虚构最终 veto |
-| L19  | T1 放行未接纳，T2 被其他 blocker 拒绝；defer 晚登记/抛错        | from 仍是实际已接纳资源；T2 只释放自己的暂停引用；全部清理一次，重入不见半结算，错误只报告一次       |
+| 编号 | 场景                                                                   | 必须观察到的结果                                                                                     |
+| ---- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| L01  | hasUnsavedChanges=false，decide 拒绝 pending write                     | 单关、批量、导航、预览替换和退出均不跳过该决定                                                       |
+| L02  | 两内容：第一个 allow，第二个 deny                                      | 无任何标签提前删除、无资源提前停止；已成功应用保存不回滚                                             |
+| L03  | 确认期间 t7→t8，或 t7→t8→逻辑相同内容                                  | 旧批准失效；token 不能因状态外观相同而复活                                                           |
+| L04  | 保存并关闭成功产生新 token，期间正常 rerender                          | 对实际保存成功 token 的批准可以提交；普通回调更新不换 owner，不因相对初始 token 改变一概拒绝         |
+| L05  | 保存期间新增编辑、回执未知或保存失败                                   | 新编辑和内容保留；不把最新 token 当被保存证据                                                        |
+| L06  | 确认期间 controller 更换、owner 完整暂停、同 ID 重开                   | 旧批准无效；保护不可用时拒绝，不能视为干净                                                           |
+| L07  | React StrictMode、Suspense、丢弃的 concurrent render                   | 只用已 commit owner，资源按真实寿命持有；隐藏不解除保护                                              |
+| L08  | 多个 useContent、重复 controller、多个 runEffect                       | 读者不占 owner；双 owner 报错；独立 effect 正常清理                                                  |
+| L09  | 工具 save/focus/leave 与文档同能力                                     | 声明能力一致执行；缺能力明确返回，不 silently ignore                                                 |
+| L10  | 相同关闭重复、相交范围、决定取消、回调重入                             | 同请求合并，重叠 busy，signal 有效，无重复弹窗/释放或等待环                                          |
+| L11  | 已批准关闭、其中清理失败                                               | 原生关闭保持，其他清理继续；错误按固定集合返回一次                                                   |
+| L12  | 关闭后异步资源到达，另有同 ID 新实例                                   | 晚到资源立即释放，不附着新实例；晚到错误只通知一次                                                   |
+| L13  | 共享草稿/服务被多个文档借用                                            | 关闭只释放当前引用，其他内容与业务事实不受库擅自处置                                                 |
+| L14  | closeWorkspace 包含 pinned/不可关工具、workspaceLeave 拒绝             | 全部统一询问和复核；拒绝保留会话，dispose 则明确强制终止                                             |
+| L15  | 懒恢复的未挂载文档、项目独立状态                                       | 不为关闭布局项加载全部 Router；独立状态在 workspaceLeave 仍能阻止退出                                |
+| L16  | 初始化/拖拽/导航/决定/清理期间 dispose                                 | 撤销晚到提交，已知资源结算，重复终止无重复业务动作                                                   |
+| L17  | dirty/写入未知时同文档 go/back/forward 与筛选                          | 真实 from/to 经过同一保护；拒绝不移动；允许的同资源路线保留草稿，key 变化不销毁内容                  |
+| L18  | allow 后慢 loader/redirect、失败/取代、owner 隐藏、批次他项拒绝        | 编辑命令入口持续受保护；全部尝试正确结算并幂等释放临时冻结；未进入 pending 也无泄漏，无虚构最终 veto |
+| L19  | T1 已提交 history 未接纳，T2 被其他 blocker 拒绝；defer 晚登记/抛错    | from 仍是实际已接纳资源；T2 只释放自己的暂停引用；全部清理一次，重入不见半结算，错误只报告一次       |
+| L20  | 同地址 navigate、invalidate/load、错误重试引发 redirect                | 无批准链在位置改变前决定，拒绝保留资源并正常结算；已批准链不重复询问，不因 ignoreBlocker 默认放行    |
+| L21  | T1 的 Worksplit blocker 已允许，其他 blocker 暂停；T2 完成后 T1 晚允许 | T1 不得再改写 history/发布；最终位置为 T2，索引匹配真实 entries，T1 暂停恰好释放                     |
 
 ### 原生菜单、布局与焦点
 
@@ -1230,25 +1342,29 @@ Studio 的 `projects/report-template-studio/src/renderer/editor-lifecycle.ts`、
 
 ### 历史、恢复、制品与真实接入
 
-| 编号 | 场景                                                                                                  | 必须观察到的结果                                                                                               |
-| ---- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| H01  | start、open、内部导航、activate、close                                                                | push/replace 与历史行为表一致，拒绝不发布 URL                                                                  |
-| H02  | 快速 Back/Forward、拒绝恢复期间新打开                                                                 | 最新操作接纳，物理索引恢复正确，无重复 push 或滞留错误 URL                                                     |
-| H03  | 外部范围允许/拒绝/取消/接管失败                                                                       | 正常通知与异常分开；共享批准，不由宿主再做一套关闭循环                                                         |
-| H04  | 空 home、带 basepath 深链接、数组 search、hash                                                        | 原生编解码和明确首页规则成立，不产生占位文档                                                                   |
-| H05  | 两工作台同页、不连接浏览器、同 Window 重复连接                                                        | 无全局监听泄漏；同 Window 所有权冲突明确失败                                                                   |
-| H06  | 旧 scope/外层 Router state/未知索引                                                                   | 不破坏别人的 state；隔离版本适配并记录无法恢复的边界                                                           |
-| H07  | 真实 Router 与唯一 memory backend 的五类导航、快速交叉、分支截断、相同 href 不同 state、ignoreBlocker | blocker/索引/通知/拒绝结算一致；按真实 entry 恢复父层，不按 href 合并；原生 continuation 不重复批准            |
-| H08  | created/starting/running/disposed、启动期遍历、重复 start、StrictMode                                 | 一次启动拥有初始化及可选浏览器；半启动不加载内容或接收变更；失败释放，终态不复活，旧加载不覆盖新条目           |
-| S01  | 分组、pin、名称、Border、最大化的新版快照                                                             | 原生形态与内容恢复一致，后台文档懒加载                                                                         |
-| S02  | version:1、未知工具、重复 ID、非法角色/URL                                                            | 明确拒绝、原输入保留；无自动转换、修补或清空                                                                   |
-| S03  | createSnapshot 与一般查询                                                                             | 只有显式快照可触发原生 save listener，不把 snapshot 当草稿保存                                                 |
-| S04  | 新开、复制、恢复含下探 URL；旧业务读取依据失效                                                        | 不复制或伪造阅读父层；页面 fallback/不可用状态由应用提供，不以最新结果替换旧依据                               |
-| S05  | namespace 与宿主 config、恢复后导航、native save listener、失效通知                                   | 宿主字段保留；角色/URL只导出一处，不成为运行镜像；布局/URL变化通知writer，纯焦点不通知，结构校验不请求业务数据 |
-| P01  | demo 与独立 tarball 工作台消费                                                                        | 只用公开导出；类型、构建、运行、CSS、原生对象唯一性通过                                                        |
-| P02  | 独立安装 SplitView                                                                                    | 无 Router/FlexLayout/Hotkeys 依赖要求；仅两个发布包，无 core/旧入口，算法与分割交互保持                        |
-| P03  | 实际财务与可用 Shell/Studio checkout                                                                  | 记录准确 gitlink/安装制品与迁移范围，保留业务保护；未运行项明确列出                                            |
-| P04  | 桌面和窄窗格键鼠、拖拽、焦点、滚动、菜单                                                              | 真实浏览器验收；财务宿主验证实际 2×2，不能只靠 JSDOM/截图                                                      |
+| 编号 | 场景                                                                                            | 必须观察到的结果                                                                                               |
+| ---- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| H01  | start、open、内部导航、activate、close                                                          | push/replace 与历史行为表一致，拒绝不发布 URL                                                                  |
+| H02  | 快速 Back/Forward、拒绝恢复期间新打开                                                           | 最新操作接纳，物理索引恢复正确，无重复 push 或滞留错误 URL                                                     |
+| H03  | 外部范围允许/拒绝/取消/接管失败                                                                 | 正常通知与异常分开；共享批准，不由宿主再做一套关闭循环                                                         |
+| H04  | 空 home、带 basepath 深链接、数组 search、hash                                                  | 原生编解码和明确首页规则成立，不产生占位文档                                                                   |
+| H05  | 两工作台同页、不连接浏览器、同 Window 重复连接                                                  | 无全局监听泄漏；同 Window 所有权冲突明确失败                                                                   |
+| H06  | 旧 scope/外层 Router state/未知索引                                                             | 不破坏别人的 state；隔离版本适配并记录无法恢复的边界                                                           |
+| H07  | 真实 Router 与唯一 history 的五类导航、异步 blocker、分支截断、同 href 不同 state、同步订阅重入 | 全链后复核再分配实际索引；GO 目标不漂移；拒绝无成功 notify/悬空 Promise；重入不覆盖新提交                      |
+| H08  | created/starting/running/disposed、启动期遍历、重复 start、StrictMode                           | 一次启动拥有初始化及可选浏览器；半启动不加载内容或接收变更；失败释放，终态不复活，旧加载不覆盖新条目           |
+| H09  | A→B→C，浏览器返回 B 后页面返回 A；同 href 不同 state；页面直接 GO 后浏览器 Back                 | 原实例/entry 的 state 与父层保持；文档 GO 记一次前台访问，browser visit 不再 push，不混用两类 delta            |
+| H10  | 原 entry 被 REPLACE/截断、同 ID 重开、重载会话、URL 回退后再次遍历                              | 旧引用不命中新寿命或同 href 别项；URL 回退建立并重绑新实例，无伪父层/草稿复活，拒绝恢复原 browser entry        |
+| S01  | 分组、pin、名称、Border、最大化的新版快照                                                       | 原生形态与内容恢复一致，后台文档懒加载                                                                         |
+| S02  | version:1、未知工具、重复 ID、非法角色/URL                                                      | 明确拒绝、原输入保留；无自动转换、修补或清空                                                                   |
+| S03  | createSnapshot、退出快照与一般查询                                                              | 仅显式导出/已启用的最后导出触发 save listener；同一实现，导出无可变运行引用，不把 snapshot 当草稿保存          |
+| S04  | 新开、复制、恢复含下探 URL；旧业务读取依据失效                                                  | 不复制或伪造阅读父层；页面 fallback/不可用状态由应用提供，不以最新结果替换旧依据                               |
+| S05  | namespace 与宿主 config、恢复后导航、native save listener、失效通知                             | 宿主字段保留；角色/URL只导出一处，不成为运行镜像；布局/URL变化通知writer，纯焦点不通知，结构校验不请求业务数据 |
+| S06  | 节流尚未 flush 时正常/外部退出、批准期间编辑布局、导出异常/重入、终止后存储失败                 | 终止前导出一次并复核；导出失败保留会话，存储失败保留已终止事实；旧 writer 不覆盖最终快照，未启用不序列化       |
+| S07  | starting 期间外部退出、强制 dispose、拒绝退出、重复 closeWorkspace                              | 不导出半启动/清空布局，不额外 save listener，不阻塞强制终止；幂等结果不重复导出或通知宿主                      |
+| P01  | demo 与独立 tarball 工作台消费                                                                  | 只用公开导出；类型、构建、运行、CSS、原生对象唯一性通过                                                        |
+| P02  | 独立安装 SplitView                                                                              | 无 Router/FlexLayout/Hotkeys 依赖要求；仅两个发布包，无 core/旧入口，算法与分割交互保持                        |
+| P03  | 实际财务与可用 Shell/Studio checkout                                                            | 记录准确 gitlink/安装制品与迁移范围，保留业务保护；未运行项明确列出                                            |
+| P04  | 桌面和窄窗格键鼠、拖拽、焦点、滚动、菜单                                                        | 真实浏览器验收；财务宿主验证实际 2×2，不能只靠 JSDOM/截图                                                      |
 
 ### 现有验证入口的使用
 
@@ -1270,7 +1386,7 @@ Studio 的 `projects/report-template-studio/src/renderer/editor-lifecycle.ts`、
 
 ## 实施收敛与交付门槛
 
-这是一个完整目标，不保留按轮次并行的设计。先验证[预演中的核心时序](worksplit-redesign-scenarios.md#实施时先证明什么)，固定公开类型与验收，再调整内容/离开/原生接纳，
+这是一个完整目标，不保留按轮次并行的设计。先验证[预演中的核心时序](worksplit-redesign-scenarios.md#实施时先证明什么)，特别是无批准重载与全 blocker 链后的提交/结算，固定公开类型与验收，再调整内容/离开/原生接纳，
 随后连接菜单、历史与 React，最后迁移 demo、制品和下游；这些是依赖顺序，不是对外提供中间兼容版本。
 
 完成时必须同时满足：
