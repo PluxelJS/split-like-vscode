@@ -40,7 +40,7 @@ try {
   );
   const devDependencies = {
     // The isolated public consumer deliberately uses standard Vite, not the workspace alias.
-    vite: "8.3.3",
+    vite: "8.3.5",
     ...Object.fromEntries(
       await Promise.all(
         ["typescript", "@vitejs/plugin-react", "@types/react", "@types/react-dom"].map(
