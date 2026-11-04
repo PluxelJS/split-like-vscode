@@ -34,7 +34,7 @@
 
 | 对象        | 本次读取基线                                    | 结论的范围                                                      |
 | ----------- | ----------------------------------------------- | --------------------------------------------------------------- |
-| Worksplit   | 原始运行基线 `265bbed1`；本轮读取 `bdd1ca9`     | 后续只增加设计文档；公开导出、实现与测试仍为原运行基线          |
+| Worksplit   | 原始运行基线 `265bbed1`；本轮读取 `4b0cfa7`     | 后续只增加设计文档；公开导出、实现与测试仍为原运行基线          |
 | 财务工作台  | 场景基线 `0ce93ea4`；本轮复核 `39721c93`        | 同标签下探/返回、业务 scope、浏览器接管与退出前快照 writer      |
 | 初审 Pluxel | 11 月 3 日读取 `0ca9e13a`，gitlink 为 `cd4104e` | 当时 Shell/Studio 有较早 hook；本轮未复查，不代表消费者最新状态 |
 | 原生布局    | FlexLayout `0.11.1` 加仓库固定补丁              | 所有原生能力判断以该版本为基线；实施时如升级需重新验收          |
@@ -1124,6 +1124,9 @@ SplitView 有独立用途，保留功能并迁到专用包；从 `@worksplit/rea
 
 React、Router、FlexLayout 仍使用消费者唯一实例；Store 若保留沿用现有上游机制，不公开另一套 store DSL。
 发布包声明与实际 import 一致，删除不再使用的 Hotkeys peer；不要通过 bundled 第二份 React/原生类解决安装问题。
+必需的上游补丁或能力修正必须进入实际支持的安装路径；工作区 patchedDependencies 不构成已经随库交付的证据。
+独立消费者仅按发布制品、声明依赖和 README 安装步骤，便应取得同一受支持能力，并运行对应缺陷回归。
+若需要消费侧补丁配置或额外修正制品，必须明确交付并由夹具照做；不能只锁版本号、在开发仓库通过测试后宣称普通 peer 安装也满足契约。
 开发条件、默认 dist 条件、声明输出、CSS sideEffects 与 tarball 内容都要从独立目录验证。
 现有 pnpm workspace/catalog、Vite+、hk、Pitchfork 沿用；不把这次 API 重构扩成无关工具链替换。
 
@@ -1361,7 +1364,7 @@ Studio 的 `projects/report-template-studio/src/renderer/editor-lifecycle.ts`、
 | S05  | namespace 与宿主 config、恢复后导航、native save listener、失效通知                             | 宿主字段保留；角色/URL只导出一处，不成为运行镜像；布局/URL变化通知writer，纯焦点不通知，结构校验不请求业务数据 |
 | S06  | 节流尚未 flush 时正常/外部退出、批准期间编辑布局、导出异常/重入、终止后存储失败                 | 终止前导出一次并复核；导出失败保留会话，存储失败保留已终止事实；旧 writer 不覆盖最终快照，未启用不序列化       |
 | S07  | starting 期间外部退出、强制 dispose、拒绝退出、重复 closeWorkspace                              | 不导出半启动/清空布局，不额外 save listener，不阻塞强制终止；幂等结果不重复导出或通知宿主                      |
-| P01  | demo 与独立 tarball 工作台消费                                                                  | 只用公开导出；类型、构建、运行、CSS、原生对象唯一性通过                                                        |
+| P01  | demo 与独立 tarball 工作台消费                                                                  | 只用公开导出；类型、构建、运行、CSS、原生对象唯一性通过；必需修正按公布安装步骤生效，并通过对应缺陷回归        |
 | P02  | 独立安装 SplitView                                                                              | 无 Router/FlexLayout/Hotkeys 依赖要求；仅两个发布包，无 core/旧入口，算法与分割交互保持                        |
 | P03  | 实际财务与可用 Shell/Studio checkout                                                            | 记录准确 gitlink/安装制品与迁移范围，保留业务保护；未运行项明确列出                                            |
 | P04  | 桌面和窄窗格键鼠、拖拽、焦点、滚动、菜单                                                        | 真实浏览器验收；财务宿主验证实际 2×2，不能只靠 JSDOM/截图                                                      |

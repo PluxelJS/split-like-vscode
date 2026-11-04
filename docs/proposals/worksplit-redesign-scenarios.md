@@ -7,7 +7,7 @@
 
 | 对象         | 本轮依据                                                                                   | 能说明什么                                                      |
 | ------------ | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| Worksplit    | `bdd1ca9`；运行代码仍为 `265bbed1`                                                         | 既有公开接口、实现和测试；重构尚未交付                          |
+| Worksplit    | `4b0cfa7`；运行代码仍为 `265bbed1`                                                         | 既有公开接口、实现和测试；重构尚未交付                          |
 | 财务工作台   | 场景基线 `0ce93ea4`；本轮复核 `financial-workbook` 的 `39721c93`                           | 用户路径、业务 owner、现行快照 writer 与退出次序                |
 | 上游 history | 安装及子模块 lock 均为 `@tanstack/history 1.162.5`                                         | 遍历保护缺口，以及异步 blocker 晚提交/提前分配索引的实际反例    |
 | Router       | 实际安装 react-router `1.170.46` / core `1.171.39`；子模块 lock 为 `1.170.42` / `1.171.35` | 本轮时序核对针对实际安装源码；实施须对齐并验证最终声明/安装版本 |
@@ -33,6 +33,12 @@
 前两项源码对应 Router.commitLocation 的同地址 load 及 followRedirect 的 ignoreBlocker；第三项对应 history.tryNavigation 的 await 链和询问前分配索引。
 这证明旧依赖路径的风险，不证明新 history 适配、运行中的业务数据丢失或全部 Router 版本具有相同行为。
 尤其不能从“可以提供 createHistory backend”推导“已能识别每条 redirect 归属并结算被拒绝的 Router Promise”。
+
+发行路径另有一项静态证据：[独立消费脚本](../../scripts/check-package-consumer.mjs)读取本机原生包的版本号，
+在临时目录生成 manifest 并执行 npm install；它没有传递[工作区配置](../../pnpm-workspace.yaml)中的 FlexLayout patchedDependencies。
+因此“安装的是同一版本号”不足以证明该夹具具有本机的单成员组修正或 endDrag 能力，也不能据此证明未来 Router 修正可交付。
+本轮没有重跑该制品，不能把此项推断写成已经复现的运行失败。实施应按[包边界](worksplit-redesign.md#包边界)补齐真实安装路径及对应缺陷回归，
+把决定架构的必需修正随最小接线验证，不等全部迁移后才发现制品缺少能力。
 
 阅读顺序：先沿下面的旅程理解边界，再去主提案核对接口，最后按[实施说明](worksplit-redesign-implementation.md)验证最可能推翻路线的能力。
 
