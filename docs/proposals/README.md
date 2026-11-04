@@ -24,14 +24,9 @@ actual saved-state evidence, overlapping leave requests, native menus/dragging/f
 history, restoration and resource cleanup.
 
 The declared running financial host passed its own acceptance, including actual 2×2 layout,
-narrow panes, keyboard/mouse/dragging, focus and resource cleanup. The parent aggregate `pnpm verify`
-did not pass: its checkout guard rejected the pre-existing staged gitlink mismatch. Its remaining
-standard checks were run serially. The full test task last exited with a distribution log-format
-assertion failure; after normalizing ANSI/whitespace in that test, the standard distribution task
-passed all three tests, and static checks/build passed again. The full test aggregate was not rerun.
-Seven financial browser tests require a designated
-remote service endpoint that was unavailable; they remain skipped and are not replaced by the
-local production-browser or running-host results.
+narrow panes, keyboard/mouse/dragging, focus and resource cleanup. The parent repository owns its
+aggregate validation and unrun financial checks in its `VALIDATION.md`; the library's results do
+not substitute for those checks.
 
 Both final-source measurement tasks passed their browser behavior prechecks, then measured
 2/10/50/200 documents, 1,000 queries, 20 activations and complete cleanup. Ordinary queries caused
@@ -46,5 +41,7 @@ improvement claim.
 - [Implementation order](worksplit-redesign-implementation.md): prerequisite and verification sequencing.
 
 External Pluxel Shell/Studio repositories have not been modified by this task. Their actual
-install/API/lifecycle adaptation remains a migration gap, not a completed consumer. This task
-also does not authorize upstream push, parent gitlink delivery, merge or package publication.
+install/API/lifecycle adaptation remains a migration gap, not a completed consumer.
+
+Delivery pushes the verified submodule commit first. The parent then updates its gitlink to that
+available commit, completes its own validation, and commits and pushes the integration.

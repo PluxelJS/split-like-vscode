@@ -24,12 +24,11 @@
 
 ## 剩余范围与证据边界
 
-- 父仓库聚合 verify 被原有 staged gitlink 与 checkout 不一致拒绝；其余标准任务已分别通过，不能把聚合门写成全绿。
-  七项指定远程浏览器服务的财务测试缺少 endpoint，实际宿主与本地生产浏览器验收不能替代这些未运行项。
+- 父仓库聚合验收与财务未运行项由其 `VALIDATION.md` 维护；本仓库、独立制品和实际宿主的结果不能相互替代。
 - 最终源码的两组测量已先通过行为检查，再记录相同工作量与完整清理。它们是当前环境单次样本，无等价历史基线，不宣称性能提升。
-- 外部 Pluxel Shell/Studio 未获本轮修改授权。Shell 的 document/session/nativeMenus，Studio 的 editor-lifecycle/panes
+- 外部 Pluxel Shell/Studio 尚未完成迁移。Shell 的 document/session/nativeMenus，Studio 的 editor-lifecycle/panes
   仍须按实际 checkout 迁移 controller、保存依据、菜单与历史接管；历史迁移文档不证明它们已安装新制品。
-- 个人分支提交与发布是不同动作。本次没有推送、合并或发布授权；子模块先推送后才交付父仓库 gitlink，未推送位置必须明确报告。
+- 先提交并推送已验证的子模块，再更新父仓库 gitlink，完成父仓库验收后提交并推送集成改动。
 
 下面的矩阵保留反例与完整验收边界；执行入口和串行顺序见[交付检查](worksplit-redesign-implementation.md)。
 
