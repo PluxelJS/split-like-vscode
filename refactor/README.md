@@ -9,7 +9,8 @@
 2026-11-03 确定的[设计原则](../docs/design-principles.md)是后续演进的共同约束。
 [整体重构提案](../docs/proposals/worksplit-redesign.md)定义新的目标架构、默认菜单与公共 API，明确彻底替换且不留兼容；
 它尚未实施。本页后文记录当前实现，包括将被迁出的自动放置政策和将被替换的内容 API。
-实施者从[实施说明](../docs/proposals/worksplit-redesign-implementation.md)进入，不把历史验收当作新设计完成证明。
+11 月 4 日补充的[场景预演](../docs/proposals/worksplit-redesign-scenarios.md)从实际下探、返回、编辑和多窗格读取推导边界；
+实施者再按[实施说明](../docs/proposals/worksplit-redesign-implementation.md)推进，不把历史验收当作新设计完成证明。
 
 | 要解决的问题                          | 权威入口                                                                                      |
 | ------------------------------------- | --------------------------------------------------------------------------------------------- |

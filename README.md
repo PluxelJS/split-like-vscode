@@ -8,7 +8,8 @@ one native Model, with no parallel docking tree or pathname renderer dispatcher.
 The [design principles](docs/design-principles.md) and [complete redesign proposal](docs/proposals/worksplit-redesign.md)
 define the next breaking architecture, including integrated default menus and a unified public API.
 That proposal is **not implemented** by the API documented below. It deliberately requires consumer migration,
-with no legacy API aliases or runtime compatibility layer. See the [implementation brief](docs/proposals/worksplit-redesign-implementation.md).
+with no legacy API aliases or runtime compatibility layer. Start with the [scenario walkthrough](docs/proposals/worksplit-redesign-scenarios.md)
+for drill-down, same-tab return, editing and visibility boundaries, then use the [implementation brief](docs/proposals/worksplit-redesign-implementation.md).
 
 - `@worksplit/react`: `createWorkbench`, `Workbench`, the `useWorkbenchContent` hook and independent `SplitView`.
 - `@worksplit/core`: the DOM-free pane sizing/resize calculations used by `SplitView`.
@@ -19,16 +20,16 @@ need independent panes use `SplitView` without creating a document workspace. Se
 [behavior contract](docs/vscode-workbench-behavior.md) and
 [content API acceptance evidence](refactor/API_REFINEMENT_VALIDATION.md).
 
-| Task                                         | Start here                                                                                                                                                             |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Install in another React application         | [Source checkout](#install-from-source)                                                                                                                                |
-| Create a routed workspace                    | [Initialization](#a-complete-routed-workspace)                                                                                                                         |
-| Guard edits and own resource cleanup         | [Content decisions](#content-decisions-commands-and-resources)                                                                                                         |
-| Attach RPC capabilities and other resources  | [Resource ownership and Cap’n Web](docs/resource-lifetimes.md)                                                                                                         |
-| Customize shell, providers and native Layout | [Host customization](#customize-the-host-with-native-apis)                                                                                                             |
-| Use application stores and dynamic shortcuts | [Store and Hotkeys](#host-shortcuts-and-frontend-stores)                                                                                                               |
-| Change the integration or assess its limits  | [Architecture](refactor/README.md), [behavior](docs/vscode-workbench-behavior.md), [evidence](refactor/API_REFINEMENT_VALIDATION.md)                                   |
-| Implement the planned breaking redesign      | [Principles](docs/design-principles.md), [proposal](docs/proposals/worksplit-redesign.md), [implementation brief](docs/proposals/worksplit-redesign-implementation.md) |
+| Task                                         | Start here                                                                                                                                                                                                                          |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Install in another React application         | [Source checkout](#install-from-source)                                                                                                                                                                                             |
+| Create a routed workspace                    | [Initialization](#a-complete-routed-workspace)                                                                                                                                                                                      |
+| Guard edits and own resource cleanup         | [Content decisions](#content-decisions-commands-and-resources)                                                                                                                                                                      |
+| Attach RPC capabilities and other resources  | [Resource ownership and Cap’n Web](docs/resource-lifetimes.md)                                                                                                                                                                      |
+| Customize shell, providers and native Layout | [Host customization](#customize-the-host-with-native-apis)                                                                                                                                                                          |
+| Use application stores and dynamic shortcuts | [Store and Hotkeys](#host-shortcuts-and-frontend-stores)                                                                                                                                                                            |
+| Change the integration or assess its limits  | [Architecture](refactor/README.md), [behavior](docs/vscode-workbench-behavior.md), [evidence](refactor/API_REFINEMENT_VALIDATION.md)                                                                                                |
+| Implement the planned breaking redesign      | [Principles](docs/design-principles.md), [scenarios](docs/proposals/worksplit-redesign-scenarios.md), [proposal](docs/proposals/worksplit-redesign.md), [implementation brief](docs/proposals/worksplit-redesign-implementation.md) |
 
 ## Install from source
 
