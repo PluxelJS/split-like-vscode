@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 
-import { ContentEffects, type WorkbenchContentEffect } from "./content-effects";
+import { ContentEffects, type ContentEffect } from "./content-effects";
 
 function gate<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -47,7 +47,7 @@ it("freezes before abort/reentrant defer and does not wait for late resources or
   const known = gate();
   const late = gate();
   const setup = gate();
-  let context!: WorkbenchContentEffect;
+  let context!: ContentEffect;
   const lateFailure = new Error("late cleanup");
   effects.effect(async (effect) => {
     context = effect;

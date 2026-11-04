@@ -14,7 +14,12 @@ const documents = createRoute({
     view: input.view === "compact" ? ("compact" as const) : ("full" as const),
     pageSize: typeof input.pageSize === "number" ? input.pageSize : 100,
   }),
-  staticData: { worksplit: { title: "Document", identitySearch: ["view"] } },
+  staticData: {
+    worksplit: {
+      title: "Document",
+      documentKey: ({ params, search }) => `${params.id}:${search.view}`,
+    },
+  },
 });
 const rules = createRoute({
   getParentRoute: () => root,
@@ -50,3 +55,26 @@ void workbench.open({
   // @ts-expect-error Registered search retains its closed view union.
   search: { view: "invalid", pageSize: 100 },
 });
+
+const link = workbench.createLink({
+  to: "/documents/$id",
+  params: { id: "link" },
+  search: { view: "compact", pageSize: 50 },
+});
+void link.open({ reuse: "navigate" });
+// @ts-expect-error Paths still belong to the registered route tree.
+void workbench.createLink({ to: "/unregistered" });
+void workbench.open({
+  to: "/rules",
+  search: { onlyUnclassified: false },
+  // @ts-expect-error Only the library can associate approval with a native request.
+  ignoreBlocker: true,
+});
+void workbench.open(
+  { to: "/rules", search: { onlyUnclassified: true } },
+  {
+    presentation: "background",
+    // @ts-expect-error A background document cannot become the replaceable preview.
+    preview: true,
+  },
+);

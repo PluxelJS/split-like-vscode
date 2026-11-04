@@ -1,4 +1,3 @@
-import { useHotkeys } from "@tanstack/react-hotkeys";
 import { RouterProvider, type AnyRouter } from "@tanstack/react-router";
 import { useStore } from "@tanstack/react-store";
 import { Layout, type ILayoutApi, type ILayoutProps, type TabNode } from "flexlayout-react";
@@ -11,130 +10,86 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  type HTMLAttributes,
-  type ReactNode,
-  type Ref,
 } from "react";
 
-import {
-  integrationState,
-  type WorkbenchContent,
-  type WorkbenchContentLifecycle,
-  type WorkbenchInstance,
-  type WorkbenchState,
-} from "./integration";
+import type { ControllerOwner } from "./content-record";
+import { integrationState } from "./internal";
+import { useWorkbenchMenus } from "./menus";
+import type {
+  ContentController,
+  ContentHandle,
+  WorkbenchInstance,
+  WorkbenchProps,
+  WorkbenchState,
+} from "./types";
 
 const ContentContext = createContext<{
-  content: WorkbenchContent;
-  instance: WorkbenchInstance<AnyRouter>;
-  node: TabNode;
+  content: ContentHandle;
+  instance: object;
 } | null>(null);
 const defaultEmpty = <p>Open a document to begin.</p>;
 const rejectExternalDrag = () => undefined;
 
-export interface WorkbenchProps extends Omit<
-  HTMLAttributes<HTMLDivElement>,
-  "children" | "dangerouslySetInnerHTML"
-> {
-  /** A real instance returned by createWorkbench or constructed with WorkbenchInstance. */
-  workbench: WorkbenchInstance<AnyRouter>;
-  navigation?: ReactNode;
-  empty?: ReactNode;
-  /** Native Layout ref. Mutations are intercepted; use dispatch for insertion/close receipts. */
-  layoutRef?: Ref<ILayoutApi>;
-  /** Native Layout props. Borrow nodes/Model for presentation/defaults/observers; dispatch mutations. */
-  native?: Omit<
-    ILayoutProps,
-    | "model"
-    | "factory"
-    | "onAction"
-    | "onExternalDrag"
-    | "supportsPopout"
-    | "popoutClassName"
-    | "popoutURL"
-    | "popoutWindowName"
-    | "constrainFloatPanels"
-    | "renderPopoutContent"
-    | "onPopoutOpen"
-    | "onPopoutClose"
-  >;
-}
-
-export function useWorkbenchState<T>(
-  workbench: WorkbenchInstance<AnyRouter>,
+export function useWorkbenchState<TRouter extends AnyRouter, T>(
+  instance: WorkbenchInstance<TRouter>,
   selector: (state: WorkbenchState) => T,
 ): T {
-  return useStore(integrationState(workbench).store, selector);
+  return useStore(integrationState(instance).store, selector);
 }
 
-/** Omitted lifecycle only borrows the handle. An object declares this hook's editing owner. */
-export function useWorkbenchContent(lifecycle?: WorkbenchContentLifecycle): WorkbenchContent {
+/** Borrow the current content lifetime without declaring a controller owner. */
+export function useContent(): ContentHandle {
   const context = useContext(ContentContext);
   if (!context) throw new Error("Content must render inside a Worksplit document or tool");
-  const { content, instance, node } = context;
-  const internal = integrationState(instance);
-  const committed = useRef(lifecycle);
-  // A discarded concurrent render never changes callbacks. Layout-effect cleanup on Suspense
-  // hiding does not withdraw the separate passive owner registration.
-  useLayoutEffect(() => {
-    committed.current = lifecycle;
-  });
-  const owner = useMemo<WorkbenchContentLifecycle>(
-    () => ({
-      get isDirty() {
-        return committed.current?.isDirty?.bind(committed.current);
-      },
-      get getCloseRevision() {
-        return committed.current?.getCloseRevision?.bind(committed.current);
-      },
-      get beforeLeave() {
-        return committed.current?.beforeLeave?.bind(committed.current);
-      },
-      get save() {
-        return committed.current?.save?.bind(committed.current);
-      },
-      get focus() {
-        return committed.current?.focus?.bind(committed.current);
-      },
-    }),
-    [],
-  );
-  const ownsEditor = lifecycle !== undefined;
-  useEffect(() => {
-    if (ownsEditor) return internal.registerOwner(content.id, owner, node);
-  }, [content, internal, node, owner, ownsEditor]);
-  return content;
+  return context.content;
 }
 
-const Content = memo(function Content({
-  node,
-  instance,
-}: {
-  node: TabNode;
-  instance: WorkbenchInstance<AnyRouter>;
-}) {
-  const id = node.getId();
+/** Declare the sole controller for this content. Only committed renders update callbacks. */
+export function useContentController(controller: ContentController): void {
+  const context = useContext(ContentContext);
+  if (!context) throw new Error("Content must render inside a Worksplit document or tool");
+  const { content, instance } = context;
   const internal = integrationState(instance);
-  const router = useStore(internal.store, () => internal.documents.get(id)?.router);
-  const tool = internal.tools.get(id);
-  const context = useMemo(
-    () => ({ content: internal.content(id, node), instance, node }),
-    [id, instance, internal, node],
-  );
+  const owner = useMemo<ControllerOwner>(() => ({ controller: { leave: null } }), []);
+  useLayoutEffect(() => internal.updateController(content, owner, controller));
+  // Suspense hides layout effects, but does not relinquish the passive lifetime owner.
+  useEffect(() => internal.registerController(content, owner), [content, internal, owner]);
+}
+
+const Content = memo(function Content({ node, instance }: { node: TabNode; instance: object }) {
+  const internal = integrationState(instance);
+  const id = node.getId();
+  const lifecycle = useStore(internal.store, (state) => state.lifecycle);
+  const record = internal.getRecord(id);
+  const ready = useStore(internal.store, () => {
+    const current = internal.getRecord(id);
+    return current?.role === "document" ? current.ready : current !== undefined;
+  });
+  const content = useStore(internal.store, () => internal.getRecord(id)?.handle);
+  const context = useMemo(() => (content ? { content, instance } : null), [content, instance]);
+  const bindRoot = (root: HTMLDivElement | null) => {
+    if (content) internal.bindContentRoot(content, root);
+  };
   useEffect(() => {
-    if (!tool) void internal.loadDocument(id).catch(internal.report);
-  }, [id, internal, tool]);
+    if (lifecycle === "running" && content && record?.role === "document") {
+      void internal.loadDocument(content).catch(internal.report);
+    }
+  }, [content, internal, lifecycle, record]);
+  if (!record || !context || record.node !== node || lifecycle === "disposed") return null;
   return (
     <ContentContext.Provider value={context}>
       <div
+        ref={bindRoot}
         className="worksplit-content"
         role="presentation"
+        tabIndex={-1}
         data-worksplit-content={id}
-        data-worksplit-role={tool ? "tool" : "document"}
+        data-worksplit-role={record.role}
         onKeyDown={(event) => {
-          if (event.defaultPrevented || !event.currentTarget.contains(event.target as Node)) return;
-          // Native content portals and Tab panels are siblings in the React tree.
-          // Hand only the panel's configured focus toggle to its existing native handler.
+          if (!event.currentTarget.contains(event.target as Node)) return;
+          if (event.defaultPrevented) return;
+          // Native content portals and tab panels are React siblings. Forward only the panel's
+          // configured focus toggle to its existing native keyboard handler.
           const panel = event.currentTarget.closest<HTMLElement>('[role="tabpanel"]');
           const parts = panel?.getAttribute("aria-keyshortcuts")?.split("+");
           const key = parts?.pop();
@@ -169,10 +124,12 @@ const Content = memo(function Content({
           }
         }}
       >
-        {tool ? (
-          tool.render({ id })
-        ) : router ? (
-          <RouterProvider router={router} />
+        {lifecycle !== "running" || !ready ? (
+          <p role="status">Loading document…</p>
+        ) : record.role === "tool" ? (
+          record.definition.render({ content: record.handle, node })
+        ) : record.runtime ? (
+          <RouterProvider router={record.runtime.router} />
         ) : (
           <p role="status">Loading document…</p>
         )}
@@ -181,23 +138,30 @@ const Content = memo(function Content({
   );
 });
 
-export function Workbench({
-  workbench,
-  navigation,
+export function Workbench<TRouter extends AnyRouter>({
+  instance,
   empty = defaultEmpty,
   native,
   layoutRef,
+  menus,
   className,
+  onKeyDown,
   ...rootProps
-}: WorkbenchProps) {
-  const internal = integrationState(workbench);
+}: WorkbenchProps<TRouter>) {
+  if (menus !== false && native?.onContextMenu) {
+    throw new Error("Set menus={false} when supplying native.onContextMenu");
+  }
+  const internal = integrationState(instance);
   const root = useRef<HTMLDivElement>(null);
   const nativeLayout = useRef<ILayoutApi>(null);
   useImperativeHandle(layoutRef, () => nativeLayout.current!);
-  useEffect(() => internal.documentLinks.attach(() => nativeLayout.current), [internal]);
+  useEffect(() => {
+    if (root.current) return internal.bindLayout(() => nativeLayout.current, root.current);
+  }, [internal]);
+  const menu = useWorkbenchMenus(instance, menus, root);
   const factory = useMemo(
-    () => (node: TabNode) => <Content node={node} instance={workbench} />,
-    [workbench],
+    () => (node: TabNode) => <Content node={node} instance={instance} />,
+    [instance],
   );
   const placeholder = useMemo(() => () => <div className="worksplit-empty">{empty}</div>, [empty]);
   const modelObserver = native?.onModelChange;
@@ -211,44 +175,28 @@ export function Workbench({
     },
     [internal, modelObserver],
   );
-  useHotkeys(
-    internal.commands.flatMap((command) =>
-      command.hotkey
-        ? [
-            {
-              hotkey: command.hotkey,
-              callback: () => {
-                void workbench.executeCommand(command.id).catch(internal.report);
-              },
-              options: { ignoreInputs: command.ignoreInputs ?? true, stopPropagation: false },
-            },
-          ]
-        : [],
-    ),
-    { target: root },
-  );
   useEffect(() => {
     const element = root.current;
     if (!element) return;
     const doc = element.ownerDocument;
     const win = doc.defaultView!;
-    const observe = (target: EventTarget | null) => {
-      if (!(target instanceof Element) || !element.contains(target)) {
-        internal.focus(null, null);
+    let active = true;
+    const observe = (target: EventTarget | null, intent = false) => {
+      if (!(target instanceof win.Element) || !element.contains(target)) {
+        internal.focus(null, "outside");
         return;
       }
       const content = target.closest<HTMLElement>("[data-worksplit-content]");
-      if (content)
-        internal.focus(
-          content.dataset.worksplitContent!,
-          content.dataset.worksplitRole === "tool" ? "tool" : "document",
-        );
-      else internal.focus(null, "shell");
+      if (content) internal.focus(content.dataset.worksplitContent!, "content", intent);
+      else internal.focus(null, "chrome");
     };
     const focus = (event: Event) => observe(event.target);
+    // Capture intent before a host or child handler starts work from the same event.
+    // The actual DOM target keeps portal keys from claiming their React owner's content.
+    const intent = (event: Event) => observe(event.target, true);
     const out = () =>
       queueMicrotask(() => {
-        if (!element.contains(doc.activeElement)) internal.focus(null, null);
+        if (active && !element.contains(doc.activeElement)) internal.focus(null, "outside");
       });
     const focused = () => {
       internal.setWindowFocus(true);
@@ -256,13 +204,16 @@ export function Workbench({
     };
     const blurred = () => internal.setWindowFocus(false);
     doc.addEventListener("focusin", focus);
-    doc.addEventListener("pointerdown", focus, true);
+    doc.addEventListener("pointerdown", intent, true);
+    doc.addEventListener("keydown", intent, true);
     doc.addEventListener("focusout", out);
     win.addEventListener("focus", focused);
     win.addEventListener("blur", blurred);
     return () => {
+      active = false;
       doc.removeEventListener("focusin", focus);
-      doc.removeEventListener("pointerdown", focus, true);
+      doc.removeEventListener("pointerdown", intent, true);
+      doc.removeEventListener("keydown", intent, true);
       doc.removeEventListener("focusout", out);
       win.removeEventListener("focus", focused);
       win.removeEventListener("blur", blurred);
@@ -270,15 +221,15 @@ export function Workbench({
   }, [internal]);
   return (
     <div
+      role="presentation"
       {...rootProps}
       ref={root}
-      className={`worksplit-workbench${navigation ? " worksplit-with-navigation" : ""}${className ? ` ${className}` : ""}`}
+      className={`worksplit-workbench${className ? ` ${className}` : ""}`}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        menu.onKeyDown(event);
+      }}
     >
-      {navigation && (
-        <nav className="worksplit-navigation" aria-label="Workspace">
-          {navigation}
-        </nav>
-      )}
       <div className="worksplit-native-layout">
         <Layout
           {...native}
@@ -287,12 +238,14 @@ export function Workbench({
           factory={factory}
           onAction={internal.modelAction}
           onModelChange={observeModel}
+          {...(menus === false ? {} : { onContextMenu: menu.onContextMenu })}
           onExternalDrag={rejectExternalDrag}
           supportsPopout={false}
           invalidateTabContentOnParentRender={native?.invalidateTabContentOnParentRender ?? false}
           onTabSetPlaceHolder={native?.onTabSetPlaceHolder ?? placeholder}
         />
       </div>
+      {menu.popup}
     </div>
   );
 }

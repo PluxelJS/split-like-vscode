@@ -12,7 +12,14 @@ export default {
     builtin: true,
     node: true,
   },
-  ignorePatterns: ["node_modules", "dist", "coverage", "packages/*/dist", "**/*.tsbuildinfo"],
+  ignorePatterns: [
+    "node_modules",
+    "dist",
+    "coverage",
+    "packages/*/dist",
+    "**/.turbo/**",
+    "**/*.tsbuildinfo",
+  ],
   plugins: ["import", "jsx-a11y", "promise", "react", "typescript", "vitest", "unicorn", "oxc"],
   rules: {
     eqeqeq: "error",

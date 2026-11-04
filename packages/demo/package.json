@@ -12,10 +12,10 @@
     "typecheck": "vp run check-types"
   },
   "dependencies": {
-    "@tanstack/react-hotkeys": "catalog:frontend",
     "@tanstack/react-router": "catalog:frontend",
     "@tanstack/react-store": "catalog:frontend",
     "@worksplit/react": "workspace:*",
+    "@worksplit/split-view": "catalog:internal",
     "flexlayout-react": "catalog:frontend",
     "react": "catalog:frontend",
     "react-dom": "catalog:frontend"

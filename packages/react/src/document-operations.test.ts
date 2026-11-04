@@ -5,23 +5,24 @@ import {
   redirect,
   type RouterHistory,
 } from "@tanstack/react-router";
-import { Actions } from "flexlayout-react";
+import { Actions, DockLocation } from "flexlayout-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createWorkbench, type WorkbenchSnapshot, type WorkbenchContentLifecycle } from "./index";
-import { integrationState } from "./integration";
+import { createWorkbench, type WorkbenchSnapshot, type LeaveRequest } from "./index";
+import { integrationState } from "./internal";
+/* eslint-disable no-await-in-loop -- Native scenarios and resource teardown deliberately run in order. */
+import type { LeaveDecision } from "./types";
 
 const disposals: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
-  await Promise.all(disposals.splice(0).map((dispose) => dispose()));
+  for (const dispose of disposals.splice(0)) await dispose();
 });
-const documentNavigation = (id: string, filter = "", source = "S") => ({
+const nav = (id: string, filter = "", source = "S") => ({
   to: "/sources/$source/documents/$id" as const,
   params: { source, id },
   search: { filter },
 });
-
-function setup(snapshot?: WorkbenchSnapshot) {
+async function setup(snapshot?: WorkbenchSnapshot) {
   const load = vi.fn<(id: string) => void>();
   const root = createRootRoute();
   const document = createRoute({
@@ -33,170 +34,261 @@ function setup(snapshot?: WorkbenchSnapshot) {
     loader: ({ params }) => {
       load(params.id);
     },
-    staticData: { worksplit: { title: "Document" } },
+    staticData: {
+      worksplit: {
+        title: "Document",
+        documentKey: ({ params }) => `${params.source}:${params.id}`,
+      },
+    },
   });
   const alias = createRoute({
     getParentRoute: () => root,
     path: "/alias",
     beforeLoad: () => {
-      throw redirect({
-        to: "/sources/$source/documents/$id",
-        params: { source: "S", id: "B" },
-        search: { filter: "" },
-      });
+      throw redirect(nav("B"));
     },
   });
   const routeTree = root.addChildren([document, alias]);
   const workbench = createWorkbench({
+    workspaceId: "document-operations",
     createRouter: (history: RouterHistory) =>
       createRouter({ routeTree, history, defaultPendingMinMs: 0, defaultStaleTime: Infinity }),
-    ...(snapshot ? { snapshot } : {}),
+    ...(snapshot ? { initial: { snapshot } } : {}),
   });
   disposals.push(() => workbench.dispose());
+  await workbench.start();
   const open = async (id: string, preview = false) => {
-    const result = await workbench.open(documentNavigation(id), { preview });
-    expect(result.status).toBe("committed");
-    if (result.status !== "committed") throw new Error(result.status);
-    return result.document.id;
+    const result = await workbench.open(nav(id), { preview });
+    if (result.status !== "applied") throw new Error(result.status);
+    return result.value.document.id;
   };
-  return { workbench, nav: documentNavigation, open, load };
+  return { workbench, open, load };
 }
-
-describe("document entrances and replaceable previews", () => {
-  it("reveals an existing identity without changing filters or asking its dirty guard", async () => {
-    const { workbench, nav, load } = setup();
-    const initial = await workbench.open(nav("A", "cash"));
-    if (initial.status !== "committed") throw new Error(initial.status);
-    const beforeLeave = vi.fn<() => boolean>(() => false);
-    integrationState(workbench).registerOwner(initial.document.id, {
-      isDirty: () => true,
-      beforeLeave,
-    });
-    const count = load.mock.calls.length;
-    const result = await workbench.open(nav("A"), { reuse: "preserve" });
-    expect(result).toMatchObject({
-      status: "committed",
-      reused: true,
-      document: { id: initial.document.id, href: initial.document.href },
-    });
-    expect(beforeLeave).not.toHaveBeenCalled();
-    expect(load).toHaveBeenCalledTimes(count);
-    expect((await workbench.open(nav("A"))).status).toBe("rejected");
-    expect(beforeLeave).toHaveBeenCalledTimes(1);
+function deny(workbench: Awaited<ReturnType<typeof setup>>["workbench"], id: string) {
+  const decide = vi.fn<() => LeaveDecision>(() => ({ decision: "deny" as const }));
+  integrationState(workbench).registerController(workbench.getContent(id)!.handle, {
+    controller: { leave: { getState: () => ({ hasUnsavedChanges: true, token: 1 }), decide } },
   });
-
-  it("preserves the final redirected target, without replacing a different preview", async () => {
-    const { workbench, nav, open } = setup();
+  return decide;
+}
+describe("document entrances and replaceable previews", () => {
+  it.each(["close", "dispose", "next-preview"] as const)(
+    "settles the admitted preview before old cleanup waits through %s",
+    async (next) => {
+      const { workbench, open } = await setup();
+      const a = await open("A", true);
+      let finishCleanup!: () => void;
+      const cleanup = new Promise<void>((resolve) => {
+        finishCleanup = resolve;
+      });
+      workbench.getContent(a)!.handle.runEffect(({ defer }) => defer(() => cleanup));
+      const opening = workbench.open(nav("B"), { preview: true });
+      try {
+        await vi.waitFor(() =>
+          expect(workbench.getDocuments().some((doc) => doc.href.includes("/B"))).toBe(true),
+        );
+        const b = workbench.getDocuments().find((doc) => doc.href.includes("/B"))!;
+        let previews: string[] = [];
+        if (next === "close") await workbench.close(b.id);
+        else if (next === "dispose") await workbench.dispose();
+        else previews = [await open("C", true)];
+        expect(workbench.getDocument(b.id)).toBeNull();
+        expect(
+          workbench
+            .getDocuments()
+            .filter((doc) => doc.preview)
+            .map((doc) => doc.id),
+        ).toEqual(previews);
+        finishCleanup();
+        expect(await opening).toMatchObject({
+          status: "applied",
+          value: { document: { id: b.id, href: b.href, preview: true } },
+        });
+      } finally {
+        finishCleanup();
+        await opening;
+      }
+    },
+  );
+  it.each(["explicit", "context"] as const)(
+    "resolves relative link hrefs from the %s source document",
+    async (sourceKind) => {
+      const { workbench } = await setup();
+      await workbench.open(nav("A", "", "S"));
+      const second = await workbench.open(nav("B", "", "T"));
+      if (second.status !== "applied") throw new Error(second.status);
+      const link = workbench.createLink(
+        {
+          from: "/sources/$source/documents/$id",
+          to: ".",
+          params: true,
+          search: { filter: "cash" },
+        },
+        {
+          ...(sourceKind === "explicit" ? { source: second.value.document.handle } : {}),
+          reuse: "navigate",
+        },
+      );
+      expect(link.href).toBe("/sources/T/documents/B?filter=cash");
+      expect(await link.open()).toMatchObject({
+        status: "applied",
+        value: { document: { id: second.value.document.id, href: link.href } },
+      });
+    },
+  );
+  it("preserves an existing custom identity without changing its filters or asking its guard", async () => {
+    const { workbench, load } = await setup();
+    const first = await workbench.open(nav("A", "cash"));
+    if (first.status !== "applied") throw new Error(first.status);
+    const decide = deny(workbench, first.value.document.id);
+    const count = load.mock.calls.length;
+    expect(await workbench.open(nav("A"))).toMatchObject({
+      status: "applied",
+      value: {
+        reused: true,
+        document: { id: first.value.document.id, href: first.value.document.href },
+      },
+    });
+    expect(decide).not.toHaveBeenCalled();
+    expect(load).toHaveBeenCalledTimes(count);
+    expect((await workbench.open(nav("A"), { reuse: "navigate" })).status).toBe("denied");
+    expect(decide).toHaveBeenCalledOnce();
+  });
+  it("deduplicates the final redirect without replacing an unrelated preview", async () => {
+    const { workbench, open } = await setup();
     const b = await workbench.open(nav("B", "cash"));
-    if (b.status !== "committed") throw new Error(b.status);
+    if (b.status !== "applied") throw new Error(b.status);
     const a = await open("A", true);
-    const result = await workbench.open({ to: "/alias" }, { preview: true, reuse: "preserve" });
-    expect(result).toMatchObject({
-      status: "committed",
-      document: { id: b.document.id, href: b.document.href, preview: false },
+    expect(await workbench.open({ to: "/alias" }, { preview: true })).toMatchObject({
+      status: "applied",
+      value: { document: { id: b.value.document.id, href: b.value.document.href, preview: false } },
     });
     expect(workbench.getDocument(a)?.preview).toBe(true);
     expect(workbench.getDocuments()).toHaveLength(2);
   });
-
   it("replaces a clean preview with a fresh lifetime and retains ordinary comparisons", async () => {
-    const { workbench, open } = setup();
+    const { workbench, open } = await setup();
     const permanent = await open("A");
     const b = await open("B", true);
     const disposed = vi.fn<() => void>();
-    integrationState(workbench)
-      .content(b)
-      .effect(({ defer }) => {
-        defer(disposed);
-      });
+    workbench.getContent(b)!.handle.runEffect((effect) => effect.defer(disposed));
     const c = await open("C", true);
     expect(c).not.toBe(b);
     expect(workbench.getDocument(b)).toBeNull();
     expect(disposed).toHaveBeenCalledOnce();
-    expect(workbench.getDocuments().map((d) => d.id)).toEqual([permanent, c]);
+    expect(workbench.getDocuments().map((doc) => doc.id)).toEqual([permanent, c]);
     expect(workbench.getDocument(c)?.preview).toBe(true);
-    workbench.keep(c);
-    expect(workbench.getDocument(c)?.preview).toBe(false);
+    await workbench.keepOpen(c);
     await open("D", true);
-    expect(workbench.getDocument(c)).not.toBeNull();
-    expect((await workbench.close(c)).status).toBe("closed");
+    expect(workbench.getDocument(c)?.preview).toBe(false);
+    expect((await workbench.close(c)).status).toBe("applied");
   });
-
-  it("automatically keeps dirty and pinned previews instead of discarding them", async () => {
-    const { workbench, open } = setup();
+  it("keeps dirty and pinned previews without asking an interactive decision", async () => {
+    const { workbench, open } = await setup();
     const a = await open("A", true);
-    const beforeLeave = vi.fn<() => boolean>(() => false);
-    integrationState(workbench).registerOwner(a, { isDirty: () => true, beforeLeave });
+    const decide = deny(workbench, a);
     const b = await open("B", true);
     expect(workbench.getDocument(a)?.preview).toBe(false);
-    expect(beforeLeave).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled();
     await workbench.dispatch(Actions.setTabPinned(b, true));
-    expect(workbench.getDocument(b)?.preview).toBe(false);
     await open("C", true);
     expect(workbench.getDocuments()).toHaveLength(3);
-    expect(workbench.getDocuments().filter((d) => d.preview)).toHaveLength(1);
+    expect(workbench.getDocuments().filter((doc) => doc.preview)).toHaveLength(1);
   });
-
-  it("leaves the previous preview intact when admission fails", async () => {
-    const { workbench, open, nav } = setup();
+  it("keeps the previous preview when destination admission fails", async () => {
+    const { workbench, open } = await setup();
     const a = await open("A", true);
-    const result = await workbench.open(nav("B"), { preview: true, target: "missing" });
-    expect(result.status).toBe("failed");
+    expect(
+      (
+        await workbench.open(nav("B"), {
+          preview: true,
+          destination: { target: "missing", location: DockLocation.CENTER },
+        })
+      ).status,
+    ).toBe("denied");
     expect(workbench.getDocuments()).toMatchObject([{ id: a, preview: true }]);
   });
-
-  it("creates ordinary independent copies and rejects background preview requests", async () => {
-    const { workbench, open, nav } = setup();
+  it("creates ordinary independent copies and returns an invalid-argument result for background previews", async () => {
+    const { workbench, open } = await setup();
     const a = await open("A", true);
-    const copy = await workbench.duplicate(a);
-    expect(copy).toMatchObject({
-      status: "committed",
-      reused: false,
-      document: { preview: false },
+    expect(await workbench.duplicate(a)).toMatchObject({
+      status: "applied",
+      value: { reused: false, document: { preview: false } },
     });
-    expect(workbench.getDocument(a)?.preview).toBe(true);
-    expect(await workbench.duplicate("missing")).toEqual({ status: "rejected", reason: "closed" });
-    await expect(workbench.open(nav("B"), { preview: true, background: true })).rejects.toThrow(
-      /preview/i,
-    );
+    expect(await workbench.duplicate("missing")).toMatchObject({
+      status: "denied",
+      reason: "missing-content",
+    });
+    // @ts-expect-error Runtime JS consumers receive the same explicit rejection.
+    expect(await workbench.open(nav("B"), { preview: true, presentation: "background" })).toEqual({
+      status: "denied",
+      reason: "invalid-argument",
+    });
   });
-
-  it("restores a preview and deduplicates a lazily restored identity with other filters", async () => {
-    const first = setup();
-    const a = await first.workbench.open(first.nav("A", "cash"), { preview: true });
-    if (a.status !== "committed") throw new Error(a.status);
-    const snapshot = first.workbench.snapshot();
-    const second = setup(snapshot);
-    const result = await second.workbench.open(second.nav("A"), { reuse: "preserve" });
-    expect(result).toMatchObject({
-      status: "committed",
-      reused: true,
-      document: { id: a.document.id, href: a.document.href, preview: true },
+  it.each(["document", "explicit"] as const)(
+    "duplicates an inactive document into its %s source container",
+    async (sourceKind) => {
+      const { workbench, open } = await setup();
+      const a = await open("A");
+      const aContainer = workbench.getDocument(a)!.containerId!;
+      const other = await workbench.open(nav("B"), {
+        destination: { target: aContainer, location: DockLocation.RIGHT },
+      });
+      if (other.status !== "applied") throw new Error(other.status);
+      const b = other.value.document;
+      expect(b.containerId).not.toBe(aContainer);
+      const source = sourceKind === "explicit" ? b.handle : undefined;
+      const result = await workbench.duplicate(a, source ? { source } : {});
+      expect(result).toMatchObject({
+        status: "applied",
+        value: {
+          reused: false,
+          document: {
+            href: workbench.getDocument(a)!.href,
+            containerId: source ? b.containerId : aContainer,
+            preview: false,
+          },
+        },
+      });
+      expect(workbench.getDocuments()).toHaveLength(3);
+    },
+  );
+  it("restores a preview and reuses its declared identity across filters", async () => {
+    const first = await setup();
+    const a = await first.workbench.open(nav("A", "cash"), { preview: true });
+    if (a.status !== "applied") throw new Error(a.status);
+    const second = await setup(first.workbench.createSnapshot());
+    expect(await second.workbench.open(nav("A"), { preview: true })).toMatchObject({
+      status: "applied",
+      value: {
+        reused: true,
+        document: { id: a.value.document.id, href: a.value.document.href, preview: true },
+      },
     });
-    expect(second.workbench.getDocuments()).toHaveLength(1);
     await second.open("B", true);
-    expect(second.workbench.getDocument(a.document.id)).toBeNull();
+    expect(second.workbench.getDocument(a.value.document.id)).toBeNull();
   });
-
-  it("supplies guarded navigation locations for permitted same-document view changes", async () => {
-    const { workbench, open, nav } = setup();
+  it("supplies native locations and finite attempt context to same-document view changes", async () => {
+    const { workbench, open } = await setup();
     const a = await open("A");
-    const beforeLeave = vi.fn<NonNullable<WorkbenchContentLifecycle["beforeLeave"]>>(
-      (reason, context) =>
-        reason === "navigate" && context.from?.split("?")[0] === context.to?.split("?")[0],
+    const decide = vi.fn<(request: LeaveRequest) => LeaveDecision>((request: LeaveRequest) =>
+      request.reason === "navigate" && request.from.pathname === request.to.pathname
+        ? { decision: "allow" as const, token: 1 }
+        : { decision: "deny" as const },
     );
-    integrationState(workbench).registerOwner(a, { isDirty: () => true, beforeLeave });
-    const result = await workbench.open(nav("A", "cash"));
-    expect(result.status).toBe("committed");
-    expect(beforeLeave).toHaveBeenCalledWith(
-      "navigate",
+    integrationState(workbench).registerController(workbench.getContent(a)!.handle, {
+      controller: { leave: { getState: () => ({ hasUnsavedChanges: true, token: 1 }), decide } },
+    });
+    expect((await workbench.open(nav("A", "cash"), { reuse: "navigate" })).status).toBe("applied");
+    expect(decide).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: a,
-        from: expect.stringContaining("/documents/A"),
-        to: expect.stringContaining("cash"),
+        reason: "navigate",
+        content: workbench.getContent(a)!.handle,
+        from: expect.objectContaining({ pathname: "/sources/S/documents/A" }),
+        to: expect.objectContaining({ searchStr: "?filter=cash" }),
       }),
     );
-    expect((await workbench.close(a)).status).toBe("rejected");
-    expect(beforeLeave).toHaveBeenLastCalledWith("close", expect.objectContaining({ id: a }));
+    expect((await workbench.close(a)).status).toBe("denied");
+    expect(decide).toHaveBeenLastCalledWith(expect.objectContaining({ reason: "close" }));
   });
 });

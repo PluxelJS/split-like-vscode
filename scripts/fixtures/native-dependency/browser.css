@@ -1,0 +1,35 @@
+html {
+  color-scheme: dark;
+  font-family: sans-serif;
+}
+body {
+  margin: 16px;
+}
+h1 {
+  font-size: 20px;
+}
+.controls {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+button {
+  padding: 8px;
+  margin-right: 8px;
+}
+.layouts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.layouts section {
+  position: relative;
+  height: 540px;
+  min-width: 0;
+}
+.flexlayout__tab input {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 20px;
+  padding: 8px;
+}

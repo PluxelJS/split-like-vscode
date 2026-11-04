@@ -10,7 +10,7 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 
 import { createWorkbench, type WorkbenchInstance, type WorkbenchOptions } from "./index";
-import { integrationState } from "./integration";
+import { integrationState } from "./internal";
 
 const instances: WorkbenchInstance<AnyRouter>[] = [];
 afterEach(async () => {
@@ -19,27 +19,34 @@ afterEach(async () => {
 });
 const tab = {
   id: "extension:east:events",
-  component: "worksplit.tool",
+  component: "extension:events",
   name: "Events",
   config: { owner: "east", entry: "events", region: "bottom" },
 };
-function resolveTool(value: Readonly<IJsonTabNode>) {
+function resolveTool(key: string, value: Readonly<IJsonTabNode>) {
   const config = value.config as typeof tab.config | undefined;
-  return value.id === tab.id &&
+  return key === tab.component &&
+    value.id === tab.id &&
     config?.owner === "east" &&
     config.entry === "events" &&
     config.region === "bottom"
-    ? { id: value.id, render: () => null }
+    ? { render: () => null }
     : undefined;
 }
-function setup(options: Partial<WorkbenchOptions<AnyRouter>> = {}) {
+function setup(options: Partial<WorkbenchOptions<AnyRouter>> = {}, created?: () => void) {
   const root = createRootRoute();
   const routeTree = root.addChildren([createRoute({ getParentRoute: () => root, path: "/$id" })]);
   const workbench = createWorkbench({
-    createRouter: (history) => createRouter({ routeTree, history }),
-    layout: {
-      borders: [{ type: "border", location: "bottom", selected: -1, children: [] }],
-      layout: { type: "row", children: [{ type: "tabset", id: "main", children: [] }] },
+    createRouter: (history) => {
+      created?.();
+      return createRouter({ routeTree, history });
+    },
+    workspaceId: "resolved-tools",
+    initial: {
+      layout: {
+        borders: [{ type: "border", location: "bottom", selected: -1, children: [] }],
+        layout: { type: "row", children: [{ type: "tabset", id: "main", children: [] }] },
+      },
     },
     resolveTool,
     ...options,
@@ -49,103 +56,120 @@ function setup(options: Partial<WorkbenchOptions<AnyRouter>> = {}) {
 }
 const staticRender = () => null;
 const add = () => Actions.addTab(tab, "border_bottom", DockLocation.CENTER, -1, true);
-it("resolves fresh native tools without creating a Router, guards close, releases and resolves again on reopen", async () => {
+it("resolves native tools without a Router, guards close, releases and resolves again on reopen", async () => {
   const resolver = vi.fn<typeof resolveTool>(resolveTool);
-  const workbench = setup({ resolveTool: resolver });
+  const created = vi.fn<() => void>();
+  const workbench = setup({ resolveTool: resolver }, created);
+  await workbench.start();
+  expect(created).not.toHaveBeenCalled();
+  expect(await workbench.dispatch(add())).toMatchObject({ status: "applied" });
+  expect(created).not.toHaveBeenCalled();
   const opened = await workbench.open({ to: "/$id", params: { id: "A" } });
-  expect(opened.status).toBe("committed");
+  expect(opened.status).toBe("applied");
   const document = workbench.getActiveDocument();
-  expect(await workbench.dispatch(add())).toEqual({ status: "applied" });
   expect(workbench.getDocuments()).toHaveLength(1);
-  expect(workbench.getActiveDocument()).toEqual(document);
   const internal = integrationState(workbench);
   const dispose = vi.fn<() => void>();
   const beforeLeave = vi.fn<() => Promise<boolean>>(async () => false);
-  internal.registerOwner(tab.id, { isDirty: () => true, beforeLeave });
-  internal.content(tab.id).effect(({ defer }) => {
+  const content = workbench.getContent(tab.id)!.handle;
+  internal.registerController(content, {
+    controller: {
+      leave: {
+        getState: () => ({ hasUnsavedChanges: true, token: 0 }),
+        decide: async () =>
+          (await beforeLeave()) ? { decision: "allow", token: 0 } : { decision: "deny" },
+      },
+    },
+  });
+  content.runEffect(({ defer }) => {
     defer(dispose);
   });
-  expect(await workbench.close(tab.id)).toMatchObject({ status: "rejected", reason: "decision" });
-  expect(internal.tools.has(tab.id)).toBe(true);
+  expect(await workbench.close(tab.id)).toMatchObject({ status: "denied", reason: "decision" });
+  expect(workbench.getContent(tab.id)?.role).toBe("tool");
   expect(dispose).not.toHaveBeenCalled();
   beforeLeave.mockResolvedValue(true);
-  expect(await workbench.close(tab.id)).toMatchObject({ status: "closed", cleanupErrors: [] });
+  expect(await workbench.close(tab.id)).toMatchObject({ status: "applied", cleanupErrors: [] });
   expect(dispose).toHaveBeenCalledOnce();
-  expect(internal.tools.has(tab.id)).toBe(false);
+  expect(workbench.getContent(tab.id)).toBeNull();
   resolver.mockClear();
-  expect(await workbench.dispatch(add())).toEqual({ status: "applied" });
-  expect(resolver).toHaveBeenCalled();
+  expect(await workbench.dispatch(add())).toMatchObject({ status: "applied" });
+  expect(resolver).toHaveBeenCalledWith(tab.component, expect.objectContaining({ id: tab.id }));
   expect(workbench.getDocuments()).toHaveLength(1);
+  expect(workbench.getActiveDocument()).toEqual(document);
 });
-it("restores native tool positions/config and refuses unknown or mismatched definitions", async () => {
+it("restores native tool positions/config and refuses unknown definitions", async () => {
   const first = setup();
+  await first.start();
   await first.dispatch(add());
   await first.dispatch(Actions.renameTab(tab.id, "My events"));
-  const snapshot = first.snapshot();
-  const restored = setup({ snapshot });
-  expect(restored.getLayout().borders).toEqual(first.getLayout().borders);
-  expect(integrationState(restored).tools.has(tab.id)).toBe(true);
-  expect(() => setup({ snapshot, resolveTool: () => undefined })).toThrow(
-    "Unknown Worksplit content",
+  const snapshot = first.createSnapshot();
+  const restored = setup({ initial: { snapshot } });
+  expect(restored.model.toJson().borders).toEqual(first.model.toJson().borders);
+  expect(restored.getContent(tab.id)?.role).toBe("tool");
+  expect(() => setup({ initial: { snapshot }, resolveTool: () => undefined })).toThrow(
+    "Unknown tool definition",
   );
-  expect(() =>
-    setup({ snapshot, resolveTool: () => ({ id: "wrong", render: () => null }) }),
-  ).toThrow("declared id");
-  const before = restored.getLayout();
+  const mismatched = structuredClone(snapshot);
+  (mismatched.layout.borders![0]!.children![0]! as IJsonTabNode).component = "unknown:definition";
+  expect(() => setup({ initial: { snapshot: mismatched } })).toThrow("Unknown tool definition");
+  await restored.start();
+  const before = restored.model.toJson();
   expect(
     await restored.dispatch(Actions.updateNodeAttributes(tab.id, { config: { owner: "west" } })),
-  ).toEqual({ status: "rejected" });
-  expect(restored.getLayout()).toEqual(before);
+  ).toMatchObject({ status: "denied" });
+  expect(restored.model.toJson()).toEqual(before);
 });
-it("uses static tools first and isolates resolver input from the persisted definition", async () => {
-  const resolver = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["resolveTool"]>>((input) => {
+it("uses static definitions first and isolates resolver input from persisted configuration", async () => {
+  const resolver = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["resolveTool"]>>((_key, input) => {
     (input.config as typeof tab.config).owner = "changed";
-    return { id: input.id!, render: () => null };
+    return { render: () => null };
   });
   const staticWorkbench = setup({
-    tools: [{ id: tab.id, render: staticRender }],
+    tools: { [tab.component]: { render: staticRender } },
     resolveTool: resolver,
   });
+  await staticWorkbench.start();
   await staticWorkbench.dispatch(add());
   expect(resolver).not.toHaveBeenCalled();
-  expect(integrationState(staticWorkbench).tools.get(tab.id)?.render).toBe(staticRender);
+  const record = integrationState(staticWorkbench).getRecord(tab.id);
+  expect(record?.role === "tool" && record.definition.render).toBe(staticRender);
   const dynamic = setup({ resolveTool: resolver });
+  await dynamic.start();
   await dynamic.dispatch(add());
-  expect((integrationState(dynamic).model.getNodeById(tab.id) as TabNode).getConfig()).toEqual(
-    tab.config,
-  );
+  expect((dynamic.model.getNodeById(tab.id) as TabNode).getConfig()).toEqual(tab.config);
   expect(tab.config.owner).toBe("east");
 });
-it("keeps rejected candidates out of the live model and renderer registry", async () => {
+it("keeps rejected candidates out of the live Model and content records", async () => {
   const workbench = setup({ allowDrop: () => false });
-  const internal = integrationState(workbench);
+  await workbench.start();
   const observer = vi.fn<(action: Action) => void>();
-  internal.model.addChangeListener(observer);
-  const before = workbench.getLayout();
+  workbench.model.addChangeListener(observer);
+  const before = workbench.model.toJson();
   expect(workbench.canDispatch(add())).toBe(false);
-  expect(await workbench.dispatch(add())).toEqual({ status: "rejected" });
-  expect(workbench.getLayout()).toEqual(before);
-  expect(internal.tools.has(tab.id)).toBe(false);
+  expect(await workbench.dispatch(add())).toMatchObject({ status: "denied" });
+  expect(workbench.model.toJson()).toEqual(before);
+  expect(workbench.getContent(tab.id)).toBeNull();
   expect(observer).not.toHaveBeenCalled();
 });
-
 it.each([true, false])(
   "preflights tool admission without save/change side effects (allowed=%s)",
   async (allowed) => {
     const policy = vi.fn<() => boolean>(() => allowed);
     const workbench = setup({
-      layout: {
-        global: { tabEnableClose: false },
-        borders: [
-          {
-            type: "border",
-            location: "bottom",
-            selected: -1,
-            config: { area: "tools" },
-            children: [],
-          },
-        ],
-        layout: { type: "row", children: [{ type: "tabset", id: "main", children: [] }] },
+      initial: {
+        layout: {
+          global: { tabEnableClose: false },
+          borders: [
+            {
+              type: "border",
+              location: "bottom",
+              selected: -1,
+              config: { area: "tools" },
+              children: [],
+            },
+          ],
+          layout: { type: "row", children: [{ type: "tabset", id: "main", children: [] }] },
+        },
       },
       allowDrop: (tabs, target) => {
         if (tabs[0]?.getId() !== tab.id) return true;
@@ -157,24 +181,24 @@ it.each([true, false])(
         return policy();
       },
     });
+    await workbench.start();
     const opened = await workbench.open({ to: "/$id", params: { id: "A" } });
-    if (opened.status !== "committed") throw new Error(opened.status);
-    const model = integrationState(workbench).model;
+    if (opened.status !== "applied") throw new Error(opened.status);
+    const model = workbench.model;
     const save = vi.fn<() => void>();
     const change = vi.fn<() => void>();
-    model.getNodeById(opened.document.id)!.setEventListener("save", save);
+    model.getNodeById(opened.value.document.id)!.setEventListener("save", save);
     model.addChangeListener(change);
     expect(workbench.canDispatch(add())).toBe(allowed);
     expect(save).not.toHaveBeenCalled();
     expect(change).not.toHaveBeenCalled();
     expect(model.getNodeById(tab.id)).toBeUndefined();
     expect(policy).toHaveBeenCalledOnce();
-    workbench.snapshot();
+    workbench.createSnapshot();
     expect(save).toHaveBeenCalledOnce();
   },
 );
-
-it("keeps candidate global inheritance current after direct native global actions", () => {
+it("keeps candidate global inheritance current after direct native global actions", async () => {
   let enableClose = true;
   const workbench = setup({
     allowDrop: (tabs) => {
@@ -182,12 +206,12 @@ it("keeps candidate global inheritance current after direct native global action
       return true;
     },
   });
-  const model = integrationState(workbench).model;
+  await workbench.start();
   expect(workbench.canDispatch(add())).toBe(true);
   enableClose = false;
-  model.doAction(Actions.updateModelAttributes({ tabEnableClose: false }));
+  workbench.model.doAction(Actions.updateModelAttributes({ tabEnableClose: false }));
   expect(workbench.canDispatch(add())).toBe(true);
   enableClose = true;
-  model.doAction(Actions.updateModelAttributes({ tabEnableClose: true }));
+  workbench.model.doAction(Actions.updateModelAttributes({ tabEnableClose: true }));
   expect(workbench.canDispatch(add())).toBe(true);
 });

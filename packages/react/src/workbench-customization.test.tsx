@@ -14,8 +14,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import {
   createWorkbench,
   Workbench,
-  useWorkbenchContent,
-  type WorkbenchCommand,
+  useContent,
+  useContentController,
   type WorkbenchProps,
 } from "@worksplit/react";
 import {
@@ -131,13 +131,13 @@ function RouteError({ error }: ErrorComponentProps) {
   );
 }
 
-function fixture(withTool = false, commands: readonly WorkbenchCommand[] = []) {
+async function fixture(withTool = false) {
   const routers: AnyRouter[] = [];
   const resources = new Set<string>();
   const contents = new Map<
     string,
     {
-      content: ReturnType<typeof useWorkbenchContent>;
+      content: ReturnType<typeof useContent>;
       stop: () => void;
     }
   >();
@@ -153,25 +153,33 @@ function fixture(withTool = false, commands: readonly WorkbenchCommand[] = []) {
   const decide = vi.fn<(id: string, reason: "close" | "navigate") => boolean>(() => allowLeave);
 
   function SessionProvider({ children }: { children: ReactNode }) {
-    const { id } = useWorkbenchContent();
+    const { id } = useContent();
     const [session] = useState(() => ({ id, token: ++nextToken }));
     return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>;
   }
 
   function Editor({ label }: { label: string }) {
     if (label === "tool" && toolUnavailable) throw new Error("Application tool unavailable");
-    const content = useWorkbenchContent();
+    const content = useContent();
     const input = useRef<HTMLInputElement>(null);
     const revision = useRef(0);
-    useWorkbenchContent({
-      isDirty: () => Boolean(input.current?.value),
-      getCloseRevision: () => revision.current,
-      beforeLeave: (reason) => decide(content.id, reason),
+    useContentController({
+      leave: {
+        getState: () => ({
+          hasUnsavedChanges: Boolean(input.current?.value),
+          token: revision.current,
+        }),
+        decide: (request) =>
+          !request.state.hasUnsavedChanges ||
+          decide(content.id, request.reason === "navigate" ? "navigate" : "close")
+            ? { decision: "allow", token: request.state.token }
+            : { decision: "deny" },
+      },
       focus: () => input.current?.focus({ preventScroll: true }),
       save: () => saved(content.id),
     });
     useEffect(() => {
-      const stop = content.effect(({ defer }) => {
+      const stop = content.runEffect(({ defer }) => {
         resources.add(content.id);
         defer(() => {
           resources.delete(content.id);
@@ -249,27 +257,27 @@ function fixture(withTool = false, commands: readonly WorkbenchCommand[] = []) {
   };
   const workbench = createWorkbench({
     createRouter: createDocumentRouter,
-    commands,
-    layout: {
-      global: { tabEnableRename: true, tabSetEnableCloseButton: true },
-      borders: withTool
-        ? [
-            {
-              type: "border",
-              location: "bottom",
-              selected: 0,
-              children: [
-                { type: "tab", id: "helper", name: "Helper", component: "worksplit.tool" },
-              ],
-            },
-          ]
-        : [],
-      layout: { type: "row", children: [] },
+    workspaceId: "customization",
+    home: { mode: "empty", href: "/" },
+    initial: {
+      layout: {
+        global: { tabEnableRename: true, tabSetEnableCloseButton: true },
+        borders: withTool
+          ? [
+              {
+                type: "border",
+                location: "bottom",
+                selected: 0,
+                children: [{ type: "tab", id: "helper", name: "Helper", component: "helper" }],
+              },
+            ]
+          : [],
+        layout: { type: "row", children: [] },
+      },
     },
     tools: withTool
-      ? [
-          {
-            id: "helper",
+      ? {
+          helper: {
             render: () => (
               <SessionProvider>
                 <Frame>
@@ -278,10 +286,11 @@ function fixture(withTool = false, commands: readonly WorkbenchCommand[] = []) {
               </SessionProvider>
             ),
           },
-        ]
-      : [],
+        }
+      : {},
   });
-  workbench.connectBrowser();
+  window.history.replaceState({ __TSR_index: 0 }, "", "/");
+  await workbench.start({ browser: { window, onOutsideNavigate() {} } });
   disposals.push(() => workbench.dispose());
   const open = async (name: string) => {
     const result = await workbench.open({
@@ -289,8 +298,8 @@ function fixture(withTool = false, commands: readonly WorkbenchCommand[] = []) {
       params: { name },
       search: { view: "edit" },
     });
-    if (result.status !== "committed") throw new Error(`Open failed: ${result.status}`);
-    return result.document.id;
+    if (result.status !== "applied") throw new Error(`Open failed: ${result.status}`);
+    return result.value.document.id;
   };
   return {
     workbench,
@@ -317,11 +326,11 @@ function fixture(withTool = false, commands: readonly WorkbenchCommand[] = []) {
   };
 }
 
-async function openPair(commands: readonly WorkbenchCommand[] = []) {
-  const consumer = fixture(true, commands);
+async function openPair() {
+  const consumer = await fixture(true);
   const a = await consumer.open("A");
   const b = await consumer.open("B");
-  const source = consumer.workbench.getEditingContext().activeGroupId;
+  const source = consumer.workbench.getContext().activeContainerId;
   if (!source) throw new Error("The application document has no native TabSet");
   await consumer.workbench.dispatch(Actions.moveNode(b, source, DockLocation.RIGHT, -1));
   return { ...consumer, a, b };
@@ -344,7 +353,7 @@ function pressSave(target: HTMLElement, shiftKey = false) {
 
 describe("public React customization", () => {
   it("keeps declarative native menus in the host provider and guards their close actions", async () => {
-    const consumer = fixture();
+    const consumer = await fixture();
     const id = await consumer.open("A");
     const receipts: string[] = [];
     function Shell() {
@@ -352,7 +361,8 @@ describe("public React customization", () => {
       return (
         <HostTheme.Provider value="night">
           <Workbench
-            workbench={consumer.workbench}
+            instance={consumer.workbench}
+            menus={false}
             native={{
               onContextMenu(node, event) {
                 event.preventDefault();
@@ -376,6 +386,7 @@ describe("public React customization", () => {
                     .build(),
                   renderItem: (item, _index, api) => (
                     <button
+                      key={item.key}
                       role="menuitem"
                       tabIndex={-1}
                       aria-disabled={item.disabled}
@@ -398,7 +409,7 @@ describe("public React customization", () => {
     const tab = document.getElementById(`flexlayout-tabbutton-${id}`)!;
     fireEvent.contextMenu(tab);
     fireEvent.click(await screen.findByRole("menuitem", { name: "night: Close" }));
-    await waitFor(() => expect(receipts).toEqual(["rejected"]));
+    await waitFor(() => expect(receipts).toEqual(["denied"]));
     expect(consumer.decide).toHaveBeenCalledWith(id, "close");
     expect(consumer.workbench.getDocument(id)).toBeDefined();
     expect(screen.queryByRole("menu")).toBeNull();
@@ -409,18 +420,25 @@ describe("public React customization", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("inherits native host HotkeysProvider defaults for built-in command bindings and unregisters them", async () => {
-    const execute = vi.fn<WorkbenchCommand["execute"]>();
-    const consumer = fixture(false, [{ id: "save", hotkey: "Mod+S", target: "document", execute }]);
-    const props: WorkbenchProps = {
-      workbench: consumer.workbench,
-      "aria-label": "Keyboard workspace",
-      tabIndex: -1,
-      empty: null,
-    };
+  it("inherits host HotkeysProvider defaults for host save bindings and unregisters them", async () => {
+    const consumer = await fixture();
+    const execute = vi.fn<() => void>(() => {
+      const target = consumer.workbench.getActiveDocument();
+      if (target) void consumer.workbench.save(target.id);
+    });
+    function HostBinding() {
+      const target = useRef<HTMLDivElement>(null);
+      useHotkey("Mod+S", execute, { target, ignoreInputs: true });
+      return (
+        <div ref={target} aria-label="Keyboard workspace" tabIndex={-1}>
+          {consumerShell("day", { instance: consumer.workbench, empty: null })}
+        </div>
+      );
+    }
+    const binding = <HostBinding />;
     const shell = (enabled: boolean, preventDefault: boolean) => (
       <HotkeysProvider defaultOptions={{ hotkey: { enabled, preventDefault, platform: "linux" } }}>
-        {consumerShell("day", props)}
+        {binding}
       </HotkeysProvider>
     );
     const view = render(shell(false, true));
@@ -432,20 +450,15 @@ describe("public React customization", () => {
     act(() => workspace.focus());
     expect(pressSave(workspace).defaultPrevented).toBe(false);
     expect(execute).not.toHaveBeenCalled();
-
     view.rerender(shell(true, false));
     expect(pressSave(workspace).defaultPrevented).toBe(false);
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
-    expect(execute.mock.calls[0]?.[0].id).toBe(consumer.workbench.getActiveDocument()?.id);
-
+    expect(consumer.saved).toHaveBeenCalledWith(consumer.workbench.getActiveDocument()?.id);
     view.rerender(shell(true, true));
     expect(pressSave(workspace).defaultPrevented).toBe(true);
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
-    // Worksplit's command input policy and native root target remain explicit per binding.
     expect(pressSave(editor).defaultPrevented).toBe(false);
-    expect(pressSave(screen.getByText("Application commands")).defaultPrevented).toBe(false);
     expect(execute).toHaveBeenCalledTimes(2);
-
     view.unmount();
     expect(pressSave(workspace).defaultPrevented).toBe(false);
     expect(execute).toHaveBeenCalledTimes(2);
@@ -464,22 +477,18 @@ describe("public React customization", () => {
     let pendingFirst = true;
     const started = vi.fn<(id: string) => void>();
     const failed = vi.fn<(error: unknown) => void>();
-    const commands: readonly WorkbenchCommand[] = [
-      {
-        id: "save",
-        target: "document",
-        execute: async ({ id }): Promise<void> => {
-          started(id);
-          if (pendingFirst) {
-            pendingFirst = false;
-            await firstCommand;
-          }
-          await consumer.workbench.save(id);
-        },
-      },
-    ];
-    const catalogue = commands.map((command) => ({ ...command }));
-    const consumer = await openPair(commands);
+    const consumer = await openPair();
+    const saveCapturedDocument = async () => {
+      const document = consumer.workbench.getActiveDocument();
+      if (!document) return;
+      started(document.id);
+      if (pendingFirst) {
+        pendingFirst = false;
+        await firstCommand;
+      }
+      if (consumer.workbench.getDocument(document.id)?.handle !== document.handle) return;
+      await consumer.workbench.save(document.id);
+    };
 
     function Application() {
       const preferencesNow = useStore(preferences, (state) => state);
@@ -487,7 +496,7 @@ describe("public React customization", () => {
       useHotkey(
         preferencesNow.binding,
         () => {
-          void consumer.workbench.executeCommand("save").catch(failed);
+          void saveCapturedDocument().catch(failed);
         },
         {
           target,
@@ -502,7 +511,7 @@ describe("public React customization", () => {
             {preferencesNow.ignoreInputs ? "inputs ignored" : "inputs allowed"}
           </output>
           <button type="button">Application shortcut target</button>
-          {consumerShell("day", { workbench: consumer.workbench, empty: null })}
+          {consumerShell("day", { instance: consumer.workbench, empty: null })}
         </div>
       );
     }
@@ -518,11 +527,15 @@ describe("public React customization", () => {
     const tokenA = screen.getByTestId(`frame-${consumer.a}`).getAttribute("data-provider-token");
     const routers = [...consumer.routers];
 
-    act(() => consumer.workbench.activate(consumer.a));
+    await act(async () => {
+      await consumer.workbench.activate(consumer.a);
+    });
     expect(pressSave(editorA).defaultPrevented).toBe(true);
     expect(started.mock.calls).toEqual([[consumer.a]]);
     expect(consumer.saved).not.toHaveBeenCalled();
-    act(() => consumer.workbench.activate(consumer.b));
+    await act(async () => {
+      await consumer.workbench.activate(consumer.b);
+    });
     await act(async () => finishFirst());
     await waitFor(() => expect(consumer.saved.mock.calls).toEqual([[consumer.a]]));
     expect(consumer.workbench.getActiveDocument()?.id).toBe(consumer.b);
@@ -553,8 +566,6 @@ describe("public React customization", () => {
     expect(pressSave(target, true).defaultPrevented).toBe(true);
     await waitFor(() => expect(consumer.saved).toHaveBeenCalledTimes(4));
     expect(started.mock.calls).toEqual([[consumer.a], [consumer.b], [consumer.b], [consumer.b]]);
-    expect(commands).toEqual(catalogue);
-    expect(commands[0]?.hotkey).toBeUndefined();
     expect(screen.getByLabelText("Editor A")).toBe(editorA);
     expect(screen.getByLabelText("Editor B")).toBe(editorB);
     expect(screen.getByTestId(`frame-${consumer.a}`).getAttribute("data-provider-token")).toBe(
@@ -570,14 +581,14 @@ describe("public React customization", () => {
   });
 
   it("owns shell DOM and native placeholders, render slots, icons, and the direct Layout ref", async () => {
-    const { workbench, open, routers } = fixture();
+    const { workbench, open, routers } = await fixture();
     const layoutRef = createRef<ILayoutApi>();
     const click = vi.fn<() => void>();
     const slotClick = vi.fn<() => void>();
     const contextMenu = vi.fn<NonNullable<ILayoutProps["onContextMenu"]>>();
     render(
       consumerShell("day", {
-        workbench,
+        instance: workbench,
         layoutRef,
         id: "consumer-workbench",
         className: "consumer-surface",
@@ -586,6 +597,7 @@ describe("public React customization", () => {
         "aria-describedby": "host-description",
         onClick: click,
         empty: null,
+        menus: false,
         native: {
           onTabSetPlaceHolder: () => <p>Application empty workspace</p>,
           onRenderTab: (node, values) => {
@@ -642,10 +654,10 @@ describe("public React customization", () => {
   });
 
   it("uses native Model creation hooks and removable change listeners through borrowed nodes", async () => {
-    const { workbench, open } = fixture();
+    const { workbench, open } = await fixture();
     const a = await open("A");
     const b = await open("B");
-    const source = workbench.getEditingContext().activeGroupId;
+    const source = workbench.getContext().activeContainerId;
     if (!source) throw new Error("The application document has no native TabSet");
     let model: Model | undefined;
     const created = vi.fn<(node?: TabNode) => ITabSetAttributes>((node) => ({
@@ -656,7 +668,7 @@ describe("public React customization", () => {
     const changed = vi.fn<(action: Action) => void>();
     render(
       consumerShell("day", {
-        workbench,
+        instance: workbench,
         empty: null,
         native: {
           onRenderTabSet: (node) => {
@@ -670,11 +682,11 @@ describe("public React customization", () => {
     );
     const editorB = await screen.findByLabelText("Editor B");
     await act(async () => {
-      expect(await workbench.dispatch(Actions.moveNode(a, source, DockLocation.RIGHT, -1))).toEqual(
-        {
-          status: "applied",
-        },
-      );
+      expect(
+        await workbench.dispatch(Actions.moveNode(a, source, DockLocation.RIGHT, -1)),
+      ).toMatchObject({
+        status: "applied",
+      });
     });
     const editorA = await screen.findByLabelText("Editor A");
     expect(created).toHaveBeenCalledTimes(1);
@@ -692,7 +704,7 @@ describe("public React customization", () => {
     await act(async () => {
       expect(
         await workbench.dispatch(Actions.moveNode(a, source, DockLocation.CENTER, -1)),
-      ).toEqual({
+      ).toMatchObject({
         status: "applied",
       });
     });
@@ -705,7 +717,7 @@ describe("public React customization", () => {
   it("keeps Router providers, live host context, editors and lifecycles across native moves and guarded deletes", async () => {
     const consumer = await openPair();
     const { workbench, a, b } = consumer;
-    const props = { workbench, className: "consumer-surface", empty: null };
+    const props = { instance: workbench, className: "consumer-surface", empty: null };
     const view = render(consumerShell("day", props));
     const editorA = await screen.findByLabelText("Editor A");
     const editorB = await screen.findByLabelText("Editor B");
@@ -718,12 +730,12 @@ describe("public React customization", () => {
     view.rerender(consumerShell("night", props));
     expect(frameA.getAttribute("data-theme")).toBe("night");
     expect(screen.getByTestId("frame-helper").getAttribute("data-theme")).toBe("night");
-    const destination = workbench.getEditingContext().activeGroupId;
+    const destination = workbench.getContext().activeContainerId;
     if (!destination) throw new Error("The selected document has no native TabSet");
     await act(async () => {
       expect(
         await workbench.dispatch(Actions.moveNode(a, destination, DockLocation.CENTER, -1)),
-      ).toEqual({ status: "applied" });
+      ).toMatchObject({ status: "applied" });
     });
     expect(screen.getByLabelText("Editor A")).toBe(editorA);
     expect(screen.getByLabelText("Editor B")).toBe(editorB);
@@ -736,7 +748,7 @@ describe("public React customization", () => {
     expect(consumer.routers).toEqual(originalRouters);
     await act(async () => {
       expect(await workbench.dispatch(Actions.deleteTab(a))).toMatchObject({
-        status: "rejected",
+        status: "denied",
         reason: "decision",
       });
     });
@@ -745,8 +757,7 @@ describe("public React customization", () => {
     consumer.approve();
     await act(async () => {
       expect(await workbench.dispatch(Actions.deleteTab(a))).toMatchObject({
-        status: "closed",
-        id: a,
+        status: "applied",
         cleanupErrors: [],
       });
     });
@@ -760,7 +771,7 @@ describe("public React customization", () => {
   it("uses application Router pending and error components without replacing a sibling provider or Router", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const consumer = await openPair();
-    render(consumerShell("night", { workbench: consumer.workbench, empty: null }));
+    render(consumerShell("night", { instance: consumer.workbench, empty: null }));
     await screen.findByLabelText("Editor A");
     const editorB = await screen.findByLabelText("Editor B");
     const tokenB = screen.getByTestId(`frame-${consumer.b}`).getAttribute("data-provider-token");
@@ -785,12 +796,12 @@ describe("public React customization", () => {
 
   it("uses native error translation and Retry while preserving the application's sibling content", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const consumer = fixture(true);
+    const consumer = await fixture(true);
     const a = await consumer.open("A");
     consumer.failTool();
     render(
       consumerShell("night", {
-        workbench: consumer.workbench,
+        instance: consumer.workbench,
         empty: null,
         native: {
           i18nTranslator: (key) => {
@@ -821,41 +832,40 @@ describe("public React customization", () => {
   });
 
   it("keeps old public registration callbacks from replacing a reopened tool's current lifecycle", async () => {
-    const consumer = fixture(true);
+    const consumer = await fixture(true);
     await consumer.open("A");
-    render(consumerShell("day", { workbench: consumer.workbench, empty: null }));
+    render(consumerShell("day", { instance: consumer.workbench, empty: null }));
     const editorA = await screen.findByLabelText("Editor A");
     const oldTool = await screen.findByLabelText("Editor tool");
     const old = consumer.contents.get("helper")!;
     fireEvent.change(oldTool, { target: { value: "Old tool draft" } });
     await act(async () => {
       expect(await consumer.workbench.dispatch(Actions.deleteTab("helper"))).toMatchObject({
-        status: "rejected",
+        status: "denied",
         reason: "decision",
       });
     });
     consumer.approve();
     await act(async () => {
       expect(await consumer.workbench.dispatch(Actions.deleteTab("helper"))).toMatchObject({
-        status: "closed",
-        id: "helper",
+        status: "applied",
       });
     });
     await waitFor(() => expect(screen.queryByLabelText("Editor tool")).toBeNull());
     expect(oldTool.isConnected).toBe(false);
-    const target = consumer.workbench.getEditingContext().activeGroupId;
+    const target = consumer.workbench.getContext().activeContainerId;
     if (!target) throw new Error("The application document has no native target");
     await act(async () => {
       expect(
         await consumer.workbench.dispatch(
           Actions.addTab(
-            { id: "helper", name: "Reopened helper", component: "worksplit.tool" },
+            { id: "helper", name: "Reopened helper", component: "helper" },
             target,
             DockLocation.CENTER,
             -1,
           ),
         ),
-      ).toEqual({ status: "applied" });
+      ).toMatchObject({ status: "applied" });
     });
     const fresh = await screen.findByLabelText("Editor tool");
     expect(fresh).not.toBe(oldTool);
@@ -863,15 +873,14 @@ describe("public React customization", () => {
     fireEvent.change(fresh, { target: { value: "Fresh tool draft" } });
     consumer.reject();
     const lateSetup = vi.fn<() => void>();
-    expect(() => old.content.effect(lateSetup)).toThrow(/closed content helper/);
+    expect(() => old.content.runEffect(lateSetup)).toThrow(/instance has ended/);
     expect(lateSetup).not.toHaveBeenCalled();
-    await expect(old.content.executeCommand("save")).rejects.toThrow(/closed content helper/);
     await act(async () => {
       old.stop();
     });
     await act(async () => {
       expect(await consumer.workbench.dispatch(Actions.deleteTab("helper"))).toMatchObject({
-        status: "rejected",
+        status: "denied",
         reason: "decision",
       });
     });
@@ -882,7 +891,7 @@ describe("public React customization", () => {
 
     const current = consumer.contents.get("helper")!;
     const freshCleanup = vi.fn<() => void>();
-    const stopFresh = current.content.effect(({ defer }) => defer(freshCleanup));
+    const stopFresh = current.content.runEffect(({ defer }) => defer(freshCleanup));
     old.stop();
     expect(freshCleanup).not.toHaveBeenCalled();
     stopFresh();
@@ -890,7 +899,7 @@ describe("public React customization", () => {
     expect(freshCleanup).toHaveBeenCalledTimes(1);
     await act(async () => {
       expect(await consumer.workbench.dispatch(Actions.deleteTab("helper"))).toMatchObject({
-        status: "rejected",
+        status: "denied",
         reason: "decision",
       });
     });

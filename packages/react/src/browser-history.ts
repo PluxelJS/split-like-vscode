@@ -1,175 +1,282 @@
-/** Browser history is an output of accepted document navigation. No Router uses it directly. */
+/** References only: the native document history owns entries and their state. */
+export interface BrowserEntryReference {
+  readonly contentId: string;
+  readonly lifetime: string;
+  readonly entryKey: string;
+}
+
+export interface BrowserVisitResult {
+  readonly href: string;
+  readonly reference?: BrowserEntryReference;
+}
+
+export interface OutsideNavigation {
+  readonly signal: AbortSignal;
+  readonly state: unknown;
+  current(): boolean;
+}
+
+interface OwnedEntry {
+  readonly scope: string;
+  readonly index: number;
+  readonly reference?: BrowserEntryReference;
+}
+
+interface AcceptedEntry extends BrowserVisitResult {
+  readonly index: number;
+  readonly position: number;
+}
+
+const connections = new WeakMap<Window, BrowserHistoryCoordinator>();
+
+/** Browser entries are an output of native acceptance, never a Router's history. */
 export class BrowserHistoryCoordinator {
-  private accepted: { index: number; href: string; id?: string | undefined };
-  private physicalIndex: number;
+  private accepted: AcceptedEntry | undefined;
+  private physicalPosition: number | undefined;
   private generation = 0;
   private restoring = false;
   private pendingWrite: (() => void) | undefined;
   private disposed = false;
   private readonly key: string;
-  private scope: string | undefined;
-  private readonly baseIndex: number;
-  private outsideDecision = false;
+  private readonly scope: string;
+  private readonly basePosition: number;
+  private readonly nativeBasePosition: number;
+  private readonly navigationPositions: boolean;
   private outsideAbort: AbortController | undefined;
+  private visitAbort: AbortController | undefined;
+  private initialization: Promise<BrowserVisitResult | undefined> | undefined;
+  private settleInitialization: ((result: BrowserVisitResult | undefined) => void) | undefined;
 
   constructor(
     private readonly win: Window,
     workspaceId: string,
     private readonly visit: (
       href: string,
-      id: string | undefined,
+      reference: BrowserEntryReference | undefined,
       current: () => boolean,
-    ) => Promise<{ id?: string; href: string } | undefined>,
-    private readonly report: (error: unknown, outside?: boolean) => void,
-    private readonly beforeOutsideScope?: (
-      href: string,
-      context: { signal: AbortSignal },
-    ) => boolean | Promise<boolean>,
+      signal: AbortSignal,
+    ) => Promise<BrowserVisitResult | undefined>,
+    private readonly report: (error: unknown) => void,
+    /** true means the host has synchronously committed termination and handoff. */
+    private readonly outside: (href: string, context: OutsideNavigation) => Promise<boolean>,
   ) {
+    if (connections.has(win))
+      throw new Error("This Window already has a Worksplit browser connection");
     this.key = `worksplit:${workspaceId}`;
-    const saved = this.read(win.history.state);
+    const saved = this.read(win.history.state, false);
     this.scope =
       saved?.scope ??
-      Array.from(win.crypto.getRandomValues(new Uint32Array(4)), (value) =>
-        value.toString(16),
-      ).join("-");
-    this.physicalIndex = saved?.index ?? 0;
-    this.baseIndex = this.position(win.history.state) - this.physicalIndex;
-    this.accepted = { index: this.physicalIndex, href: this.href(), id: saved?.id };
-    this.write(this.accepted.href, this.accepted.id, true);
+      Array.from(win.crypto.getRandomValues(new Uint32Array(4)), (n) => n.toString(16)).join("-");
+    // A new connection can assign its initial native position; subsequent outside
+    // entries need the outer Router's native index or the public Navigation API.
+    this.navigationPositions = this.navigationPosition() !== undefined;
+    this.physicalPosition = this.position(win.history.state) ?? 0;
+    this.basePosition = this.physicalPosition - (saved?.index ?? 0);
+    this.nativeBasePosition =
+      (this.nativePosition(win.history.state) ?? this.physicalPosition) - (saved?.index ?? 0);
+    connections.set(win, this);
     win.addEventListener("popstate", this.onPop);
   }
 
-  get busy() {
-    return this.restoring || this.physicalIndex !== this.accepted.index;
+  /** The latest valid startup traversal settles this one shared initialization. */
+  get acceptedHref(): string | undefined {
+    return this.accepted?.href;
   }
 
-  publish(href: string, id: string | undefined, replace: boolean) {
-    if (this.disposed || this.outsideDecision) return;
+  start(): Promise<BrowserVisitResult | undefined> {
+    if (this.initialization) return this.initialization;
+    this.initialization = new Promise((resolve) => {
+      this.settleInitialization = resolve;
+    });
+    if (this.disposed) this.finishInitialization(undefined);
+    else this.visitEntry(this.read(this.win.history.state) ?? { scope: this.scope, index: 0 });
+    return this.initialization;
+  }
+
+  /** Explicit work supersedes a pending traversal or outside leave decision. */
+  cancelPending(): void {
+    if (this.disposed) return;
     ++this.generation;
-    const apply = () => this.write(href, id, replace);
-    if (this.busy) {
+    this.outsideAbort?.abort();
+    this.outsideAbort = undefined;
+    this.visitAbort?.abort();
+    this.visitAbort = undefined;
+    this.pendingWrite = undefined;
+    this.restore();
+  }
+
+  publish(href: string, reference: BrowserEntryReference | undefined, replace: boolean): void {
+    if (this.disposed) return;
+    ++this.generation;
+    this.outsideAbort?.abort();
+    this.outsideAbort = undefined;
+    this.visitAbort?.abort();
+    this.visitAbort = undefined;
+    const apply = () => this.write(href, reference, replace);
+    if (this.restoring || (this.accepted && this.physicalPosition !== this.accepted.position)) {
       this.pendingWrite = apply;
       this.restore();
-    } else {
-      apply();
-    }
+    } else apply();
   }
 
-  dispose() {
+  dispose(): void {
+    if (this.disposed) return;
     this.disposed = true;
     this.outsideAbort?.abort();
     this.outsideAbort = undefined;
+    this.visitAbort?.abort();
+    this.visitAbort = undefined;
     ++this.generation;
     this.pendingWrite = undefined;
     this.win.removeEventListener("popstate", this.onPop);
+    if (connections.get(this.win) === this) connections.delete(this.win);
+    this.finishInitialization(undefined);
   }
 
-  // TanStack's native browser index also identifies entries owned by the outer Router.
-  // Keep it monotonic while the workspace exclusively owns browser writes, so a rejected
-  // cross-scope traversal can use history.go without another URL/navigation state machine.
-  private position(state: unknown): number {
+  private finishInitialization(result: BrowserVisitResult | undefined): void {
+    const settle = this.settleInitialization;
+    this.settleInitialization = undefined;
+    settle?.(result);
+  }
+
+  private position(state: unknown): number | undefined {
+    return this.navigationPositions ? this.navigationPosition() : this.nativePosition(state);
+  }
+
+  private nativePosition(state: unknown): number | undefined {
     const value =
       state && typeof state === "object"
         ? (state as Record<string, unknown>)["__TSR_index"]
         : undefined;
-    return Number.isSafeInteger(value) ? (value as number) : 0;
+    return Number.isSafeInteger(value) ? (value as number) : undefined;
   }
 
-  private href() {
+  private navigationPosition(): number | undefined {
+    const navigation = (this.win as Window & { navigation?: { currentEntry?: { index: number } } })
+      .navigation;
+    const index = navigation?.currentEntry?.index;
+    return Number.isSafeInteger(index) && index! >= 0 ? index : undefined;
+  }
+
+  private href(): string {
     return this.win.location.pathname + this.win.location.search + this.win.location.hash;
   }
 
-  private read(
-    state: unknown,
-  ): { scope: string; index: number; id?: string | undefined } | undefined {
+  private read(state: unknown, sameScope = true): OwnedEntry | undefined {
     if (!state || typeof state !== "object") return;
     const value = (state as Record<string, unknown>)[this.key];
     if (!value || typeof value !== "object") return;
-    const { scope, index, id } = value as Record<string, unknown>;
+    const { scope, index, reference } = value as Record<string, unknown>;
     if (
-      typeof scope === "string" &&
-      (this.scope === undefined || this.scope === scope) &&
-      Number.isSafeInteger(index) &&
-      (id === undefined || typeof id === "string")
+      typeof scope !== "string" ||
+      !scope ||
+      (sameScope && scope !== this.scope) ||
+      !Number.isSafeInteger(index)
     )
-      return { scope, index: index as number, id: id as string | undefined };
+      return;
+    if (reference !== undefined) {
+      if (!reference || typeof reference !== "object") return;
+      const { contentId, lifetime, entryKey } = reference as Record<string, unknown>;
+      if (
+        typeof contentId !== "string" ||
+        typeof lifetime !== "string" ||
+        typeof entryKey !== "string"
+      )
+        return;
+      return { scope, index: index as number, reference: { contentId, lifetime, entryKey } };
+    }
+    return { scope, index: index as number };
   }
 
-  private write(href: string, id: string | undefined, replace: boolean) {
-    replace ||= href === this.accepted.href;
-    const index = this.accepted.index + (replace ? 0 : 1);
+  private write(
+    href: string,
+    reference: BrowserEntryReference | undefined,
+    replace: boolean,
+  ): void {
+    const index = (this.accepted?.index ?? 0) + (replace || !this.accepted ? 0 : 1);
+    const position = this.basePosition + index;
     const state = {
       ...this.win.history.state,
-      __TSR_index: this.baseIndex + index,
-      [this.key]: { scope: this.scope, index, id },
+      __TSR_index: this.nativeBasePosition + index,
+      [this.key]: { scope: this.scope, index, reference },
     };
-    this.win.history[replace ? "replaceState" : "pushState"](state, "", href);
-    this.physicalIndex = index;
-    this.accepted = { index, href, id };
+    this.win.history[replace || !this.accepted ? "replaceState" : "pushState"](state, "", href);
+    this.physicalPosition = position;
+    this.accepted = { index, position, href, ...(reference ? { reference } : {}) };
   }
 
-  private restore() {
-    if (this.restoring) return;
-    if (this.physicalIndex === this.accepted.index) {
-      this.pendingWrite?.();
+  private restore(): void {
+    if (this.disposed || this.restoring || !this.accepted) return;
+    if (this.physicalPosition === undefined) {
       this.pendingWrite = undefined;
+      this.report(
+        new Error(
+          "Cannot restore an outside entry without a native history index or Navigation API position",
+        ),
+      );
+      return;
+    }
+    if (this.physicalPosition === this.accepted.position) {
+      const pending = this.pendingWrite;
+      this.pendingWrite = undefined;
+      pending?.();
       return;
     }
     this.restoring = true;
-    this.win.history.go(this.accepted.index - this.physicalIndex);
+    this.win.history.go(this.accepted.position - this.physicalPosition);
   }
 
-  private onPop = (event: PopStateEvent) => {
+  private visitEntry(state: OwnedEntry): void {
+    this.visitAbort?.abort();
+    const abort = new AbortController();
+    this.visitAbort = abort;
+    const token = ++this.generation;
+    const href = this.href();
+    const current = () => !this.disposed && !abort.signal.aborted && token === this.generation;
+    void Promise.resolve()
+      .then(() =>
+        current() ? this.visit(href, state.reference, current, abort.signal) : undefined,
+      )
+      .then(
+        (result) => {
+          if (!current()) return;
+          this.visitAbort = undefined;
+          if (!result) {
+            this.restore();
+            this.finishInitialization(undefined);
+            return;
+          }
+          this.accepted = {
+            ...result,
+            index: state.index,
+            position: this.basePosition + state.index,
+          };
+          // A redirect normalizes the traversed entry and binds its new lifetime.
+          this.write(result.href, result.reference, true);
+          this.finishInitialization(result);
+          return;
+        },
+        (error: unknown) => {
+          if (!current()) return;
+          this.visitAbort = undefined;
+          this.report(error);
+          this.restore();
+          this.finishInitialization(undefined);
+        },
+      );
+  }
+
+  private onPop = (event: PopStateEvent): void => {
+    if (this.disposed) return;
     this.outsideAbort?.abort();
     this.outsideAbort = undefined;
+    this.visitAbort?.abort();
+    this.visitAbort = undefined;
     const state = this.read(event.state);
-    // Entries outside this workspace are owned by the containing application.
-    if (!state) {
-      const token = ++this.generation;
-      this.physicalIndex = this.position(event.state) - this.baseIndex;
-      const report = () =>
-        this.report(
-          new Error("History entry is outside this Worksplit workspace; the host must handle it"),
-          true,
-        );
-      if (!this.beforeOutsideScope) {
-        report();
-        return;
-      }
-      this.outsideDecision = true;
-      const abort = new AbortController();
-      this.outsideAbort = abort;
-      const href = this.href();
-      void Promise.resolve()
-        .then(() =>
-          abort.signal.aborted ? false : this.beforeOutsideScope!(href, { signal: abort.signal }),
-        )
-        .then(
-          (allowed) => {
-            if (this.disposed || token !== this.generation) return;
-            this.outsideAbort = undefined;
-            this.outsideDecision = false;
-            return allowed ? report() : this.restore();
-          },
-          (error) => {
-            if (this.disposed || token !== this.generation) return;
-            this.outsideAbort = undefined;
-            this.outsideDecision = false;
-            this.report(error);
-            this.restore();
-          },
-        );
-      return;
-    }
-    // An owned traversal supersedes the host decision, including its publish lock.
-    // Invalidate it before the restoration branch, which can otherwise return early.
-    this.outsideDecision = false;
-    const token = ++this.generation;
-    this.physicalIndex = state.index;
+    this.physicalPosition = state ? this.basePosition + state.index : this.position(event.state);
     if (this.restoring) {
       this.restoring = false;
-      if (state.index !== this.accepted.index) {
+      if (this.physicalPosition !== this.accepted?.position) {
         this.restore();
         return;
       }
@@ -178,24 +285,39 @@ export class BrowserHistoryCoordinator {
       pending?.();
       return;
     }
+    if (state) {
+      this.visitEntry(state);
+      return;
+    }
+    const token = ++this.generation;
+    const abort = new AbortController();
+    this.outsideAbort = abort;
+    const current = () => !this.disposed && !abort.signal.aborted && token === this.generation;
     const href = this.href();
-    const current = () => !this.disposed && token === this.generation;
-    void this.visit(href, state.id, current).then(
-      (result) => {
-        if (!current()) return undefined;
-        if (result === undefined) {
+    void Promise.resolve()
+      .then(() =>
+        current()
+          ? this.outside(href, { signal: abort.signal, state: event.state, current })
+          : false,
+      )
+      .then(
+        (allowed) => {
+          if (!current()) return;
+          this.outsideAbort = undefined;
+          if (allowed) this.dispose();
+          else {
+            this.restore();
+            this.finishInitialization(undefined);
+          }
+          return;
+        },
+        (error: unknown) => {
+          if (!current()) return;
+          this.outsideAbort = undefined;
+          this.report(error);
           this.restore();
-        } else {
-          this.accepted = { index: state.index, href: result.href, id: result.id };
-          // Redirects normalize this existing entry, never push another entry.
-          this.write(result.href, result.id, true);
-        }
-        return undefined;
-      },
-      (error: unknown) => {
-        this.report(error);
-        if (current()) this.restore();
-      },
-    );
+          this.finishInitialization(undefined);
+        },
+      );
   };
 }

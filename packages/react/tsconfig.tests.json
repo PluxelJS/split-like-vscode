@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    "customConditions": ["development"],
+    "types": ["vite/client"]
+  },
+  "include": ["src", "../demo/src/examples"]
+}

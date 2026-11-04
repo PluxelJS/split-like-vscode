@@ -1,0 +1,2154 @@
+diff --git a/dist/cjs/RouterProvider.d.cts b/dist/cjs/RouterProvider.d.cts
+index af0e8db9..6279a781 100644
+--- a/dist/cjs/RouterProvider.d.cts
++++ b/dist/cjs/RouterProvider.d.cts
+@@ -1,3 +1,4 @@
++import type { HistoryNavigationOutcome, HistoryNavigation } from '@tanstack/history';
+ import { NavigateOptions, ToOptions } from './link.cjs';
+ import { ParsedLocation } from './location.cjs';
+ import { RoutePaths } from './routeInfo.cjs';
+@@ -9,6 +10,9 @@ export interface MatchLocation {
+     from?: string;
+ }
+ export interface CommitLocationOptions {
++    onNavigationResult?: (result: HistoryNavigationOutcome) => void;
++    onNavigationStart?: (navigation: HistoryNavigation) => void;
++    navigation?: HistoryNavigation;
+     replace?: boolean;
+     resetScroll?: boolean;
+     hashScrollIntoView?: boolean | ScrollIntoViewOptions;
+diff --git a/dist/cjs/link.d.cts b/dist/cjs/link.d.cts
+index 94411ebf..39680f91 100644
+--- a/dist/cjs/link.d.cts
++++ b/dist/cjs/link.d.cts
+@@ -1,3 +1,4 @@
++import type { HistoryNavigationOutcome, HistoryNavigation } from '@tanstack/history';
+ import { HistoryState, ParsedHistoryState } from '@tanstack/history';
+ import { AllParams, CatchAllPaths, CurrentPath, FullSearchSchema, FullSearchSchemaInput, ParentPath, RouteByPath, RouteByToPath, RoutePaths, RouteToPath, ToPath } from './routeInfo.cjs';
+ import { AnyRouter, RegisteredRouter, ViewTransitionOptions } from './router.cjs';
+@@ -38,6 +39,8 @@ export type NavigateOptions<TRouter extends AnyRouter = RegisteredRouter, TFrom
+  * @link [API Docs](https://tanstack.com/router/latest/docs/framework/react/api/router/NavigateOptionsType)
+  */
+ export interface NavigateOptionProps {
++    onNavigationResult?: (result: HistoryNavigationOutcome) => void;
++    onNavigationStart?: (navigation: HistoryNavigation) => void;
+     /**
+      * If set to `true`, the router will scroll the element with an id matching the hash into view with default `ScrollIntoViewOptions`.
+      * If set to `false`, the router will not scroll the element with an id matching the hash into view.
+diff --git a/dist/cjs/load-client.cjs b/dist/cjs/load-client.cjs
+index 3b7293e1..c229c93e 100644
+--- a/dist/cjs/load-client.cjs
++++ b/dist/cjs/load-client.cjs
+@@ -831,34 +831,53 @@ async function awaitCurrent(router, owner) {
+ 	}
+ }
+ function followRedirect(router, tx, outcome) {
+-	const options = outcome[1].options;
+-	const location = outcome[2];
+-	if (!location) return router.navigate({
+-		...options,
+-		replace: true,
+-		ignoreBlocker: true
+-	});
+-	if (options.reloadDocument) return router.navigate({
+-		href: (location.maskedLocation ?? location).publicHref,
+-		reloadDocument: true,
+-		replace: true,
+-		ignoreBlocker: true
+-	});
+-	location._redirects = tx[1] + 1;
+-	router._pendingLocation = location;
+-	const committed = router.commitLocation({
+-		...location,
+-		viewTransition: options.viewTransition,
+-		replace: true,
+-		resetScroll: options.resetScroll,
+-		hashScrollIntoView: options.hashScrollIntoView,
+-		ignoreBlocker: true
+-	});
+-	queueMicrotask(() => {
+-		if (router._pendingLocation === location) router._pendingLocation = void 0;
+-	});
+-	return committed;
++    const options = outcome[1].options;
++    const location = outcome[2];
++    if (!location) {
++        return router.navigate({
++            ...options,
++            replace: true,
++            ignoreBlocker: true
++        });
++    }
++    if (options.reloadDocument) {
++        return router.navigate({
++            href: (location.maskedLocation ?? location).publicHref,
++            reloadDocument: true,
++            replace: true,
++            ignoreBlocker: true
++        });
++    }
++    ;
++    location._redirects = tx[1] + 1;
++    router._pendingLocation = location;
++    const committed = router.commitLocation({
++        ...location,
++        viewTransition: options.viewTransition,
++        replace: true,
++        resetScroll: options.resetScroll,
++        hashScrollIntoView: options.hashScrollIntoView,
++        ignoreBlocker: true,
++        navigation: tx[7],
++        onNavigationResult: (result)=>{
++            Object.assign(tx[9], result);
++        },
++        onNavigationStart: tx[11]
++    });
++    queueMicrotask(()=>{
++        if (router._pendingLocation === location) {
++            router._pendingLocation = undefined;
++        }
++    });
++    return committed.then(()=>{
++        if (router._tx === tx && router.history.completeNavigation) {
++            finishPending(router, tx);
++            router.stores.status.set('idle');
++            if (tx[8]) router.history.completeNavigation?.(tx[8], 'superseded');
++        }
++    });
+ }
++
+ async function runBackground(router, tx, base, tasks, settlement) {
+ 	const next = base.map((match) => ({ ...match }));
+ 	acquireMatchResources(next);
+@@ -895,172 +914,292 @@ async function runBackground(router, tx, base, tasks, settlement) {
+ 	transferMatchResources(router, base, next);
+ }
+ async function runClientTransaction(router, tx, forceStaleReload, onReady, sync, resolvedPrefix) {
+-	const result = await executeClientLane(router, tx[2], tx[3], [
+-		tx[0],
+-		tx[1],
+-		router._committed,
+-		void 0,
+-		sync,
+-		forceStaleReload,
+-		resolvedPrefix,
+-		onReady
+-	]);
+-	if (isControl(result)) {
+-		const follow = result[0] === REDIRECTED && router._tx === tx;
+-		if (!follow || result[1].options.reloadDocument) finishPending(router, tx);
+-		transferMatchResources(router, tx[3]);
+-		tx[3] = [];
+-		if (!follow) return;
+-		if (router._tx !== tx) {
+-			finishPending(router, tx);
+-			return;
+-		}
+-		if (process.env.NODE_ENV !== "production" && tx[6]) router._refreshNextLoad = true;
+-		await followRedirect(router, tx, result);
+-		return;
+-	}
+-	const matches = result[1];
+-	if (router._tx === tx) await awaitPendingMinimum(router, tx);
+-	if (router._tx !== tx) {
+-		finishPending(router, tx);
+-		transferMatchResources(router, matches);
+-		discardBackground(router, result);
+-		return;
+-	}
+-	const toLocation = tx[2];
+-	const changeInfo = require_router.getLocationChangeInfo(toLocation, router.stores.resolvedLocation.get());
+-	const background = result[2];
+-	await router.startViewTransition(async () => {
+-		if (router._tx === tx) await awaitPendingMinimum(router, tx);
+-		if (router._tx !== tx) {
+-			finishPending(router, tx);
+-			transferMatchResources(router, matches);
+-			discardBackground(router, result);
+-			return;
+-		}
+-		const commit = () => {
+-			finishPending(router, tx);
+-			commitMatches(router, tx, matches, resolvedPrefix);
+-			if (router._tx !== tx) return;
+-			router.emit({
+-				type: "onLoad",
+-				...changeInfo
+-			});
+-			if (router._tx === tx) router.emit({
+-				type: "onBeforeRouteMount",
+-				...changeInfo
+-			});
+-		};
+-		const rendered = await router.startTransition(commit, matches);
+-		if (process.env.NODE_ENV !== "production" && tx[6]) tx[6] = void 0;
+-		if (router._tx !== tx) {
+-			discardBackground(router, result);
+-			return;
+-		}
+-		if (background?.length) runBackground(router, tx, matches, background, result[3]).catch(console.error);
+-		router.batch(() => {
+-			router.stores.resolvedLocation.set(toLocation);
+-			router.stores.status.set("idle");
+-			if (router._tx === tx) router.emit({
+-				type: "onResolved",
+-				...changeInfo
+-			});
+-			if (rendered && router._tx === tx) router.emit({
+-				type: "onRendered",
+-				...changeInfo
+-			});
+-		});
+-		if (router._tx !== tx) return;
+-		router._commitPromise?.resolve();
+-		router._commitPromise = void 0;
+-	});
++    const result = await executeClientLane(router, tx[2], tx[3], [
++        tx[0],
++        tx[1],
++        router._committed,
++        undefined,
++        sync,
++        forceStaleReload,
++        resolvedPrefix,
++        onReady
++    ]);
++    if (isControl(result)) {
++        const follow = result[0] === REDIRECTED && router._tx === tx;
++        if (!follow || result[1].options.reloadDocument) {
++            finishPending(router, tx);
++        }
++        transferMatchResources(router, tx[3]);
++        tx[3] = [];
++        if (!follow) {
++            return;
++        }
++        if (router._tx !== tx) {
++            finishPending(router, tx);
++            return;
++        }
++        if (process.env.NODE_ENV !== 'production' && tx[6]) {
++            router._refreshNextLoad = true;
++        }
++        await followRedirect(router, tx, result);
++        return;
++    }
++    const matches = result[1];
++    if (router._tx === tx) {
++        await awaitPendingMinimum(router, tx);
++    }
++    if (router._tx !== tx) {
++        finishPending(router, tx);
++        transferMatchResources(router, matches);
++        discardBackground(router, result);
++        return;
++    }
++    const toLocation = tx[2];
++    const changeInfo = require_router.getLocationChangeInfo(toLocation, router.stores.resolvedLocation.get());
++    const background = result[2];
++    await router.startViewTransition(async ()=>{
++        if (router._tx === tx) {
++            await awaitPendingMinimum(router, tx);
++        }
++        if (router._tx !== tx) {
++            finishPending(router, tx);
++            transferMatchResources(router, matches);
++            discardBackground(router, result);
++            return;
++        }
++        const commit = ()=>{
++            finishPending(router, tx);
++            commitMatches(router, tx, matches, resolvedPrefix);
++            if (router._tx !== tx) {
++                return;
++            }
++            router.emit({
++                type: 'onLoad',
++                ...changeInfo
++            });
++            if (router._tx === tx) {
++                router.emit({
++                    type: 'onBeforeRouteMount',
++                    ...changeInfo
++                });
++            }
++        };
++        const rendered = await router.startTransition(commit, matches);
++        if (process.env.NODE_ENV !== 'production' && tx[6]) {
++            tx[6] = undefined;
++        }
++        if (router._tx !== tx) {
++            discardBackground(router, result);
++            return;
++        }
++        if (background?.length) {
++            runBackground(router, tx, matches, background, result[3]).catch(console.error);
++        }
++        router.batch(()=>{
++            router.stores.resolvedLocation.set(toLocation);
++            router.stores.status.set('idle');
++            if (router._tx === tx) {
++                router.emit({
++                    type: 'onResolved',
++                    ...changeInfo
++                });
++            }
++            if (rendered && router._tx === tx) {
++                router.emit({
++                    type: 'onRendered',
++                    ...changeInfo
++                });
++            }
++        });
++        if (router._tx !== tx) {
++            return;
++        }
++        if (tx[9]) tx[9].status = 'accepted';
++        if (tx[7] ?? tx[8]) router.history.completeNavigation?.(tx[7] ?? tx[8], 'accepted');
++        router._commitPromise?.resolve();
++        router._commitPromise = undefined;
++    });
+ }
++
+ async function loadClientRoute(router, opts) {
+-	let rematerialize = false;
+-	if (process.env.NODE_ENV !== "production") rematerialize = !!router._refreshNextLoad || !!router._tx?.[6];
+-	const previousOwner = router._tx;
+-	const resolvedLocation = router.stores.resolvedLocation.get();
+-	const previousLocation = resolvedLocation ?? router.stores.location.get();
+-	const location = router.latestLocation;
+-	const pendingLocation = router._pendingLocation;
+-	const redirects = pendingLocation?.href === location.href ? pendingLocation._redirects ?? 0 : 0;
+-	const handoff = router._handoff;
+-	const hydrationController = rematerialize ? void 0 : handoff?.[0]();
+-	const preflight = new AbortController();
+-	const previousPreflight = router._preflight;
+-	router._preflight = preflight;
+-	if (!rematerialize && !hydrationController) handoff?.[1]();
+-	previousPreflight?.abort();
+-	if (!preflight.signal.aborted) {
+-		const changeInfo = require_router.getLocationChangeInfo(location, resolvedLocation);
+-		router.emit({
+-			type: "onBeforeNavigate",
+-			...changeInfo
+-		});
+-		if (!preflight.signal.aborted) router.emit({
+-			type: "onBeforeLoad",
+-			...changeInfo
+-		});
+-	}
+-	if (preflight.signal.aborted) {
+-		await awaitCurrent(router, previousOwner);
+-		return;
+-	}
+-	const sameHref = previousLocation.href === location.href;
+-	let controller = preflight;
+-	const matches = process.env.NODE_ENV !== "production" && rematerialize ? router.matchRoutes(location, {
+-		_controller: preflight,
+-		_rematerialize: true
+-	}) : router.matchRoutes(location, { _controller: preflight });
+-	acquireMatchResources(matches);
+-	const resolvedPrefix = hydrationController ? handoff[1](matches) : void 0;
+-	if (resolvedPrefix) controller = hydrationController;
+-	else hydrationController?.abort();
+-	if (preflight.signal.aborted) {
+-		transferMatchResources(router, matches);
+-		await awaitCurrent(router, previousOwner);
+-		return;
+-	}
+-	router._preflight = void 0;
+-	let settle;
+-	const run = () => runClientTransaction(router, tx, sameHref, () => offerPending(router, tx), opts?.sync, resolvedPrefix);
+-	const done = opts?.sync ? new Promise((resolve) => settle = resolve) : Promise.resolve().then(run);
+-	const tx = [
+-		controller,
+-		redirects,
+-		location,
+-		matches,
+-		Date.now(),
+-		done.then(() => awaitCurrent(router, tx))
+-	];
+-	if (process.env.NODE_ENV !== "production" && rematerialize) {
+-		tx[6] = [handoff];
+-		router._refreshNextLoad = void 0;
+-	}
+-	router._tx = tx;
+-	if (previousOwner) {
+-		for (const match of router.stores.matches.get()) {
+-			if (router._tx !== tx) break;
+-			if (match.isFetching) setFetching(router, match, false);
+-		}
+-		previousOwner[0].abort();
+-		transferMatchResources(router, previousOwner[3], tx[3], true);
+-	}
+-	if (router._tx !== tx) {
+-		transferMatchResources(router, tx[3]);
+-		tx[3] = [];
+-		settle?.();
+-		await awaitCurrent(router, tx);
+-		return;
+-	}
+-	router.batch(() => {
+-		router.stores.status.set("pending");
+-		router.stores.location.set(location);
+-	});
+-	if (resolvedPrefix || !router._committed.length && matches[0]?.status !== "success" && !matches.some((match) => match._notFound)) offerPending(router, tx);
+-	settle?.(run());
+-	await tx[5];
++    const outcome = {
++        status: 'superseded',
++        navigation: opts?.navigation
++    };
++    const previous = router._tx;
++    const candidate = previous?.[7] ?? previous?.[8];
++    const protection = !opts?.navigation && !candidate?.result && previous?.[2].state.__TSR_key === router.latestLocation.state.__TSR_key ? candidate : undefined;
++    const lifetime = opts?.navigation ?? protection;
++    let owned;
++    try {
++        let rematerialize = false;
++        if (process.env.NODE_ENV !== 'production') {
++            rematerialize = !!router._refreshNextLoad || !!router._tx?.[6];
++        }
++        const previousOwner = router._tx;
++        const resolvedLocation = router.stores.resolvedLocation.get();
++        const previousLocation = resolvedLocation ?? router.stores.location.get();
++        const location = router.latestLocation;
++        const pendingLocation = router._pendingLocation;
++        const redirects = pendingLocation?.href === location.href ? pendingLocation._redirects ?? 0 : 0;
++        const handoff = router._handoff;
++        const hydrationController = rematerialize ? undefined : handoff?.[0]();
++        const preflight = new AbortController();
++        if (router.history.signal?.aborted) preflight.abort();
++        if (lifetime?.signal.aborted && lifetime.result !== 'accepted') preflight.abort();
++        const previousPreflight = router._preflight;
++        router._preflight = preflight;
++        if (!rematerialize && !hydrationController) {
++            handoff?.[1]();
++        }
++        previousPreflight?.abort();
++        if (!preflight.signal.aborted) {
++            const changeInfo = require_router.getLocationChangeInfo(location, resolvedLocation);
++            router.emit({
++                type: 'onBeforeNavigate',
++                ...changeInfo
++            });
++            if (!preflight.signal.aborted) {
++                router.emit({
++                    type: 'onBeforeLoad',
++                    ...changeInfo
++                });
++            }
++        }
++        if (router.history.signal?.aborted || lifetime?.signal.aborted && lifetime.result !== 'accepted') preflight.abort();
++        if (preflight.signal.aborted) {
++            if (opts?.navigation) router.history.completeNavigation?.(opts.navigation, "superseded");
++            await awaitCurrent(router, previousOwner);
++            return outcome;
++        }
++        const sameHref = previousLocation.href === location.href;
++        let controller = preflight;
++        const matches = process.env.NODE_ENV !== 'production' && rematerialize ? router.matchRoutes(location, {
++            _controller: preflight,
++            _rematerialize: true
++        }) : router.matchRoutes(location, {
++            _controller: preflight
++        });
++        acquireMatchResources(matches);
++        const resolvedPrefix = hydrationController ? handoff[1](matches) : undefined;
++        if (resolvedPrefix) {
++            controller = hydrationController;
++        } else {
++            hydrationController?.abort();
++        }
++        if (router.history.signal?.aborted || lifetime?.signal.aborted && lifetime.result !== 'accepted') preflight.abort();
++        if (preflight.signal.aborted) {
++            if (opts?.navigation) router.history.completeNavigation?.(opts.navigation, "superseded");
++            transferMatchResources(router, matches);
++            await awaitCurrent(router, previousOwner);
++            return outcome;
++        }
++        router._preflight = undefined;
++        let settle;
++        const run = ()=>runClientTransaction(router, tx, sameHref, ()=>offerPending(router, tx), opts?.sync, resolvedPrefix);
++        const done = opts?.sync ? new Promise((resolve)=>settle = resolve) : Promise.resolve().then(run);
++        const tx = [
++            controller,
++            redirects,
++            location,
++            matches,
++            Date.now(),
++            done.then(()=>awaitCurrent(router, tx))
++        ];
++        if (process.env.NODE_ENV !== 'production' && rematerialize) {
++            tx[6] = [
++                handoff
++            ];
++            router._refreshNextLoad = undefined;
++        }
++        tx[7] = opts?.navigation;
++        tx[8] = protection;
++        tx[9] = outcome;
++        tx[11] = opts?.onNavigationStart;
++        owned = tx;
++        previousOwner?.[10]?.();
++        router._tx = tx;
++        const cancelHistory = ()=>{
++            if (router._tx === tx) {
++                router._tx = undefined;
++                tx[0].abort();
++                finishPending(router, tx);
++                router.stores.status.set('idle');
++            }
++        };
++        router.history.signal?.addEventListener('abort', cancelHistory, {
++            once: true
++        });
++        tx[10] = ()=>router.history.signal?.removeEventListener('abort', cancelHistory);
++        if (router.history.signal?.aborted) cancelHistory();
++        if (lifetime) {
++            const cancel = ()=>{
++                if (lifetime.result !== 'accepted' && router._tx === tx) {
++                    router._tx = undefined;
++                    tx[0].abort();
++                    finishPending(router, tx);
++                    router.stores.status.set('idle');
++                }
++            };
++            lifetime.signal.addEventListener('abort', cancel, {
++                once: true
++            });
++            tx[10] = ()=>{
++                router.history.signal?.removeEventListener('abort', cancelHistory);
++                lifetime.signal.removeEventListener('abort', cancel);
++            };
++            if (lifetime.signal.aborted) cancel();
++        }
++        if (previousOwner) {
++            const previousNavigation = previousOwner[7] ?? previousOwner[8];
++            if (previousNavigation && previousNavigation !== protection && opts?.navigation !== previousNavigation && opts?.navigation?.parent !== previousNavigation) {
++                router.history.completeNavigation?.(previousNavigation, 'superseded');
++            }
++            for (const match of router.stores.matches.get()){
++                if (router._tx !== tx) {
++                    break;
++                }
++                if (match.isFetching) {
++                    setFetching(router, match, false);
++                }
++            }
++            previousOwner[0].abort();
++            transferMatchResources(router, previousOwner[3], tx[3], true);
++        }
++        if (router._tx !== tx) {
++            transferMatchResources(router, tx[3]);
++            tx[3] = [];
++            settle?.();
++            await awaitCurrent(router, tx);
++            return outcome;
++        }
++        router.batch(()=>{
++            router.stores.status.set('pending');
++            router.stores.location.set(location);
++        });
++        if (resolvedPrefix || !router._committed.length && matches[0]?.status !== 'success' && !matches.some((match)=>match._notFound)) {
++            offerPending(router, tx);
++        }
++        settle?.(run());
++        await tx[5];
++        return outcome;
++    } catch (error) {
++        if (owned && router._tx === owned) {
++            router._tx = undefined;
++            owned[10]?.();
++            owned[0].abort();
++            finishPending(router, owned);
++            transferMatchResources(router, owned[3]);
++            owned[3] = [];
++            router.stores.status.set('idle');
++        }
++        if (lifetime) router.history.completeNavigation?.(lifetime, 'failed', error);
++        outcome.status = 'failed';
++        outcome.error = error;
++        return outcome;
++    }
+ }
++
+ async function refreshClientRoute(router) {
+ 	const pending = router._tx;
+ 	if (pending && !pending[6] && router.stores.status.get() === "pending") {
+@@ -1322,5 +1461,3 @@ exports.projectLane = projectLane;
+ exports.refreshClientRoute = refreshClientRoute;
+ exports.replaceRouteChunk = replaceRouteChunk;
+ exports.waitFor = waitFor;
+-
+-//# sourceMappingURL=load-client.cjs.map
+\ No newline at end of file
+diff --git a/dist/cjs/load-client.d.cts b/dist/cjs/load-client.d.cts
+index 98a92734..22b2d9d5 100644
+--- a/dist/cjs/load-client.d.cts
++++ b/dist/cjs/load-client.d.cts
+@@ -1,3 +1,4 @@
++import type { HistoryNavigationOutcome, HistoryNavigation } from '@tanstack/history';
+ import { GLOBAL_SEROVAL, GLOBAL_TSR } from './ssr/constants.cjs';
+ import { TsrSsrGlobal } from './ssr/types.cjs';
+ import { ParsedLocation } from './location.cjs';
+@@ -90,7 +91,12 @@ export type LoadTransaction = [
+      * until this publication is acknowledged. The optional hydration handoff is
+      * retired when the refresh publishes.
+      */
+-    refresh?: [handoff: NonNullable<AnyRouter['_handoff']> | undefined]
++    refresh?: [handoff: NonNullable<AnyRouter['_handoff']> | undefined],
++    navigation?: HistoryNavigation,
++    protection?: HistoryNavigation,
++    outcome?: HistoryNavigationOutcome,
++    cleanup?: () => void,
++    onNavigationStart?: (navigation: HistoryNavigation) => void
+ ];
+ export type PendingSession = [
+     generation: LoadTransaction,
+@@ -119,7 +125,9 @@ export declare function projectLane(router: AnyRouter, lane: ReducedLane, signal
+ export declare function commitMatches(router: CoordinatorRouter, tx: LoadTransaction, matches: LaneMatches<'projected'>, resolvedPrefix?: number): void;
+ export declare function loadClientRoute(router: CoordinatorRouter, opts?: {
+     sync?: boolean;
+-}): Promise<void>;
++    navigation?: HistoryNavigation;
++    onNavigationStart?: (navigation: HistoryNavigation) => void;
++}): Promise<HistoryNavigationOutcome>;
+ export declare function refreshClientRoute(router: CoordinatorRouter): Promise<void>;
+ export declare function preloadClientRoute<TRouteTree extends AnyRoute, TTrailingSlashOption extends TrailingSlashOption, TDefaultStructuralSharingOption extends boolean, TRouterHistory extends RouterHistory, TDehydrated extends Record<string, any> = Record<string, any>, TFrom extends RoutePaths<TRouteTree> | string = string, TTo extends string | undefined = undefined, TMaskFrom extends RoutePaths<TRouteTree> | string = TFrom, TMaskTo extends string = ''>(router: RouterCore<TRouteTree, TTrailingSlashOption, TDefaultStructuralSharingOption, TRouterHistory, TDehydrated>, opts: NavigateOptions<RouterCore<TRouteTree, TTrailingSlashOption, TDefaultStructuralSharingOption, TRouterHistory, TDehydrated>, TFrom, TTo, TMaskFrom, TMaskTo>): Promise<Array<AnyRouteMatch> | undefined>;
+ declare global {
+diff --git a/dist/cjs/router.cjs b/dist/cjs/router.cjs
+index 68b6ef85..f157dcea 100644
+--- a/dist/cjs/router.cjs
++++ b/dist/cjs/router.cjs
+@@ -384,81 +384,135 @@ var RouterCore = class {
+ 			if (!(_tanstack_router_core_isServer.isServer ?? this.isServer) && !usedCurrent && opts._fromLocation) this.staticLocations.set(opts, next);
+ 			return next;
+ 		};
+-		this.commitLocation = async ({ viewTransition, ignoreBlocker, ...next }) => {
+-			if (_tanstack_router_core_isServer.isServer ?? this.isServer) return;
+-			const nextLocation = next.maskedLocation ?? next;
+-			if (nextLocation.external && !(_tanstack_router_core_isServer.isServer ?? this.isServer)) return documentNavigation(this, nextLocation.publicHref, {
+-				replace: next.replace,
+-				ignoreBlocker
+-			});
+-			let historyAction;
+-			const isSameLocation = require_path.trimPathRight(this.latestLocation.href) === require_path.trimPathRight(next.href) && require_utils.deepEqual(_getUserHistoryState(next.state), _getUserHistoryState(this.latestLocation.state));
+-			const previousCommitPromise = this._commitPromise;
+-			let resolve;
+-			const commitPromise = new Promise((done) => {
+-				resolve = done;
+-			});
+-			commitPromise.resolve = () => {
+-				resolve();
+-				previousCommitPromise?.resolve();
+-			};
+-			this._commitPromise = commitPromise;
+-			if (isSameLocation) this.load();
+-			else {
+-				let { maskedLocation, hashScrollIntoView, ...nextHistory } = next;
+-				if (maskedLocation) {
+-					nextHistory = {
+-						...maskedLocation,
+-						state: {
+-							...maskedLocation.state,
+-							__tempKey: void 0,
+-							__tempLocation: {
+-								...nextHistory,
+-								search: nextHistory.searchStr,
+-								state: {
+-									...nextHistory.state,
+-									__tempKey: void 0,
+-									__tempLocation: void 0,
+-									__TSR_key: void 0,
+-									key: void 0
+-								}
+-							}
+-						}
+-					};
+-					if (nextHistory.unmaskOnReload ?? this.options.unmaskOnReload ?? false) nextHistory.state.__tempKey = this.tempLocationKey;
+-				}
+-				nextHistory.state = {
+-					...nextHistory.state,
+-					__hashScrollIntoViewOptions: hashScrollIntoView ?? this.options.defaultHashScrollIntoView ?? true
+-				};
+-				this.shouldViewTransition = viewTransition;
+-				historyAction = next.replace ? "REPLACE" : "PUSH";
+-				this.history[historyAction === "REPLACE" ? "replace" : "push"](nextHistory.publicHref, nextHistory.state, { ignoreBlocker });
+-				if (!this.history.subscribers.size) this.load({ action: { type: historyAction } });
+-			}
+-			this._scroll.n = next.resetScroll ?? true;
+-			return this._commitPromise;
+-		};
+-		this.buildAndCommitLocation = ({ replace, resetScroll, hashScrollIntoView, viewTransition, ignoreBlocker, ...rest } = {}) => {
+-			if (_tanstack_router_core_isServer.isServer ?? this.isServer) return Promise.resolve();
+-			const location = this.buildLocation({
+-				...rest,
+-				_includeValidateSearch: true
+-			});
+-			this._pendingLocation = location;
+-			const commitPromise = this.commitLocation({
+-				...location,
+-				viewTransition,
+-				replace,
+-				resetScroll,
+-				hashScrollIntoView,
+-				ignoreBlocker
+-			});
+-			queueMicrotask(() => {
+-				if (this._pendingLocation === location) this._pendingLocation = void 0;
+-			});
+-			return commitPromise;
+-		};
++		this.commitLocation = async ({ viewTransition, ignoreBlocker, navigation, onNavigationResult, onNavigationStart, ...next })=>{
++        if (_tanstack_router_core_isServer.isServer ?? this.isServer) {
++            return;
++        }
++        const nextLocation = next.maskedLocation ?? next;
++        if (nextLocation.external && !(_tanstack_router_core_isServer.isServer ?? this.isServer)) {
++            return documentNavigation(this, nextLocation.publicHref, {
++                replace: next.replace,
++                ignoreBlocker
++            });
++        }
++        let historyAction;
++        const isSameLocation = require_path.trimPathRight(this.latestLocation.href) === require_path.trimPathRight(next.href) && require_utils.deepEqual(_getUserHistoryState(next.state), _getUserHistoryState(this.latestLocation.state));
++        const receiptHistory = this.history.completeNavigation;
++        const previousCommitPromise = receiptHistory ? undefined : this._commitPromise;
++        let resolve;
++        const commitPromise = new Promise((done)=>{
++            resolve = done;
++        });
++        commitPromise.resolve = ()=>{
++            resolve();
++            previousCommitPromise?.resolve();
++        };
++        if (!receiptHistory) this._commitPromise = commitPromise;
++        if (isSameLocation) {
++            if (receiptHistory) return this.load({
++                navigation,
++                onNavigationResult,
++                onNavigationStart
++            });
++            this.load();
++        } else {
++            let { maskedLocation, hashScrollIntoView, ...nextHistory } = next;
++            if (maskedLocation) {
++                nextHistory = {
++                    ...maskedLocation,
++                    state: {
++                        ...maskedLocation.state,
++                        __tempKey: undefined,
++                        __tempLocation: {
++                            ...nextHistory,
++                            search: nextHistory.searchStr,
++                            state: {
++                                ...nextHistory.state,
++                                __tempKey: undefined,
++                                __tempLocation: undefined,
++                                __TSR_key: undefined,
++                                key: undefined
++                            }
++                        }
++                    }
++                };
++                if (nextHistory.unmaskOnReload ?? this.options.unmaskOnReload ?? false) {
++                    nextHistory.state.__tempKey = this.tempLocationKey;
++                }
++            }
++            nextHistory.state = {
++                ...nextHistory.state,
++                __hashScrollIntoViewOptions: hashScrollIntoView ?? this.options.defaultHashScrollIntoView ?? true
++            };
++            this.shouldViewTransition = viewTransition;
++            historyAction = next.replace ? 'REPLACE' : 'PUSH';
++            const receipt = this.history[historyAction === 'REPLACE' ? 'replace' : 'push'](nextHistory.publicHref, nextHistory.state, {
++                ignoreBlocker,
++                navigation,
++                onNavigationStart
++            });
++            if (receipt) {
++                this._scroll.n = next.resetScroll ?? true;
++                if (await receipt.committed) {
++                    if (!this.history.subscribers.has(this.load)) {
++                        try {
++                            await this.load({
++                                action: {
++                                    type: historyAction
++                                },
++                                navigation: receipt
++                            });
++                        } catch (error) {
++                            this.history.completeNavigation?.(receipt, 'failed', error);
++                        }
++                    }
++                }
++                const status = await receipt.finished;
++                onNavigationResult?.({
++                    status,
++                    navigation: receipt,
++                    error: receipt.error
++                });
++                if (status === 'failed') throw receipt.error;
++                return;
++            }
++            if (!this.history.subscribers.size) {
++                this.load({
++                    action: {
++                        type: historyAction
++                    }
++                });
++            }
++        }
++        this._scroll.n = next.resetScroll ?? true;
++        return this._commitPromise;
++    };
++		this.buildAndCommitLocation = ({ replace, resetScroll, hashScrollIntoView, viewTransition, ignoreBlocker, onNavigationResult, onNavigationStart, ...rest } = {})=>{
++        if (_tanstack_router_core_isServer.isServer ?? this.isServer) {
++            return Promise.resolve();
++        }
++        const location = this.buildLocation({
++            ...rest,
++            _includeValidateSearch: true
++        });
++        this._pendingLocation = location;
++        const commitPromise = this.commitLocation({
++            ...location,
++            viewTransition,
++            replace,
++            resetScroll,
++            hashScrollIntoView,
++            ignoreBlocker,
++            onNavigationResult,
++            onNavigationStart
++        });
++        queueMicrotask(()=>{
++            if (this._pendingLocation === location) {
++                this._pendingLocation = undefined;
++            }
++        });
++        return commitPromise;
++    };
+ 		this.navigate = async ({ to, reloadDocument, href, publicHref, ...rest }) => {
+ 			if (_tanstack_router_core_isServer.isServer ?? this.isServer) return;
+ 			const hrefScheme = href ? require_utils.getUrlScheme(href) : void 0;
+@@ -482,12 +536,27 @@ var RouterCore = class {
+ 				_isNavigate: true
+ 			});
+ 		};
+-		this.load = async (opts) => {
+-			if (_tanstack_router_core_isServer.isServer ?? this.isServer) return (0, _tanstack_router_core_isServer.loadServerRoute)(this, opts);
+-			this.updateLatestLocation();
+-			if (opts?.action) this._scroll.h = opts.action.type === "PUSH" || opts.action.type === "REPLACE";
+-			await require_load_client.loadClientRoute(this, opts);
+-		};
++		this.load = async (opts)=>{
++        if (_tanstack_router_core_isServer.isServer ?? this.isServer) return _tanstack_router_core_isServer.loadServerRoute(this, opts);
++        let outcome;
++        try {
++            this.updateLatestLocation();
++            if (opts?.action) this._scroll.h = opts.action.type === 'PUSH' || opts.action.type === 'REPLACE';
++            outcome = await require_load_client.loadClientRoute(this, opts);
++        } catch (error) {
++            const navigation = opts?.navigation ?? this._tx?.[7] ?? this._tx?.[8];
++            if (navigation) this.history.completeNavigation?.(navigation, 'failed', error);
++            outcome = {
++                status: 'failed',
++                error,
++                navigation
++            };
++        }
++        opts?.onNavigationResult?.({
++            ...outcome
++        });
++        if (outcome.status === 'failed') throw outcome.error;
++    };
+ 		this.startViewTransition = (fn) => {
+ 			const shouldViewTransition = this.shouldViewTransition ?? this.options.defaultViewTransition;
+ 			this.shouldViewTransition = void 0;
+@@ -986,5 +1055,3 @@ exports.lazyFn = lazyFn;
+ exports.lifecycleEnd = lifecycleEnd;
+ exports.runRouteLifecycle = runRouteLifecycle;
+ exports.trailingSlashOptions = trailingSlashOptions;
+-
+-//# sourceMappingURL=router.cjs.map
+\ No newline at end of file
+diff --git a/dist/cjs/router.d.cts b/dist/cjs/router.d.cts
+index 68c7e5fc..d12f3cb4 100644
+--- a/dist/cjs/router.d.cts
++++ b/dist/cjs/router.d.cts
+@@ -1,3 +1,4 @@
++import type { HistoryNavigationOutcome, HistoryNavigation } from '@tanstack/history';
+ import { SieveCache } from './sieve-cache.cjs';
+ import { ProcessRouteTreeResult, ProcessedTree } from './new-process-route-tree.cjs';
+ import { SearchParser, SearchSerializer } from './searchParams.cjs';
+@@ -483,6 +484,9 @@ export type GetMatchRoutesFn = (pathname: string) => [
+ ];
+ export type EmitFn = (routerEvent: RouterEvent) => void;
+ export type LoadFn = (opts?: {
++    onNavigationResult?: (result: HistoryNavigationOutcome) => void;
++    onNavigationStart?: (navigation: HistoryNavigation) => void;
++    navigation?: HistoryNavigation;
+     sync?: boolean;
+     action?: {
+         type: HistoryAction;
+diff --git a/dist/esm/RouterProvider.d.ts b/dist/esm/RouterProvider.d.ts
+index 4dc7ce37..d54535d2 100644
+--- a/dist/esm/RouterProvider.d.ts
++++ b/dist/esm/RouterProvider.d.ts
+@@ -1,3 +1,4 @@
++import type { HistoryNavigationOutcome, HistoryNavigation } from '@tanstack/history';
+ import { NavigateOptions, ToOptions } from './link.js';
+ import { ParsedLocation } from './location.js';
+ import { RoutePaths } from './routeInfo.js';
+@@ -9,6 +10,9 @@ export interface MatchLocation {
+     from?: string;
+ }
+ export interface CommitLocationOptions {
++    onNavigationResult?: (result: HistoryNavigationOutcome) => void;
++    onNavigationStart?: (navigation: HistoryNavigation) => void;
++    navigation?: HistoryNavigation;
+     replace?: boolean;
+     resetScroll?: boolean;
+     hashScrollIntoView?: boolean | ScrollIntoViewOptions;
+diff --git a/dist/esm/link.d.ts b/dist/esm/link.d.ts
+index 11a930bd..93f310a0 100644
+--- a/dist/esm/link.d.ts
++++ b/dist/esm/link.d.ts
+@@ -1,3 +1,4 @@
++import type { HistoryNavigationOutcome, HistoryNavigation } from '@tanstack/history';
+ import { HistoryState, ParsedHistoryState } from '@tanstack/history';
+ import { AllParams, CatchAllPaths, CurrentPath, FullSearchSchema, FullSearchSchemaInput, ParentPath, RouteByPath, RouteByToPath, RoutePaths, RouteToPath, ToPath } from './routeInfo.js';
+ import { AnyRouter, RegisteredRouter, ViewTransitionOptions } from './router.js';
+@@ -38,6 +39,8 @@ export type NavigateOptions<TRouter extends AnyRouter = RegisteredRouter, TFrom
+  * @link [API Docs](https://tanstack.com/router/latest/docs/framework/react/api/router/NavigateOptionsType)
+  */
+ export interface NavigateOptionProps {
++    onNavigationResult?: (result: HistoryNavigationOutcome) => void;
++    onNavigationStart?: (navigation: HistoryNavigation) => void;
+     /**
+      * If set to `true`, the router will scroll the element with an id matching the hash into view with default `ScrollIntoViewOptions`.
+      * If set to `false`, the router will not scroll the element with an id matching the hash into view.
+diff --git a/dist/esm/load-client.d.ts b/dist/esm/load-client.d.ts
+index 8a032d93..3333660b 100644
+--- a/dist/esm/load-client.d.ts
++++ b/dist/esm/load-client.d.ts
+@@ -1,3 +1,4 @@
++import type { HistoryNavigationOutcome, HistoryNavigation } from '@tanstack/history';
+ import { GLOBAL_SEROVAL, GLOBAL_TSR } from './ssr/constants.js';
+ import { TsrSsrGlobal } from './ssr/types.js';
+ import { ParsedLocation } from './location.js';
+@@ -90,7 +91,12 @@ export type LoadTransaction = [
+      * until this publication is acknowledged. The optional hydration handoff is
+      * retired when the refresh publishes.
+      */
+-    refresh?: [handoff: NonNullable<AnyRouter['_handoff']> | undefined]
++    refresh?: [handoff: NonNullable<AnyRouter['_handoff']> | undefined],
++    navigation?: HistoryNavigation,
++    protection?: HistoryNavigation,
++    outcome?: HistoryNavigationOutcome,
++    cleanup?: () => void,
++    onNavigationStart?: (navigation: HistoryNavigation) => void
+ ];
+ export type PendingSession = [
+     generation: LoadTransaction,
+@@ -119,7 +125,9 @@ export declare function projectLane(router: AnyRouter, lane: ReducedLane, signal
+ export declare function commitMatches(router: CoordinatorRouter, tx: LoadTransaction, matches: LaneMatches<'projected'>, resolvedPrefix?: number): void;
+ export declare function loadClientRoute(router: CoordinatorRouter, opts?: {
+     sync?: boolean;
+-}): Promise<void>;
++    navigation?: HistoryNavigation;
++    onNavigationStart?: (navigation: HistoryNavigation) => void;
++}): Promise<HistoryNavigationOutcome>;
+ export declare function refreshClientRoute(router: CoordinatorRouter): Promise<void>;
+ export declare function preloadClientRoute<TRouteTree extends AnyRoute, TTrailingSlashOption extends TrailingSlashOption, TDefaultStructuralSharingOption extends boolean, TRouterHistory extends RouterHistory, TDehydrated extends Record<string, any> = Record<string, any>, TFrom extends RoutePaths<TRouteTree> | string = string, TTo extends string | undefined = undefined, TMaskFrom extends RoutePaths<TRouteTree> | string = TFrom, TMaskTo extends string = ''>(router: RouterCore<TRouteTree, TTrailingSlashOption, TDefaultStructuralSharingOption, TRouterHistory, TDehydrated>, opts: NavigateOptions<RouterCore<TRouteTree, TTrailingSlashOption, TDefaultStructuralSharingOption, TRouterHistory, TDehydrated>, TFrom, TTo, TMaskFrom, TMaskTo>): Promise<Array<AnyRouteMatch> | undefined>;
+ declare global {
+diff --git a/dist/esm/load-client.js b/dist/esm/load-client.js
+index ba5ba0dd..83c7a854 100644
+--- a/dist/esm/load-client.js
++++ b/dist/esm/load-client.js
+@@ -831,34 +831,53 @@ async function awaitCurrent(router, owner) {
+ 	}
+ }
+ function followRedirect(router, tx, outcome) {
+-	const options = outcome[1].options;
+-	const location = outcome[2];
+-	if (!location) return router.navigate({
+-		...options,
+-		replace: true,
+-		ignoreBlocker: true
+-	});
+-	if (options.reloadDocument) return router.navigate({
+-		href: (location.maskedLocation ?? location).publicHref,
+-		reloadDocument: true,
+-		replace: true,
+-		ignoreBlocker: true
+-	});
+-	location._redirects = tx[1] + 1;
+-	router._pendingLocation = location;
+-	const committed = router.commitLocation({
+-		...location,
+-		viewTransition: options.viewTransition,
+-		replace: true,
+-		resetScroll: options.resetScroll,
+-		hashScrollIntoView: options.hashScrollIntoView,
+-		ignoreBlocker: true
+-	});
+-	queueMicrotask(() => {
+-		if (router._pendingLocation === location) router._pendingLocation = void 0;
+-	});
+-	return committed;
++    const options = outcome[1].options;
++    const location = outcome[2];
++    if (!location) {
++        return router.navigate({
++            ...options,
++            replace: true,
++            ignoreBlocker: true
++        });
++    }
++    if (options.reloadDocument) {
++        return router.navigate({
++            href: (location.maskedLocation ?? location).publicHref,
++            reloadDocument: true,
++            replace: true,
++            ignoreBlocker: true
++        });
++    }
++    ;
++    location._redirects = tx[1] + 1;
++    router._pendingLocation = location;
++    const committed = router.commitLocation({
++        ...location,
++        viewTransition: options.viewTransition,
++        replace: true,
++        resetScroll: options.resetScroll,
++        hashScrollIntoView: options.hashScrollIntoView,
++        ignoreBlocker: true,
++        navigation: tx[7],
++        onNavigationResult: (result)=>{
++            Object.assign(tx[9], result);
++        },
++        onNavigationStart: tx[11]
++    });
++    queueMicrotask(()=>{
++        if (router._pendingLocation === location) {
++            router._pendingLocation = undefined;
++        }
++    });
++    return committed.then(()=>{
++        if (router._tx === tx && router.history.completeNavigation) {
++            finishPending(router, tx);
++            router.stores.status.set('idle');
++            if (tx[8]) router.history.completeNavigation?.(tx[8], 'superseded');
++        }
++    });
+ }
++
+ async function runBackground(router, tx, base, tasks, settlement) {
+ 	const next = base.map((match) => ({ ...match }));
+ 	acquireMatchResources(next);
+@@ -895,172 +914,292 @@ async function runBackground(router, tx, base, tasks, settlement) {
+ 	transferMatchResources(router, base, next);
+ }
+ async function runClientTransaction(router, tx, forceStaleReload, onReady, sync, resolvedPrefix) {
+-	const result = await executeClientLane(router, tx[2], tx[3], [
+-		tx[0],
+-		tx[1],
+-		router._committed,
+-		void 0,
+-		sync,
+-		forceStaleReload,
+-		resolvedPrefix,
+-		onReady
+-	]);
+-	if (isControl(result)) {
+-		const follow = result[0] === REDIRECTED && router._tx === tx;
+-		if (!follow || result[1].options.reloadDocument) finishPending(router, tx);
+-		transferMatchResources(router, tx[3]);
+-		tx[3] = [];
+-		if (!follow) return;
+-		if (router._tx !== tx) {
+-			finishPending(router, tx);
+-			return;
+-		}
+-		if (process.env.NODE_ENV !== "production" && tx[6]) router._refreshNextLoad = true;
+-		await followRedirect(router, tx, result);
+-		return;
+-	}
+-	const matches = result[1];
+-	if (router._tx === tx) await awaitPendingMinimum(router, tx);
+-	if (router._tx !== tx) {
+-		finishPending(router, tx);
+-		transferMatchResources(router, matches);
+-		discardBackground(router, result);
+-		return;
+-	}
+-	const toLocation = tx[2];
+-	const changeInfo = getLocationChangeInfo(toLocation, router.stores.resolvedLocation.get());
+-	const background = result[2];
+-	await router.startViewTransition(async () => {
+-		if (router._tx === tx) await awaitPendingMinimum(router, tx);
+-		if (router._tx !== tx) {
+-			finishPending(router, tx);
+-			transferMatchResources(router, matches);
+-			discardBackground(router, result);
+-			return;
+-		}
+-		const commit = () => {
+-			finishPending(router, tx);
+-			commitMatches(router, tx, matches, resolvedPrefix);
+-			if (router._tx !== tx) return;
+-			router.emit({
+-				type: "onLoad",
+-				...changeInfo
+-			});
+-			if (router._tx === tx) router.emit({
+-				type: "onBeforeRouteMount",
+-				...changeInfo
+-			});
+-		};
+-		const rendered = await router.startTransition(commit, matches);
+-		if (process.env.NODE_ENV !== "production" && tx[6]) tx[6] = void 0;
+-		if (router._tx !== tx) {
+-			discardBackground(router, result);
+-			return;
+-		}
+-		if (background?.length) runBackground(router, tx, matches, background, result[3]).catch(console.error);
+-		router.batch(() => {
+-			router.stores.resolvedLocation.set(toLocation);
+-			router.stores.status.set("idle");
+-			if (router._tx === tx) router.emit({
+-				type: "onResolved",
+-				...changeInfo
+-			});
+-			if (rendered && router._tx === tx) router.emit({
+-				type: "onRendered",
+-				...changeInfo
+-			});
+-		});
+-		if (router._tx !== tx) return;
+-		router._commitPromise?.resolve();
+-		router._commitPromise = void 0;
+-	});
++    const result = await executeClientLane(router, tx[2], tx[3], [
++        tx[0],
++        tx[1],
++        router._committed,
++        undefined,
++        sync,
++        forceStaleReload,
++        resolvedPrefix,
++        onReady
++    ]);
++    if (isControl(result)) {
++        const follow = result[0] === REDIRECTED && router._tx === tx;
++        if (!follow || result[1].options.reloadDocument) {
++            finishPending(router, tx);
++        }
++        transferMatchResources(router, tx[3]);
++        tx[3] = [];
++        if (!follow) {
++            return;
++        }
++        if (router._tx !== tx) {
++            finishPending(router, tx);
++            return;
++        }
++        if (process.env.NODE_ENV !== 'production' && tx[6]) {
++            router._refreshNextLoad = true;
++        }
++        await followRedirect(router, tx, result);
++        return;
++    }
++    const matches = result[1];
++    if (router._tx === tx) {
++        await awaitPendingMinimum(router, tx);
++    }
++    if (router._tx !== tx) {
++        finishPending(router, tx);
++        transferMatchResources(router, matches);
++        discardBackground(router, result);
++        return;
++    }
++    const toLocation = tx[2];
++    const changeInfo = getLocationChangeInfo(toLocation, router.stores.resolvedLocation.get());
++    const background = result[2];
++    await router.startViewTransition(async ()=>{
++        if (router._tx === tx) {
++            await awaitPendingMinimum(router, tx);
++        }
++        if (router._tx !== tx) {
++            finishPending(router, tx);
++            transferMatchResources(router, matches);
++            discardBackground(router, result);
++            return;
++        }
++        const commit = ()=>{
++            finishPending(router, tx);
++            commitMatches(router, tx, matches, resolvedPrefix);
++            if (router._tx !== tx) {
++                return;
++            }
++            router.emit({
++                type: 'onLoad',
++                ...changeInfo
++            });
++            if (router._tx === tx) {
++                router.emit({
++                    type: 'onBeforeRouteMount',
++                    ...changeInfo
++                });
++            }
++        };
++        const rendered = await router.startTransition(commit, matches);
++        if (process.env.NODE_ENV !== 'production' && tx[6]) {
++            tx[6] = undefined;
++        }
++        if (router._tx !== tx) {
++            discardBackground(router, result);
++            return;
++        }
++        if (background?.length) {
++            runBackground(router, tx, matches, background, result[3]).catch(console.error);
++        }
++        router.batch(()=>{
++            router.stores.resolvedLocation.set(toLocation);
++            router.stores.status.set('idle');
++            if (router._tx === tx) {
++                router.emit({
++                    type: 'onResolved',
++                    ...changeInfo
++                });
++            }
++            if (rendered && router._tx === tx) {
++                router.emit({
++                    type: 'onRendered',
++                    ...changeInfo
++                });
++            }
++        });
++        if (router._tx !== tx) {
++            return;
++        }
++        if (tx[9]) tx[9].status = 'accepted';
++        if (tx[7] ?? tx[8]) router.history.completeNavigation?.(tx[7] ?? tx[8], 'accepted');
++        router._commitPromise?.resolve();
++        router._commitPromise = undefined;
++    });
+ }
++
+ async function loadClientRoute(router, opts) {
+-	let rematerialize = false;
+-	if (process.env.NODE_ENV !== "production") rematerialize = !!router._refreshNextLoad || !!router._tx?.[6];
+-	const previousOwner = router._tx;
+-	const resolvedLocation = router.stores.resolvedLocation.get();
+-	const previousLocation = resolvedLocation ?? router.stores.location.get();
+-	const location = router.latestLocation;
+-	const pendingLocation = router._pendingLocation;
+-	const redirects = pendingLocation?.href === location.href ? pendingLocation._redirects ?? 0 : 0;
+-	const handoff = router._handoff;
+-	const hydrationController = rematerialize ? void 0 : handoff?.[0]();
+-	const preflight = new AbortController();
+-	const previousPreflight = router._preflight;
+-	router._preflight = preflight;
+-	if (!rematerialize && !hydrationController) handoff?.[1]();
+-	previousPreflight?.abort();
+-	if (!preflight.signal.aborted) {
+-		const changeInfo = getLocationChangeInfo(location, resolvedLocation);
+-		router.emit({
+-			type: "onBeforeNavigate",
+-			...changeInfo
+-		});
+-		if (!preflight.signal.aborted) router.emit({
+-			type: "onBeforeLoad",
+-			...changeInfo
+-		});
+-	}
+-	if (preflight.signal.aborted) {
+-		await awaitCurrent(router, previousOwner);
+-		return;
+-	}
+-	const sameHref = previousLocation.href === location.href;
+-	let controller = preflight;
+-	const matches = process.env.NODE_ENV !== "production" && rematerialize ? router.matchRoutes(location, {
+-		_controller: preflight,
+-		_rematerialize: true
+-	}) : router.matchRoutes(location, { _controller: preflight });
+-	acquireMatchResources(matches);
+-	const resolvedPrefix = hydrationController ? handoff[1](matches) : void 0;
+-	if (resolvedPrefix) controller = hydrationController;
+-	else hydrationController?.abort();
+-	if (preflight.signal.aborted) {
+-		transferMatchResources(router, matches);
+-		await awaitCurrent(router, previousOwner);
+-		return;
+-	}
+-	router._preflight = void 0;
+-	let settle;
+-	const run = () => runClientTransaction(router, tx, sameHref, () => offerPending(router, tx), opts?.sync, resolvedPrefix);
+-	const done = opts?.sync ? new Promise((resolve) => settle = resolve) : Promise.resolve().then(run);
+-	const tx = [
+-		controller,
+-		redirects,
+-		location,
+-		matches,
+-		Date.now(),
+-		done.then(() => awaitCurrent(router, tx))
+-	];
+-	if (process.env.NODE_ENV !== "production" && rematerialize) {
+-		tx[6] = [handoff];
+-		router._refreshNextLoad = void 0;
+-	}
+-	router._tx = tx;
+-	if (previousOwner) {
+-		for (const match of router.stores.matches.get()) {
+-			if (router._tx !== tx) break;
+-			if (match.isFetching) setFetching(router, match, false);
+-		}
+-		previousOwner[0].abort();
+-		transferMatchResources(router, previousOwner[3], tx[3], true);
+-	}
+-	if (router._tx !== tx) {
+-		transferMatchResources(router, tx[3]);
+-		tx[3] = [];
+-		settle?.();
+-		await awaitCurrent(router, tx);
+-		return;
+-	}
+-	router.batch(() => {
+-		router.stores.status.set("pending");
+-		router.stores.location.set(location);
+-	});
+-	if (resolvedPrefix || !router._committed.length && matches[0]?.status !== "success" && !matches.some((match) => match._notFound)) offerPending(router, tx);
+-	settle?.(run());
+-	await tx[5];
++    const outcome = {
++        status: 'superseded',
++        navigation: opts?.navigation
++    };
++    const previous = router._tx;
++    const candidate = previous?.[7] ?? previous?.[8];
++    const protection = !opts?.navigation && !candidate?.result && previous?.[2].state.__TSR_key === router.latestLocation.state.__TSR_key ? candidate : undefined;
++    const lifetime = opts?.navigation ?? protection;
++    let owned;
++    try {
++        let rematerialize = false;
++        if (process.env.NODE_ENV !== 'production') {
++            rematerialize = !!router._refreshNextLoad || !!router._tx?.[6];
++        }
++        const previousOwner = router._tx;
++        const resolvedLocation = router.stores.resolvedLocation.get();
++        const previousLocation = resolvedLocation ?? router.stores.location.get();
++        const location = router.latestLocation;
++        const pendingLocation = router._pendingLocation;
++        const redirects = pendingLocation?.href === location.href ? pendingLocation._redirects ?? 0 : 0;
++        const handoff = router._handoff;
++        const hydrationController = rematerialize ? undefined : handoff?.[0]();
++        const preflight = new AbortController();
++        if (router.history.signal?.aborted) preflight.abort();
++        if (lifetime?.signal.aborted && lifetime.result !== 'accepted') preflight.abort();
++        const previousPreflight = router._preflight;
++        router._preflight = preflight;
++        if (!rematerialize && !hydrationController) {
++            handoff?.[1]();
++        }
++        previousPreflight?.abort();
++        if (!preflight.signal.aborted) {
++            const changeInfo = getLocationChangeInfo(location, resolvedLocation);
++            router.emit({
++                type: 'onBeforeNavigate',
++                ...changeInfo
++            });
++            if (!preflight.signal.aborted) {
++                router.emit({
++                    type: 'onBeforeLoad',
++                    ...changeInfo
++                });
++            }
++        }
++        if (router.history.signal?.aborted || lifetime?.signal.aborted && lifetime.result !== 'accepted') preflight.abort();
++        if (preflight.signal.aborted) {
++            if (opts?.navigation) router.history.completeNavigation?.(opts.navigation, "superseded");
++            await awaitCurrent(router, previousOwner);
++            return outcome;
++        }
++        const sameHref = previousLocation.href === location.href;
++        let controller = preflight;
++        const matches = process.env.NODE_ENV !== 'production' && rematerialize ? router.matchRoutes(location, {
++            _controller: preflight,
++            _rematerialize: true
++        }) : router.matchRoutes(location, {
++            _controller: preflight
++        });
++        acquireMatchResources(matches);
++        const resolvedPrefix = hydrationController ? handoff[1](matches) : undefined;
++        if (resolvedPrefix) {
++            controller = hydrationController;
++        } else {
++            hydrationController?.abort();
++        }
++        if (router.history.signal?.aborted || lifetime?.signal.aborted && lifetime.result !== 'accepted') preflight.abort();
++        if (preflight.signal.aborted) {
++            if (opts?.navigation) router.history.completeNavigation?.(opts.navigation, "superseded");
++            transferMatchResources(router, matches);
++            await awaitCurrent(router, previousOwner);
++            return outcome;
++        }
++        router._preflight = undefined;
++        let settle;
++        const run = ()=>runClientTransaction(router, tx, sameHref, ()=>offerPending(router, tx), opts?.sync, resolvedPrefix);
++        const done = opts?.sync ? new Promise((resolve)=>settle = resolve) : Promise.resolve().then(run);
++        const tx = [
++            controller,
++            redirects,
++            location,
++            matches,
++            Date.now(),
++            done.then(()=>awaitCurrent(router, tx))
++        ];
++        if (process.env.NODE_ENV !== 'production' && rematerialize) {
++            tx[6] = [
++                handoff
++            ];
++            router._refreshNextLoad = undefined;
++        }
++        tx[7] = opts?.navigation;
++        tx[8] = protection;
++        tx[9] = outcome;
++        tx[11] = opts?.onNavigationStart;
++        owned = tx;
++        previousOwner?.[10]?.();
++        router._tx = tx;
++        const cancelHistory = ()=>{
++            if (router._tx === tx) {
++                router._tx = undefined;
++                tx[0].abort();
++                finishPending(router, tx);
++                router.stores.status.set('idle');
++            }
++        };
++        router.history.signal?.addEventListener('abort', cancelHistory, {
++            once: true
++        });
++        tx[10] = ()=>router.history.signal?.removeEventListener('abort', cancelHistory);
++        if (router.history.signal?.aborted) cancelHistory();
++        if (lifetime) {
++            const cancel = ()=>{
++                if (lifetime.result !== 'accepted' && router._tx === tx) {
++                    router._tx = undefined;
++                    tx[0].abort();
++                    finishPending(router, tx);
++                    router.stores.status.set('idle');
++                }
++            };
++            lifetime.signal.addEventListener('abort', cancel, {
++                once: true
++            });
++            tx[10] = ()=>{
++                router.history.signal?.removeEventListener('abort', cancelHistory);
++                lifetime.signal.removeEventListener('abort', cancel);
++            };
++            if (lifetime.signal.aborted) cancel();
++        }
++        if (previousOwner) {
++            const previousNavigation = previousOwner[7] ?? previousOwner[8];
++            if (previousNavigation && previousNavigation !== protection && opts?.navigation !== previousNavigation && opts?.navigation?.parent !== previousNavigation) {
++                router.history.completeNavigation?.(previousNavigation, 'superseded');
++            }
++            for (const match of router.stores.matches.get()){
++                if (router._tx !== tx) {
++                    break;
++                }
++                if (match.isFetching) {
++                    setFetching(router, match, false);
++                }
++            }
++            previousOwner[0].abort();
++            transferMatchResources(router, previousOwner[3], tx[3], true);
++        }
++        if (router._tx !== tx) {
++            transferMatchResources(router, tx[3]);
++            tx[3] = [];
++            settle?.();
++            await awaitCurrent(router, tx);
++            return outcome;
++        }
++        router.batch(()=>{
++            router.stores.status.set('pending');
++            router.stores.location.set(location);
++        });
++        if (resolvedPrefix || !router._committed.length && matches[0]?.status !== 'success' && !matches.some((match)=>match._notFound)) {
++            offerPending(router, tx);
++        }
++        settle?.(run());
++        await tx[5];
++        return outcome;
++    } catch (error) {
++        if (owned && router._tx === owned) {
++            router._tx = undefined;
++            owned[10]?.();
++            owned[0].abort();
++            finishPending(router, owned);
++            transferMatchResources(router, owned[3]);
++            owned[3] = [];
++            router.stores.status.set('idle');
++        }
++        if (lifetime) router.history.completeNavigation?.(lifetime, 'failed', error);
++        outcome.status = 'failed';
++        outcome.error = error;
++        return outcome;
++    }
+ }
++
+ async function refreshClientRoute(router) {
+ 	const pending = router._tx;
+ 	if (pending && !pending[6] && router.stores.status.get() === "pending") {
+@@ -1309,5 +1448,3 @@ async function hydrate(router) {
+ }
+ //#endregion
+ export { _getAssetMatches, _getRenderedMatches, _isRouteDeparting, cacheLoaderMatch, commitMatches, getRoute, hydrate, loadClientRoute, loadRouteChunk, preloadClientRoute, projectLane, refreshClientRoute, replaceRouteChunk, waitFor };
+-
+-//# sourceMappingURL=load-client.js.map
+\ No newline at end of file
+diff --git a/dist/esm/router.d.ts b/dist/esm/router.d.ts
+index 0b15e99c..e938b30d 100644
+--- a/dist/esm/router.d.ts
++++ b/dist/esm/router.d.ts
+@@ -1,3 +1,4 @@
++import type { HistoryNavigationOutcome, HistoryNavigation } from '@tanstack/history';
+ import { SieveCache } from './sieve-cache.js';
+ import { ProcessRouteTreeResult, ProcessedTree } from './new-process-route-tree.js';
+ import { SearchParser, SearchSerializer } from './searchParams.js';
+@@ -483,6 +484,9 @@ export type GetMatchRoutesFn = (pathname: string) => [
+ ];
+ export type EmitFn = (routerEvent: RouterEvent) => void;
+ export type LoadFn = (opts?: {
++    onNavigationResult?: (result: HistoryNavigationOutcome) => void;
++    onNavigationStart?: (navigation: HistoryNavigation) => void;
++    navigation?: HistoryNavigation;
+     sync?: boolean;
+     action?: {
+         type: HistoryAction;
+diff --git a/dist/esm/router.js b/dist/esm/router.js
+index a3188602..466ad79b 100644
+--- a/dist/esm/router.js
++++ b/dist/esm/router.js
+@@ -384,81 +384,135 @@ var RouterCore = class {
+ 			if (!(isServer ?? this.isServer) && !usedCurrent && opts._fromLocation) this.staticLocations.set(opts, next);
+ 			return next;
+ 		};
+-		this.commitLocation = async ({ viewTransition, ignoreBlocker, ...next }) => {
+-			if (isServer ?? this.isServer) return;
+-			const nextLocation = next.maskedLocation ?? next;
+-			if (nextLocation.external && !(isServer ?? this.isServer)) return documentNavigation(this, nextLocation.publicHref, {
+-				replace: next.replace,
+-				ignoreBlocker
+-			});
+-			let historyAction;
+-			const isSameLocation = trimPathRight(this.latestLocation.href) === trimPathRight(next.href) && deepEqual(_getUserHistoryState(next.state), _getUserHistoryState(this.latestLocation.state));
+-			const previousCommitPromise = this._commitPromise;
+-			let resolve;
+-			const commitPromise = new Promise((done) => {
+-				resolve = done;
+-			});
+-			commitPromise.resolve = () => {
+-				resolve();
+-				previousCommitPromise?.resolve();
+-			};
+-			this._commitPromise = commitPromise;
+-			if (isSameLocation) this.load();
+-			else {
+-				let { maskedLocation, hashScrollIntoView, ...nextHistory } = next;
+-				if (maskedLocation) {
+-					nextHistory = {
+-						...maskedLocation,
+-						state: {
+-							...maskedLocation.state,
+-							__tempKey: void 0,
+-							__tempLocation: {
+-								...nextHistory,
+-								search: nextHistory.searchStr,
+-								state: {
+-									...nextHistory.state,
+-									__tempKey: void 0,
+-									__tempLocation: void 0,
+-									__TSR_key: void 0,
+-									key: void 0
+-								}
+-							}
+-						}
+-					};
+-					if (nextHistory.unmaskOnReload ?? this.options.unmaskOnReload ?? false) nextHistory.state.__tempKey = this.tempLocationKey;
+-				}
+-				nextHistory.state = {
+-					...nextHistory.state,
+-					__hashScrollIntoViewOptions: hashScrollIntoView ?? this.options.defaultHashScrollIntoView ?? true
+-				};
+-				this.shouldViewTransition = viewTransition;
+-				historyAction = next.replace ? "REPLACE" : "PUSH";
+-				this.history[historyAction === "REPLACE" ? "replace" : "push"](nextHistory.publicHref, nextHistory.state, { ignoreBlocker });
+-				if (!this.history.subscribers.size) this.load({ action: { type: historyAction } });
+-			}
+-			this._scroll.n = next.resetScroll ?? true;
+-			return this._commitPromise;
+-		};
+-		this.buildAndCommitLocation = ({ replace, resetScroll, hashScrollIntoView, viewTransition, ignoreBlocker, ...rest } = {}) => {
+-			if (isServer ?? this.isServer) return Promise.resolve();
+-			const location = this.buildLocation({
+-				...rest,
+-				_includeValidateSearch: true
+-			});
+-			this._pendingLocation = location;
+-			const commitPromise = this.commitLocation({
+-				...location,
+-				viewTransition,
+-				replace,
+-				resetScroll,
+-				hashScrollIntoView,
+-				ignoreBlocker
+-			});
+-			queueMicrotask(() => {
+-				if (this._pendingLocation === location) this._pendingLocation = void 0;
+-			});
+-			return commitPromise;
+-		};
++		this.commitLocation = async ({ viewTransition, ignoreBlocker, navigation, onNavigationResult, onNavigationStart, ...next })=>{
++        if (isServer ?? this.isServer) {
++            return;
++        }
++        const nextLocation = next.maskedLocation ?? next;
++        if (nextLocation.external && !(isServer ?? this.isServer)) {
++            return documentNavigation(this, nextLocation.publicHref, {
++                replace: next.replace,
++                ignoreBlocker
++            });
++        }
++        let historyAction;
++        const isSameLocation = trimPathRight(this.latestLocation.href) === trimPathRight(next.href) && deepEqual(_getUserHistoryState(next.state), _getUserHistoryState(this.latestLocation.state));
++        const receiptHistory = this.history.completeNavigation;
++        const previousCommitPromise = receiptHistory ? undefined : this._commitPromise;
++        let resolve;
++        const commitPromise = new Promise((done)=>{
++            resolve = done;
++        });
++        commitPromise.resolve = ()=>{
++            resolve();
++            previousCommitPromise?.resolve();
++        };
++        if (!receiptHistory) this._commitPromise = commitPromise;
++        if (isSameLocation) {
++            if (receiptHistory) return this.load({
++                navigation,
++                onNavigationResult,
++                onNavigationStart
++            });
++            this.load();
++        } else {
++            let { maskedLocation, hashScrollIntoView, ...nextHistory } = next;
++            if (maskedLocation) {
++                nextHistory = {
++                    ...maskedLocation,
++                    state: {
++                        ...maskedLocation.state,
++                        __tempKey: undefined,
++                        __tempLocation: {
++                            ...nextHistory,
++                            search: nextHistory.searchStr,
++                            state: {
++                                ...nextHistory.state,
++                                __tempKey: undefined,
++                                __tempLocation: undefined,
++                                __TSR_key: undefined,
++                                key: undefined
++                            }
++                        }
++                    }
++                };
++                if (nextHistory.unmaskOnReload ?? this.options.unmaskOnReload ?? false) {
++                    nextHistory.state.__tempKey = this.tempLocationKey;
++                }
++            }
++            nextHistory.state = {
++                ...nextHistory.state,
++                __hashScrollIntoViewOptions: hashScrollIntoView ?? this.options.defaultHashScrollIntoView ?? true
++            };
++            this.shouldViewTransition = viewTransition;
++            historyAction = next.replace ? 'REPLACE' : 'PUSH';
++            const receipt = this.history[historyAction === 'REPLACE' ? 'replace' : 'push'](nextHistory.publicHref, nextHistory.state, {
++                ignoreBlocker,
++                navigation,
++                onNavigationStart
++            });
++            if (receipt) {
++                this._scroll.n = next.resetScroll ?? true;
++                if (await receipt.committed) {
++                    if (!this.history.subscribers.has(this.load)) {
++                        try {
++                            await this.load({
++                                action: {
++                                    type: historyAction
++                                },
++                                navigation: receipt
++                            });
++                        } catch (error) {
++                            this.history.completeNavigation?.(receipt, 'failed', error);
++                        }
++                    }
++                }
++                const status = await receipt.finished;
++                onNavigationResult?.({
++                    status,
++                    navigation: receipt,
++                    error: receipt.error
++                });
++                if (status === 'failed') throw receipt.error;
++                return;
++            }
++            if (!this.history.subscribers.size) {
++                this.load({
++                    action: {
++                        type: historyAction
++                    }
++                });
++            }
++        }
++        this._scroll.n = next.resetScroll ?? true;
++        return this._commitPromise;
++    };
++		this.buildAndCommitLocation = ({ replace, resetScroll, hashScrollIntoView, viewTransition, ignoreBlocker, onNavigationResult, onNavigationStart, ...rest } = {})=>{
++        if (isServer ?? this.isServer) {
++            return Promise.resolve();
++        }
++        const location = this.buildLocation({
++            ...rest,
++            _includeValidateSearch: true
++        });
++        this._pendingLocation = location;
++        const commitPromise = this.commitLocation({
++            ...location,
++            viewTransition,
++            replace,
++            resetScroll,
++            hashScrollIntoView,
++            ignoreBlocker,
++            onNavigationResult,
++            onNavigationStart
++        });
++        queueMicrotask(()=>{
++            if (this._pendingLocation === location) {
++                this._pendingLocation = undefined;
++            }
++        });
++        return commitPromise;
++    };
+ 		this.navigate = async ({ to, reloadDocument, href, publicHref, ...rest }) => {
+ 			if (isServer ?? this.isServer) return;
+ 			const hrefScheme = href ? getUrlScheme(href) : void 0;
+@@ -482,12 +536,27 @@ var RouterCore = class {
+ 				_isNavigate: true
+ 			});
+ 		};
+-		this.load = async (opts) => {
+-			if (isServer ?? this.isServer) return loadServerRoute(this, opts);
+-			this.updateLatestLocation();
+-			if (opts?.action) this._scroll.h = opts.action.type === "PUSH" || opts.action.type === "REPLACE";
+-			await loadClientRoute(this, opts);
+-		};
++		this.load = async (opts)=>{
++        if (isServer ?? this.isServer) return loadServerRoute(this, opts);
++        let outcome;
++        try {
++            this.updateLatestLocation();
++            if (opts?.action) this._scroll.h = opts.action.type === 'PUSH' || opts.action.type === 'REPLACE';
++            outcome = await loadClientRoute(this, opts);
++        } catch (error) {
++            const navigation = opts?.navigation ?? this._tx?.[7] ?? this._tx?.[8];
++            if (navigation) this.history.completeNavigation?.(navigation, 'failed', error);
++            outcome = {
++                status: 'failed',
++                error,
++                navigation
++            };
++        }
++        opts?.onNavigationResult?.({
++            ...outcome
++        });
++        if (outcome.status === 'failed') throw outcome.error;
++    };
+ 		this.startViewTransition = (fn) => {
+ 			const shouldViewTransition = this.shouldViewTransition ?? this.options.defaultViewTransition;
+ 			this.shouldViewTransition = void 0;
+@@ -976,5 +1045,3 @@ function extractStrictParams(route, accumulatedParams) {
+ }
+ //#endregion
+ export { PathParamError, RouterCore, SearchParamError, _getUserHistoryState, defaultSerializeError, getInitialRouterState, getLocationChangeInfo, lazyFn, lifecycleEnd, runRouteLifecycle, trailingSlashOptions };
+-
+-//# sourceMappingURL=router.js.map
+\ No newline at end of file
+diff --git a/src/RouterProvider.ts b/src/RouterProvider.ts
+index 52aeaffa..87145173 100644
+--- a/src/RouterProvider.ts
++++ b/src/RouterProvider.ts
+@@ -1,3 +1,4 @@
++import type { HistoryNavigation, HistoryNavigationOutcome } from '@tanstack/history'
+ import type { NavigateOptions, ToOptions } from './link'
+ import type { ParsedLocation } from './location'
+ import type { RoutePaths } from './routeInfo'
+@@ -11,6 +12,11 @@ export interface MatchLocation {
+ }
+ 
+ export interface CommitLocationOptions {
++  onNavigationStart?: (navigation: HistoryNavigation) => void
++  onNavigationResult?: (result: HistoryNavigationOutcome) => void
++  /** Continue only the actual live Router redirect parent. */
++  navigation?: HistoryNavigation
++
+   replace?: boolean
+   resetScroll?: boolean
+   hashScrollIntoView?: boolean | ScrollIntoViewOptions
+diff --git a/src/link.ts b/src/link.ts
+index 799ae508..4d54c23b 100644
+--- a/src/link.ts
++++ b/src/link.ts
+@@ -1,3 +1,4 @@
++import type { HistoryNavigation, HistoryNavigationOutcome } from '@tanstack/history'
+ import type { HistoryState, ParsedHistoryState } from '@tanstack/history'
+ import type {
+   AllParams,
+@@ -299,6 +300,9 @@ export type NavigateOptions<
+  * @link [API Docs](https://tanstack.com/router/latest/docs/framework/react/api/router/NavigateOptionsType)
+  */
+ export interface NavigateOptionProps {
++  onNavigationStart?: (navigation: HistoryNavigation) => void
++  /** Exactly once for this native client invocation, including refusal and reload. */
++  onNavigationResult?: (result: HistoryNavigationOutcome) => void
+   /**
+    * If set to `true`, the router will scroll the element with an id matching the hash into view with default `ScrollIntoViewOptions`.
+    * If set to `false`, the router will not scroll the element with an id matching the hash into view.
+diff --git a/src/load-client.ts b/src/load-client.ts
+index e84bb8fb..013fa3e4 100644
+--- a/src/load-client.ts
++++ b/src/load-client.ts
+@@ -23,7 +23,7 @@ import type {
+ import type { AnyRedirect } from './redirect'
+ import type { AnyRouter, RouterCore, TrailingSlashOption } from './router'
+ import type { RoutePaths } from './routeInfo'
+-import type { RouterHistory } from '@tanstack/history'
++import type { RouterHistory, HistoryNavigation, HistoryNavigationOutcome } from '@tanstack/history'
+ 
+ type RouteComponentType =
+   | 'component'
+@@ -248,6 +248,11 @@ export type LoadTransaction = [
+    * retired when the refresh publishes.
+    */
+   refresh?: [handoff: NonNullable<AnyRouter['_handoff']> | undefined],
++  navigation?: HistoryNavigation,
++  protection?: HistoryNavigation,
++  outcome?: HistoryNavigationOutcome,
++  cleanup?: () => void,
++  onNavigationStart?: (navigation: HistoryNavigation) => void,
+ ]
+ 
+ export type PendingSession = [
+@@ -1752,13 +1757,22 @@ function followRedirect(
+     resetScroll: options.resetScroll,
+     hashScrollIntoView: options.hashScrollIntoView,
+     ignoreBlocker: true,
++    navigation: tx[7],
++    onNavigationResult: (result) => { Object.assign(tx[9]!, result) },
++    onNavigationStart: tx[11],
+   })
+   queueMicrotask(() => {
+     if (router._pendingLocation === location) {
+       router._pendingLocation = undefined
+     }
+   })
+-  return committed
++  return committed.then(() => {
++    if (router._tx === tx && router.history.completeNavigation) {
++      finishPending(router, tx)
++      router.stores.status.set('idle')
++      if (tx[8]) router.history.completeNavigation?.(tx[8], 'superseded')
++    }
++  })
+ }
+ 
+ async function runBackground(
+@@ -1933,6 +1947,8 @@ async function runClientTransaction(
+     if (router._tx !== tx) {
+       return
+     }
++    if (tx[9]) tx[9].status = 'accepted'
++    if (tx[7] ?? tx[8]) router.history.completeNavigation?.((tx[7] ?? tx[8])!, 'accepted')
+     router._commitPromise?.resolve()
+     router._commitPromise = undefined
+   })
+@@ -1940,8 +1956,16 @@ async function runClientTransaction(
+ 
+ export async function loadClientRoute(
+   router: CoordinatorRouter,
+-  opts?: { sync?: boolean },
+-): Promise<void> {
++  opts?: { sync?: boolean; navigation?: HistoryNavigation; onNavigationStart?: (navigation: HistoryNavigation) => void },
++): Promise<HistoryNavigationOutcome> {
++  const outcome: HistoryNavigationOutcome = { status: 'superseded', navigation: opts?.navigation }
++  const previous = router._tx
++  const candidate = previous?.[7] ?? previous?.[8]
++  const protection = !opts?.navigation && !candidate?.result &&
++    previous?.[2].state.__TSR_key === router.latestLocation.state.__TSR_key ? candidate : undefined
++  const lifetime = opts?.navigation ?? protection
++  let owned: LoadTransaction | undefined
++  try {
+   let rematerialize = false
+   if (process.env.NODE_ENV !== 'production') {
+     rematerialize = !!router._refreshNextLoad || !!router._tx?.[6 /* refresh */]
+@@ -1962,6 +1986,8 @@ export async function loadClientRoute(
+     ? undefined
+     : handoff?.[0 /* claim */]()
+   const preflight = new AbortController()
++  if (router.history.signal?.aborted) preflight.abort()
++  if (lifetime?.signal.aborted && lifetime.result !== 'accepted') preflight.abort()
+   const previousPreflight = router._preflight
+   router._preflight = preflight
+   if (!rematerialize && !hydrationController) {
+@@ -1977,9 +2003,11 @@ export async function loadClientRoute(
+       router.emit({ type: 'onBeforeLoad', ...changeInfo })
+     }
+   }
++  if (router.history.signal?.aborted || (lifetime?.signal.aborted && lifetime.result !== 'accepted')) preflight.abort()
+   if (preflight.signal.aborted) {
++    if (opts?.navigation) router.history.completeNavigation?.(opts.navigation, "superseded")
+     await awaitCurrent(router, previousOwner)
+-    return
++    return outcome
+   }
+   const sameHref = previousLocation.href === location.href
+   let controller = preflight
+@@ -1999,10 +2027,12 @@ export async function loadClientRoute(
+   } else {
+     hydrationController?.abort()
+   }
++  if (router.history.signal?.aborted || (lifetime?.signal.aborted && lifetime.result !== 'accepted')) preflight.abort()
+   if (preflight.signal.aborted) {
++    if (opts?.navigation) router.history.completeNavigation?.(opts.navigation, "superseded")
+     transferMatchResources(router, matches)
+     await awaitCurrent(router, previousOwner)
+-    return
++    return outcome
+   }
+   router._preflight = undefined
+ 
+@@ -2031,8 +2061,45 @@ export async function loadClientRoute(
+     tx[6 /* refresh */] = [handoff]
+     router._refreshNextLoad = undefined
+   }
++  tx[7] = opts?.navigation
++  tx[8] = protection
++  tx[9] = outcome
++  tx[11] = opts?.onNavigationStart
++  owned = tx
++  previousOwner?.[10]?.()
+   router._tx = tx
++  const cancelHistory = () => {
++    if (router._tx === tx) {
++      router._tx = undefined
++      tx[0].abort()
++      finishPending(router, tx)
++      router.stores.status.set('idle')
++    }
++  }
++  router.history.signal?.addEventListener('abort', cancelHistory, { once: true })
++  tx[10] = () => router.history.signal?.removeEventListener('abort', cancelHistory)
++  if (router.history.signal?.aborted) cancelHistory()
++  if (lifetime) {
++    const cancel = () => {
++      if (lifetime.result !== 'accepted' && router._tx === tx) {
++        router._tx = undefined
++        tx[0].abort()
++        finishPending(router, tx)
++        router.stores.status.set('idle')
++      }
++    }
++    lifetime.signal.addEventListener('abort', cancel, { once: true })
++    tx[10] = () => {
++      router.history.signal?.removeEventListener('abort', cancelHistory)
++      lifetime.signal.removeEventListener('abort', cancel)
++    }
++    if (lifetime.signal.aborted) cancel()
++  }
+   if (previousOwner) {
++    const previousNavigation = previousOwner[7] ?? previousOwner[8]
++    if (previousNavigation && previousNavigation !== protection && opts?.navigation !== previousNavigation && opts?.navigation?.parent !== previousNavigation) {
++      router.history.completeNavigation?.(previousNavigation, 'superseded')
++    }
+     for (const match of router.stores.matches.get() as Array<WorkMatch>) {
+       if (router._tx !== tx) {
+         break
+@@ -2054,7 +2121,7 @@ export async function loadClientRoute(
+     tx[3 /* matches */] = []
+     settle?.()
+     await awaitCurrent(router, tx)
+-    return
++    return outcome
+   }
+   router.batch(() => {
+     router.stores.status.set('pending')
+@@ -2073,6 +2140,22 @@ export async function loadClientRoute(
+   // Let explicit synchronous loads publish ready pending work before paint.
+   settle?.(run())
+   await tx[5 /* done */]
++  return outcome
++  } catch (error) {
++    if (owned && router._tx === owned) {
++      router._tx = undefined
++      owned[10]?.()
++      owned[0].abort()
++      finishPending(router, owned)
++      transferMatchResources(router, owned[3])
++      owned[3] = []
++      router.stores.status.set('idle')
++    }
++    if (lifetime) router.history.completeNavigation?.(lifetime, 'failed', error)
++    outcome.status = 'failed'
++    outcome.error = error
++    return outcome
++  }
+ }
+ 
+ export async function refreshClientRoute(
+diff --git a/src/router.ts b/src/router.ts
+index ecf44316..32aab2bd 100644
+--- a/src/router.ts
++++ b/src/router.ts
+@@ -56,6 +56,7 @@ import {
+   rewriteBasepath,
+ } from './rewrite'
+ import { createRouterStores } from './stores'
++import type { HistoryNavigation, HistoryNavigationOutcome } from '@tanstack/history'
+ import type { SieveCache } from './sieve-cache'
+ import type { RouteInterpolation } from './path'
+ import type {
+@@ -785,8 +786,11 @@ export type GetMatchRoutesFn = (pathname: string) => [
+ export type EmitFn = (routerEvent: RouterEvent) => void
+ 
+ export type LoadFn = (opts?: {
++  onNavigationStart?: (navigation: HistoryNavigation) => void
++  onNavigationResult?: (result: HistoryNavigationOutcome) => void
+   sync?: boolean
+   action?: { type: HistoryAction }
++  navigation?: HistoryNavigation
+   _signal?: AbortSignal
+   /** @private Reuse the location already prepared for this SSR request. */
+   _skipLocationUpdate?: boolean
+@@ -2226,6 +2230,9 @@ export class RouterCore<
+   commitLocation: CommitLocationFn = async ({
+     viewTransition,
+     ignoreBlocker,
++    navigation,
++    onNavigationResult,
++    onNavigationStart,
+     ...next
+   }) => {
+     if (isServer ?? this.isServer) {
+@@ -2248,7 +2255,8 @@ export class RouterCore<
+         _getUserHistoryState(this.latestLocation.state),
+       )
+ 
+-    const previousCommitPromise = this._commitPromise
++    const receiptHistory = this.history.completeNavigation
++    const previousCommitPromise = receiptHistory ? undefined : this._commitPromise
+     let resolve!: () => void
+     const commitPromise = new Promise<void>((done) => {
+       resolve = done
+@@ -2257,10 +2265,11 @@ export class RouterCore<
+       resolve()
+       previousCommitPromise?.resolve()
+     }
+-    this._commitPromise = commitPromise
++    if (!receiptHistory) this._commitPromise = commitPromise
+ 
+     // Don't commit to history if nothing changed
+     if (isSameLocation) {
++      if (receiptHistory) return this.load({ navigation, onNavigationResult, onNavigationStart })
+       this.load()
+     } else {
+       let {
+@@ -2310,11 +2319,27 @@ export class RouterCore<
+ 
+       historyAction = next.replace ? 'REPLACE' : 'PUSH'
+ 
+-      this.history[historyAction === 'REPLACE' ? 'replace' : 'push'](
++      const receipt = this.history[historyAction === 'REPLACE' ? 'replace' : 'push'](
+         nextHistory.publicHref,
+         nextHistory.state,
+-        { ignoreBlocker },
++        { ignoreBlocker, navigation, onNavigationStart },
+       )
++      if (receipt) {
++        this._scroll.n = next.resetScroll ?? true
++        if (await receipt.committed) {
++          if (!this.history.subscribers.has(this.load)) {
++            try {
++              await this.load({ action: { type: historyAction }, navigation: receipt })
++            } catch (error) {
++              this.history.completeNavigation?.(receipt, 'failed', error)
++            }
++          }
++        }
++        const status = await receipt.finished
++        onNavigationResult?.({ status, navigation: receipt, error: receipt.error })
++        if (status === 'failed') throw receipt.error
++        return
++      }
+ 
+       // Without a subscribed adapter the history commit cannot trigger the
+       // load itself. The same-location branch already loads directly.
+@@ -2335,6 +2360,8 @@ export class RouterCore<
+     hashScrollIntoView,
+     viewTransition,
+     ignoreBlocker,
++    onNavigationResult,
++    onNavigationStart,
+     ...rest
+   }: BuildNextOptions & CommitLocationOptions = {}): Promise<void> => {
+     if (isServer ?? this.isServer) {
+@@ -2357,6 +2384,8 @@ export class RouterCore<
+       resetScroll,
+       hashScrollIntoView,
+       ignoreBlocker,
++      onNavigationResult,
++      onNavigationStart,
+     })
+ 
+     // Clear pending location after commit starts
+@@ -2419,16 +2448,19 @@ export class RouterCore<
+   }
+ 
+   load: LoadFn = async (opts): Promise<void> => {
+-    if (isServer ?? this.isServer) {
+-      return loadServerRoute(this, opts)
+-    }
+-
+-    this.updateLatestLocation()
+-    if (opts?.action) {
+-      this._scroll.h =
+-        opts.action.type === 'PUSH' || opts.action.type === 'REPLACE'
+-    }
+-    await loadClientRoute(this, opts)
++    if (isServer ?? this.isServer) return loadServerRoute(this, opts)
++    let outcome: HistoryNavigationOutcome
++    try {
++      this.updateLatestLocation()
++      if (opts?.action) this._scroll.h = opts.action.type === 'PUSH' || opts.action.type === 'REPLACE'
++      outcome = await loadClientRoute(this, opts)
++    } catch (error) {
++      const navigation = opts?.navigation ?? this._tx?.[7] ?? this._tx?.[8]
++      if (navigation) this.history.completeNavigation?.(navigation, 'failed', error)
++      outcome = { status: 'failed', error, navigation }
++    }
++    opts?.onNavigationResult?.({ ...outcome })
++    if (outcome.status === 'failed') throw outcome.error
+   }
+ 
+   startViewTransition = (fn: () => Promise<void>) => {

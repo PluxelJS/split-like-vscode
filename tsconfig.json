@@ -1,7 +1,7 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/core" },
+    { "path": "./packages/split-view" },
     { "path": "./packages/react" },
     { "path": "./packages/demo" }
   ]

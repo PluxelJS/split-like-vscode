@@ -10,7 +10,13 @@ import { Actions, DockLocation, Layout, Model, type ILayoutProps } from "flexlay
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createWorkbench, Workbench, useWorkbenchContent, type WorkbenchOptions } from "./index";
+import {
+  createWorkbench,
+  Workbench,
+  useContent,
+  useContentController,
+  type WorkbenchOptions,
+} from "./index";
 
 const disposals: (() => Promise<unknown>)[] = [];
 const resizeObservers: { callback: ResizeObserverCallback; observer: ResizeObserver }[] = [];
@@ -52,7 +58,8 @@ beforeEach(() => {
 });
 afterEach(async () => {
   cleanup();
-  await Promise.all(disposals.splice(0).map((dispose) => dispose()));
+  // eslint-disable-next-line no-await-in-loop -- Finish each owned session before tearing down the next.
+  for (const dispose of disposals.splice(0)) await dispose();
   window.history.replaceState(null, "", "/");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -60,13 +67,14 @@ afterEach(async () => {
 
 function Editor() {
   const input = useRef<HTMLInputElement>(null);
-  const { id } = useWorkbenchContent({ focus: () => input.current?.focus() });
+  const { id } = useContent();
+  useContentController({ leave: null, focus: () => input.current?.focus() });
   return (
     <input ref={input} aria-label={`Editor ${id}`} data-testid={`editor-${id}`} defaultValue={id} />
   );
 }
 
-function fixture(options: Pick<WorkbenchOptions<AnyRouter>, "layout" | "tools"> = {}) {
+async function fixture(options: Pick<WorkbenchOptions<AnyRouter>, "initial" | "tools"> = {}) {
   const root = createRootRoute();
   const page = createRoute({
     getParentRoute: () => root,
@@ -85,13 +93,19 @@ function fixture(options: Pick<WorkbenchOptions<AnyRouter>, "layout" | "tools"> 
     routers.push(router);
     return router;
   };
-  const workbench = createWorkbench({ createRouter: factory, ...options });
-  workbench.connectBrowser();
+  const workbench = createWorkbench({
+    createRouter: factory,
+    workspaceId: "native-test",
+    home: { mode: "empty", href: "/" },
+    ...options,
+  });
+  window.history.replaceState({ __TSR_index: 0 }, "", "/");
+  await workbench.start({ browser: { window, onOutsideNavigate() {} } });
   disposals.push(() => workbench.dispose());
   const open = async (id: string) => {
     const result = await workbench.open({ to: "/documents/$id", params: { id } });
-    if (result.status !== "committed") throw new Error(`Document failed to open: ${result.status}`);
-    return result.document.id;
+    if (result.status !== "applied") throw new Error(`Document failed to open: ${result.status}`);
+    return result.value.document.id;
   };
   return { workbench, routers, open };
 }
@@ -103,11 +117,11 @@ function nativeTabButton(id: string): HTMLElement {
 }
 
 async function splitFixture() {
-  const { workbench, routers, open } = fixture();
+  const { workbench, routers, open } = await fixture();
   const a = await open("A");
   const b = await open("B");
   const c = await open("C");
-  const target = Model.fromJson(workbench.getLayout()).getNodeById(a)?.getParent()?.getId();
+  const target = workbench.model.getNodeById(a)?.getParent()?.getId();
   if (!target) throw new Error("Document has no native target");
   await workbench.dispatch(Actions.moveNode(c, target, DockLocation.RIGHT, -1));
   return { workbench, routers, a, b, c };
@@ -119,27 +133,27 @@ describe("native React interaction", () => {
     vi.stubGlobal("innerWidth", 390);
     const { workbench, a, b, c } = await splitFixture();
     await workbench.dispatch(Actions.addTabToNewGroup(a, "Research", "#3366cc"));
-    const groupId = Model.fromJson(workbench.getLayout()).getNodeById(a)?.getParent()?.getId();
+    const groupId = workbench.model.getNodeById(a)?.getParent()?.getId();
     if (!groupId) throw new Error("Document has no native group");
     await workbench.dispatch(Actions.moveNode(b, groupId, DockLocation.CENTER, -1));
-    const grouped = Model.fromJson(workbench.getLayout());
+    const grouped = workbench.model;
     const left = grouped.getNodeById(groupId)?.getParent()?.getId();
     const right = grouped.getNodeById(c)?.getParent()?.getId();
     if (!left || !right) throw new Error("Documents have no native tabsets");
     await workbench.dispatch(Actions.maximizeToggle(left));
-    workbench.activate(c);
-    const initial = workbench.getLayout();
+    await workbench.activate(c);
+    const initial = workbench.model.toJson();
     const expected = Model.fromJson(initial);
     expect(expected.getActiveTabset()?.getId()).toBe(right);
     expect(expected.getMaximizedTabset()?.getId()).toBe(right);
     const observed = vi.fn<NonNullable<ILayoutProps["onModelChange"]>>();
-    const view = render(<Workbench workbench={workbench} native={{ onModelChange: observed }} />);
+    const view = render(<Workbench instance={workbench} native={{ onModelChange: observed }} />);
     await screen.findByTestId(`editor-${c}`);
     await act(async () => undefined);
     const integratedObservers = resizeObservers.length;
     const expectNativeLayout = () => {
-      expect(workbench.getLayout()).toEqual(expected.toJson());
-      expect(Model.fromJson(workbench.snapshot().layout).getMaximizedTabset()?.getId()).toBe(
+      expect(workbench.model.toJson()).toEqual(expected.toJson());
+      expect(Model.fromJson(workbench.createSnapshot().layout).getMaximizedTabset()?.getId()).toBe(
         expected.getMaximizedTabset()?.getId(),
       );
     };
@@ -162,7 +176,7 @@ describe("native React interaction", () => {
     const move = Actions.moveNode(groupId, right, DockLocation.CENTER, -1);
     expected.doAction(move);
     await act(async () => {
-      expect(await workbench.dispatch(move)).toEqual({ status: "applied" });
+      expect(await workbench.dispatch(move)).toMatchObject({ status: "applied" });
     });
     expectNativeLayout();
     expect(
@@ -190,7 +204,7 @@ describe("native React interaction", () => {
     const { workbench, a, b, c } = await splitFixture();
     render(
       <Workbench
-        workbench={workbench}
+        instance={workbench}
         native={{ keyMap: { focusNextTabset: "Ctrl+Alt+ArrowRight" } }}
       />,
     );
@@ -225,11 +239,11 @@ describe("native React interaction", () => {
   it("preserves the native adjusting resize path without extra host-driven tabset renders", async () => {
     const { workbench, b, c } = await splitFixture();
     const observed = vi.fn<NonNullable<ILayoutProps["onRenderTabSet"]>>();
-    const view = render(<Workbench workbench={workbench} native={{ onRenderTabSet: observed }} />);
+    const view = render(<Workbench instance={workbench} native={{ onRenderTabSet: observed }} />);
     await screen.findByTestId(`editor-${b}`);
     await screen.findByTestId(`editor-${c}`);
     await act(async () => undefined);
-    const snapshot = workbench.getLayout();
+    const snapshot = workbench.model.toJson();
     const raw = Model.fromJson(snapshot);
     const row = raw.getRootRow();
     if (!row) throw new Error("Native layout has no root row");
@@ -240,7 +254,7 @@ describe("native React interaction", () => {
     });
     const integratedRenders = observed.mock.calls.length;
     raw.doAction(action);
-    expect(workbench.getLayout()).toEqual(raw.toJson());
+    expect(workbench.model.toJson()).toEqual(raw.toJson());
     view.unmount();
     const baseline = vi.fn<NonNullable<ILayoutProps["onRenderTabSet"]>>();
     const nativeModel = Model.fromJson(snapshot);
@@ -266,24 +280,26 @@ describe("native React interaction", () => {
       if (!recovered) throw new Error("Tool unavailable");
       return <button type="button">Tool recovered</button>;
     }
-    const { workbench, open, routers } = fixture({
-      tools: [{ id: "inspector", render: () => <RecoveringTool /> }],
-      layout: {
-        borders: [
-          {
-            type: "border",
-            location: "bottom",
-            selected: 0,
-            children: [
-              { type: "tab", id: "inspector", name: "Inspector", component: "worksplit.tool" },
-            ],
-          },
-        ],
-        layout: { type: "row", children: [] },
+    const { workbench, open, routers } = await fixture({
+      tools: { inspector: { render: () => <RecoveringTool /> } },
+      initial: {
+        layout: {
+          borders: [
+            {
+              type: "border",
+              location: "bottom",
+              selected: 0,
+              children: [
+                { type: "tab", id: "inspector", name: "Inspector", component: "inspector" },
+              ],
+            },
+          ],
+          layout: { type: "row", children: [] },
+        },
       },
     });
     const a = await open("A");
-    render(<Workbench workbench={workbench} />);
+    render(<Workbench instance={workbench} />);
     const editor = await screen.findByTestId(`editor-${a}`);
     const originalRouters = [...routers];
     expect(screen.getByRole("alert")).toBeDefined();

@@ -11,13 +11,13 @@ export default defineConfig({
     tasks: {
       "check-files": { command: "vp check", cache: false },
       "check-browser": {
-        command: "playwright test",
-        dependsOn: ["@worksplit/react#compile"],
+        command: "node scripts/check-demo-browser.mjs",
+        dependsOn: ["@worksplit/react#compile", "@worksplit/split-view#compile"],
         cache: false,
       },
       "check-package-consumer": {
         command: "node scripts/check-package-consumer.mjs",
-        dependsOn: ["@worksplit/core#compile", "@worksplit/react#compile"],
+        dependsOn: ["@worksplit/split-view#compile", "@worksplit/react#compile"],
         cache: false,
       },
       "workspace:verify": {
@@ -35,7 +35,7 @@ export default defineConfig({
       "workspace:build": {
         command: "node scripts/check-source-declarations.mjs",
         dependsOn: [
-          "@worksplit/core#compile",
+          "@worksplit/split-view#compile",
           "@worksplit/react#compile",
           "@worksplit/demo#compile",
         ],
@@ -43,18 +43,22 @@ export default defineConfig({
       },
       "workspace:test": {
         command: [],
-        dependsOn: ["@worksplit/core#check-tests", "@worksplit/react#check-tests"],
+        dependsOn: [
+          "@worksplit/split-view#check-tests",
+          "@worksplit/react#check-tests",
+          "@worksplit/demo#check-tests",
+        ],
       },
       "check-tools": {
         command: "tsc -p tsconfig.typecheck.json --noEmit",
-        dependsOn: ["@worksplit/react#compile"],
+        dependsOn: ["@worksplit/react#compile", "@worksplit/split-view#compile"],
         cache: false,
       },
       "workspace:types": {
         command: [],
         dependsOn: [
           "check-tools",
-          "@worksplit/core#check-types",
+          "@worksplit/split-view#check-types",
           "@worksplit/react#check-types",
           "@worksplit/demo#check-types",
         ],

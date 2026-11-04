@@ -1,154 +1,64 @@
+import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import {
-  createSplitLayout,
-  resizeAtSash,
-  type PaneConstraints,
-  type SplitLayout,
-} from "@worksplit/core";
-import {
+  createWorkbench,
+  useContent,
+  useContentController,
   useWorkbenchState,
-  useWorkbenchContent,
-  type WorkbenchContent,
-  type WorkbenchContentEffect,
-  type WorkbenchContentLifecycle,
-  type DispatchResult,
-  type NavigationResult,
-  type StartResult,
-  type CloseResult,
+  type ContentController,
+  type OpenOptions,
   type WorkbenchSnapshot,
-  type OpenDocumentOptions,
-  type WorkbenchTool,
-  type WorkbenchDocument,
-  type WorkbenchEditingContext,
-  type WorkbenchProps,
 } from "@worksplit/react";
-import { Actions, DockLocation, Model, type IJsonModel } from "flexlayout-react";
-import { useEffect } from "react";
+import { type PaneProps, type SplitViewHandle } from "@worksplit/split-view";
+import { Model, type IJsonModel } from "flexlayout-react";
 
-import { workbench } from "./app.js";
-
-export async function routeAndReceiptTypes() {
-  const fakeInstance = {
-    activate() {},
-    getDocument() {
-      return null;
-    },
-    executeCommand: async () => {},
-    getEditingContext() {
-      return {
-        activeGroupId: null,
-        activeTabId: null,
-        focusedArea: null,
-        focusedTabId: null,
-        windowFocused: true,
-      };
-    },
-  };
-  const fakeProps: WorkbenchProps = {
-    // @ts-expect-error Rendering requires a real Worksplit instance, not an API-shaped object.
-    workbench: fakeInstance,
-  };
-  void fakeProps;
-  const startup: StartResult = await workbench.start("/");
-  const dispatch: DispatchResult = await workbench.dispatch(Actions.renameTab("typed", "Typed"));
-  void dispatch;
-  if (startup.status === "empty") {
-    const href: string = startup.href;
-    void href;
-  }
-  const previewOptions: OpenDocumentOptions = { preview: true, reuse: "preserve" };
-  void previewOptions;
-  const besideOptions: OpenDocumentOptions = {
-    location: DockLocation.RIGHT,
-    preserveFocus: true,
-  };
-  void besideOptions;
-  const options: OpenDocumentOptions = { newInstance: true, background: true };
-  const navigation: NavigationResult = await workbench.open(
-    { to: "/documents/$id", params: { id: "Typed" }, search: { view: "edit" } },
-    options,
-  );
-  await workbench.open({
-    to: "/documents/$id",
-    // @ts-expect-error Params must follow the application's actual TanStack route tree.
-    params: { wrong: "Typed" },
-    search: { view: "edit" },
+const root = createRootRoute();
+const route = createRoute({
+  getParentRoute: () => root,
+  path: "/read/$name",
+  validateSearch: (input: Record<string, unknown>) => ({
+    mode: input.mode === "compact" ? ("compact" as const) : ("full" as const),
+  }),
+});
+const routeTree = root.addChildren([route]);
+const instance = createWorkbench({
+  createRouter: (history) => createRouter({ history, routeTree }),
+});
+export async function contracts() {
+  await instance.start();
+  const result = await instance.open({
+    to: "/read/$name",
+    params: { name: "A" },
+    search: { mode: "compact" },
   });
-  // @ts-expect-error Unknown application route paths are rejected statically.
-  await workbench.open({ to: "/undeclared" });
-  if (navigation.status === "committed") {
-    const document: WorkbenchDocument = navigation.document;
-    const containerId: string | null = document.containerId;
-    void containerId;
-    const preview: boolean = document.preview;
-    void preview;
-    workbench.keep(document.id);
-    await workbench.duplicate(document.id, { location: DockLocation.RIGHT, preserveFocus: true });
-    const closed: CloseResult = await workbench.close(document.id);
-    if (closed.status === "closed") {
-      const cleanupErrors: readonly unknown[] = closed.cleanupErrors;
-      void cleanupErrors;
-    } else if (closed.status === "rejected") {
-      const reason: "decision" | "changed" | "closing" | "not-closeable" | "revision-required" =
-        closed.reason;
-      void reason;
-    } else if (closed.status === "failed") {
-      const error: unknown = closed.error;
-      void error;
-    }
-  } else if (navigation.status === "failed") {
-    const stage: "load" | "navigate" = navigation.stage;
-    void stage;
+  // @ts-expect-error Unknown paths do not enter the application's route tree.
+  await instance.open({ to: "/unknown" });
+  // @ts-expect-error Params retain the native Router schema.
+  await instance.open({ to: "/read/$name", params: { wrong: "A" } });
+  // @ts-expect-error Search retains the native Router union.
+  await instance.open({ to: "/read/$name", params: { name: "A" }, search: { mode: "wrong" } });
+  // @ts-expect-error Background cannot create a preview.
+  const invalid: OpenOptions = { presentation: "background", preview: true };
+  void invalid;
+  if (result.status === "applied") {
+    const snapshot: WorkbenchSnapshot = instance.createSnapshot();
+    const native: IJsonModel = snapshot.layout;
+    const model: Model = instance.model;
+    void [native, model];
+    await instance.duplicate(result.value.document.id);
+    await instance.close(result.value.document.id);
   }
-  const snapshot: WorkbenchSnapshot = workbench.snapshot();
-  const nativeJson: IJsonModel = snapshot.layout;
-  const context: WorkbenchEditingContext = workbench.getEditingContext();
-  const renderer: WorkbenchTool = { id: "external", render: ({ id }) => id };
-  const panes: PaneConstraints[] = [{ id: "left" }, { id: "right" }];
-  const sized: SplitLayout = resizeAtSash(createSplitLayout({ panes, containerSize: 600 }), 0, 20);
-  return { model: Model.fromJson(nativeJson), context, renderer, sized };
 }
-
-export function usePublicContentContract(lifecycle?: WorkbenchContentLifecycle) {
-  const content: WorkbenchContent = useWorkbenchContent(lifecycle);
-  useEffect(
-    () =>
-      content.effect(async ({ signal, defer }: WorkbenchContentEffect) => {
-        signal.throwIfAborted();
-        defer(() => {});
-        defer(async () => {});
-        await Promise.resolve();
-      }),
-    [content],
-  );
-  // @ts-expect-error Cleanup is declared through defer, not a returned disposer.
-  content.effect(() => () => {});
-  // @ts-expect-error The editing owner does not own resource disposal.
-  const invalidLifecycle: WorkbenchContentLifecycle = { dispose: () => {} };
-  void invalidLifecycle;
-  const invalidEffect: WorkbenchContentEffect = {
-    signal: new AbortController().signal,
-    defer() {},
-    // @ts-expect-error Resource effects have no nested scope or task API.
-    track() {},
-  };
-  void invalidEffect;
-  // @ts-expect-error Content has no command-style lifecycle registration entry.
-  content.register({});
-  return content;
-}
-
-export function useReadonlyWorkbenchProjection() {
-  return useWorkbenchState(workbench, (state) => {
-    // @ts-expect-error The selector cannot replace the document owner.
+export function Controller({ controller }: { controller: ContentController }) {
+  const content = useContent();
+  useContentController(controller);
+  useWorkbenchState(instance, (state) => {
+    // @ts-expect-error The library owns its readonly coordination state.
     state.activeDocumentId = null;
-    // @ts-expect-error Layout/catalogue invalidation is owned by Worksplit.
-    state.revision += 1;
-    // @ts-expect-error Focus state is observed by Worksplit.
-    state.focusedTabId = null;
-    // @ts-expect-error Focus state is observed by Worksplit.
-    state.focusedArea = null;
-    // @ts-expect-error Window focus state is observed by Worksplit.
-    state.windowFocused = false;
     return state.activeDocumentId;
   });
+  return content.id;
+}
+export function splitTypes(pane: PaneProps, handle: SplitViewHandle) {
+  handle.resizePane(pane.id, 180);
+  return handle.getLayout();
 }

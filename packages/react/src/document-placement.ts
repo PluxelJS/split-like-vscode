@@ -7,9 +7,7 @@ import {
   type Node,
 } from "flexlayout-react";
 
-export type DocumentPlacement =
-  | { mode: "tab"; source?: string }
-  | { mode: "split"; source?: string; direction?: DockLocation; ratio?: number };
+import type { DestinationResolver } from "./types";
 
 function collectTabsets(node: Node): TabSetNode[] {
   return node instanceof TabSetNode
@@ -23,6 +21,48 @@ function collectTabsets(node: Node): TabSetNode[] {
 export function centralTabsets(model: Model): TabSetNode[] {
   const root = model.getRootRow();
   return root ? collectTabsets(root) : [];
+}
+
+/** Native parent order defines beside; host capacity and sizing policies remain separate. */
+export function beside(options: { direction: DockLocation; ratio?: number }): DestinationResolver {
+  const { direction, ratio } = options;
+  if (
+    ![DockLocation.LEFT, DockLocation.RIGHT, DockLocation.TOP, DockLocation.BOTTOM].includes(
+      direction,
+    )
+  )
+    throw new TypeError("beside requires a native edge direction");
+  if (ratio !== undefined && (!Number.isFinite(ratio) || ratio <= 0 || ratio >= 1))
+    throw new RangeError("Split ratio must be between zero and one");
+  return (context) => {
+    const { anchor, defaultDestination, canPlace } = context;
+    if (!anchor || anchor.getChildren().length === 0)
+      return defaultDestination && canPlace(defaultDestination) ? defaultDestination : null;
+    let branch: Node = anchor;
+    for (let parent = branch.getParent(); parent; parent = branch.getParent()) {
+      if (parent instanceof RowNode && parent.getOrientation() === direction.getOrientation()) {
+        const siblings = parent.getChildren();
+        const index = siblings.indexOf(branch);
+        const forward = direction === DockLocation.RIGHT || direction === DockLocation.BOTTOM;
+        const candidates = forward
+          ? siblings.slice(index + 1)
+          : siblings.slice(0, index).toReversed();
+        for (const sibling of candidates) {
+          for (const target of collectTabsets(sibling)) {
+            const destination = { target: target.getId(), location: DockLocation.CENTER };
+            if (canPlace(destination)) return destination;
+          }
+        }
+      }
+      branch = parent;
+    }
+    const destination = {
+      target: anchor.getId(),
+      location: direction,
+      ...(ratio === undefined ? {} : { ratio }),
+    };
+    return canPlace(destination) ? destination : null;
+  };
 }
 
 /** Compare branches at their shared native split; no parallel geometry or layout state. */

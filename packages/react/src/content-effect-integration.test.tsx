@@ -4,9 +4,9 @@ import { Actions, DockLocation } from "flexlayout-react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createWorkbench, Workbench, type WorkbenchInstance, type WorkbenchOptions } from "./index";
-import { integrationState } from "./integration";
+import { integrationState } from "./internal";
 
-const instances: WorkbenchInstance<AnyRouter>[] = [];
+const instances: Pick<WorkbenchInstance<AnyRouter>, "dispose">[] = [];
 const finishPending: (() => void)[] = [];
 beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
@@ -41,28 +41,31 @@ function deferred() {
   finishPending.push(resolve);
   return { promise, resolve, reject };
 }
-function setup(options: Pick<WorkbenchOptions<AnyRouter>, "onIssue"> = {}) {
+async function setup(options: Pick<WorkbenchOptions<AnyRouter>, "onIssue"> = {}) {
   const root = createRootRoute();
   const workbench = createWorkbench({
     createRouter: (history) => createRouter({ routeTree: root, history }),
-    tools: [{ id: "editor", render: () => <p>Real native tool</p> }],
-    layout: {
+    tools: { editor: { render: () => <p>Real native tool</p> } },
+    initial: {
       layout: {
-        children: [
-          {
-            id: "main",
-            type: "tabset",
-            enableDeleteWhenEmpty: false,
-            children: [{ id: "editor", component: "worksplit.tool", name: "Editor" }],
-          },
-        ],
+        layout: {
+          children: [
+            {
+              id: "main",
+              type: "tabset",
+              enableDeleteWhenEmpty: false,
+              children: [{ id: "editor", component: "editor", name: "Editor" }],
+            },
+          ],
+        },
       },
     },
     ...options,
   });
   instances.push(workbench);
+  await workbench.start();
   const internal = integrationState(workbench);
-  return { workbench, internal, content: internal.content("editor") };
+  return { workbench, internal, content: workbench.getContent("editor")!.handle };
 }
 
 describe("content effects through close, disposal and native receipts", () => {
@@ -75,24 +78,25 @@ describe("content effects through close, disposal and native receipts", () => {
         createRouter: (history) => createRouter({ routeTree: root.addChildren([page]), history }),
       });
       instances.push(workbench);
+      await workbench.start();
       const opened = await workbench.open({ to: "/document" });
-      if (opened.status !== "committed") throw new Error(opened.status);
-      const id = opened.document.id;
+      if (opened.status !== "applied") throw new Error(opened.status);
+      const id = opened.value.document.id;
       const observed: unknown[] = [];
-      integrationState(workbench)
-        .content(id)
-        .effect(({ defer }) => {
-          defer(() => {
-            observed.push(
-              workbench.getDocument(id),
-              workbench.getDocuments(),
-              workbench.getActiveDocument(),
-            );
-          });
+      workbench.getContent(id)!.handle.runEffect(({ defer }) => {
+        defer(() => {
+          observed.push(
+            workbench.getDocument(id),
+            workbench.getDocuments(),
+            workbench.getActiveDocument(),
+          );
         });
+      });
       const result = operation === "close" ? await workbench.close(id) : await workbench.dispose();
       expect(result).toEqual(
-        operation === "close" ? { status: "closed", id, cleanupErrors: [] } : [],
+        operation === "close"
+          ? { status: "applied", value: { closedIds: [id] }, cleanupErrors: [] }
+          : { status: "applied", value: undefined, cleanupErrors: [] },
       );
       expect(observed).toEqual([null, [], null]);
     },
@@ -100,20 +104,27 @@ describe("content effects through close, disposal and native receipts", () => {
 
   it("keeps effects through refused and canceled closing, then returns cleanup failures without reporting twice", async () => {
     const onIssue = vi.fn<(issue: unknown) => void>();
-    const { workbench, internal, content } = setup({ onIssue });
+    const { workbench, internal, content } = await setup({ onIssue });
     let allow = false;
     const release = vi.fn<() => void>();
     const cleanupError = new Error("release failed");
     let signal!: AbortSignal;
-    internal.registerOwner("editor", { isDirty: () => true, beforeLeave: () => allow });
-    content.effect((effect) => {
+    internal.registerController(content, {
+      controller: {
+        leave: {
+          getState: () => ({ hasUnsavedChanges: true, token: 1 }),
+          decide: () => (allow ? { decision: "allow", token: 1 } : { decision: "deny" }),
+        },
+      },
+    });
+    content.runEffect((effect) => {
       signal = effect.signal;
       effect.defer(release);
       effect.defer(() => {
         throw cleanupError;
       });
     });
-    expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
+    expect(await workbench.close("editor")).toEqual({ status: "denied", reason: "decision" });
     const controller = new AbortController();
     controller.abort();
     expect(await workbench.close("editor", { signal: controller.signal })).toEqual({
@@ -123,8 +134,8 @@ describe("content effects through close, disposal and native receipts", () => {
     expect(release).not.toHaveBeenCalled();
     allow = true;
     expect(await workbench.close("editor")).toEqual({
-      status: "closed",
-      id: "editor",
+      status: "applied",
+      value: { closedIds: ["editor"] },
       cleanupErrors: [cleanupError],
     });
     expect(signal.aborted).toBe(true);
@@ -134,28 +145,33 @@ describe("content effects through close, disposal and native receipts", () => {
 
   it("lets close claim unreported stop cleanup while a later dispose only waits", async () => {
     const onIssue = vi.fn<(issue: unknown) => void>();
-    const { workbench, content } = setup({ onIssue });
+    const { workbench, content } = await setup({ onIssue });
     const gate = deferred();
     const failure = new Error("slow stop failed");
     const release = vi.fn<() => Promise<void>>(() => gate.promise);
-    const stop = content.effect(({ defer }) => defer(release));
+    const stop = content.runEffect(({ defer }) => defer(release));
     stop();
     stop();
     const closing = workbench.close("editor");
+    await vi.waitFor(() => expect(workbench.getContent("editor")).toBeNull());
     const disposing = workbench.dispose();
     expect(workbench.dispose()).toBe(disposing);
     gate.reject(failure);
-    expect(await closing).toEqual({ status: "closed", id: "editor", cleanupErrors: [failure] });
-    expect(await disposing).toEqual([]);
+    expect(await closing).toEqual({
+      status: "applied",
+      value: { closedIds: ["editor"] },
+      cleanupErrors: [failure],
+    });
+    expect(await disposing).toEqual({ status: "applied", value: undefined, cleanupErrors: [] });
     expect(release).toHaveBeenCalledTimes(1);
     expect(onIssue).not.toHaveBeenCalled();
   });
 
   it("does not replay a stop failure already reported before close", async () => {
     const onIssue = vi.fn<(issue: unknown) => void>();
-    const { workbench, content } = setup({ onIssue });
+    const { workbench, content } = await setup({ onIssue });
     const failure = new Error("unowned stop failed");
-    content.effect(({ defer }) =>
+    content.runEffect(({ defer }) =>
       defer(() => {
         throw failure;
       }),
@@ -168,8 +184,8 @@ describe("content effects through close, disposal and native receipts", () => {
       }),
     );
     expect(await workbench.close("editor")).toEqual({
-      status: "closed",
-      id: "editor",
+      status: "applied",
+      value: { closedIds: ["editor"] },
       cleanupErrors: [],
     });
     expect(onIssue).toHaveBeenCalledTimes(1);
@@ -177,12 +193,12 @@ describe("content effects through close, disposal and native receipts", () => {
 
   it("fixes close's waiting set before abort listeners can defer late work", async () => {
     const onIssue = vi.fn<(issue: unknown) => void>();
-    const { workbench, content } = setup({ onIssue });
+    const { workbench, content } = await setup({ onIssue });
     const known = deferred();
     const late = deferred();
     const lateFailure = new Error("late release failed");
     const lateCleanup = vi.fn<() => Promise<void>>(() => late.promise);
-    const stop = content.effect(({ signal, defer }) => {
+    const stop = content.runEffect(({ signal, defer }) => {
       defer(() => known.promise);
       signal.addEventListener("abort", () => {
         stop();
@@ -190,9 +206,13 @@ describe("content effects through close, disposal and native receipts", () => {
       });
     });
     const closing = workbench.close("editor");
-    expect(lateCleanup).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(lateCleanup).toHaveBeenCalledTimes(1));
     known.resolve();
-    expect(await closing).toEqual({ status: "closed", id: "editor", cleanupErrors: [] });
+    expect(await closing).toEqual({
+      status: "applied",
+      value: { closedIds: ["editor"] },
+      cleanupErrors: [],
+    });
     expect(onIssue).not.toHaveBeenCalled();
     late.reject(lateFailure);
     await vi.waitFor(() =>
@@ -206,35 +226,29 @@ describe("content effects through close, disposal and native receipts", () => {
 
   it("releases late setup resources after close and never attaches them to the reopened id", async () => {
     const onIssue = vi.fn<(issue: unknown) => void>();
-    const { workbench, internal, content } = setup({ onIssue });
+    const { workbench, content } = await setup({ onIssue });
     const acquired = deferred();
     const failure = new Error("late setup failed");
     const released = vi.fn<() => void>();
     let signal!: AbortSignal;
-    content.effect(async (effect) => {
+    content.runEffect(async (effect) => {
       signal = effect.signal;
       await acquired.promise;
       effect.defer(released);
       throw failure;
     });
-    expect(await workbench.close("editor")).toMatchObject({ status: "closed", cleanupErrors: [] });
+    expect(await workbench.close("editor")).toMatchObject({ status: "applied", cleanupErrors: [] });
     expect(signal.aborted).toBe(true);
     expect(
       await workbench.dispatch(
-        Actions.addTab(
-          { id: "editor", component: "worksplit.tool" },
-          "main",
-          DockLocation.CENTER,
-          -1,
-        ),
+        Actions.addTab({ id: "editor", component: "editor" }, "main", DockLocation.CENTER, -1),
       ),
-    ).toEqual({ status: "applied" });
-    const fresh = internal.content("editor");
+    ).toEqual({ status: "applied", value: undefined, cleanupErrors: [] });
+    const fresh = workbench.getContent("editor")!.handle;
     expect(fresh).not.toBe(content);
     const rejectedSetup = vi.fn<() => void>();
-    expect(() => content.effect(rejectedSetup)).toThrow(/closed content/);
+    expect(() => content.runEffect(rejectedSetup)).toThrow(/Content instance has ended/);
     expect(rejectedSetup).not.toHaveBeenCalled();
-    await expect(content.executeCommand("unused")).rejects.toThrow(/closed content/);
     acquired.resolve();
     await vi.waitFor(() =>
       expect(onIssue).toHaveBeenCalledExactlyOnceWith({
@@ -244,25 +258,29 @@ describe("content effects through close, disposal and native receipts", () => {
       }),
     );
     expect(released).toHaveBeenCalledTimes(1);
-    expect(await workbench.close("editor")).toMatchObject({ status: "closed", cleanupErrors: [] });
+    expect(await workbench.close("editor")).toMatchObject({ status: "applied", cleanupErrors: [] });
     expect(released).toHaveBeenCalledTimes(1);
   });
 
   it("consumes a coalesced real native close receipt once", async () => {
     const onIssue = vi.fn<(issue: unknown) => void>();
-    const { workbench, internal, content } = setup({ onIssue });
+    const { workbench, internal, content } = await setup({ onIssue });
     const decision = deferred();
     const failure = new Error("native decision failed");
     const released = vi.fn<() => void>();
-    internal.registerOwner("editor", {
-      isDirty: () => true,
-      beforeLeave: async () => {
-        await decision.promise;
-        return true;
+    internal.registerController(content, {
+      controller: {
+        leave: {
+          getState: () => ({ hasUnsavedChanges: true, token: 1 }),
+          decide: async () => {
+            await decision.promise;
+            return { decision: "allow", token: 1 };
+          },
+        },
       },
     });
-    content.effect(({ defer }) => defer(released));
-    render(<Workbench workbench={workbench} />);
+    content.runEffect(({ defer }) => defer(released));
+    render(<Workbench instance={workbench} />);
     const button = await waitFor(() => {
       const close = document.querySelector<HTMLElement>(
         '#flexlayout-tabbutton-editor [title="Close"]',
@@ -284,27 +302,23 @@ describe("content effects through close, disposal and native receipts", () => {
 
   it("reports unowned failures by default and a throwing reporter cannot interrupt release", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const { content } = setup();
+    const { content } = await setup();
     const failure = new Error("setup failed");
     const release = vi.fn<() => void>();
-    content.effect(({ defer }) => {
+    content.runEffect(({ defer }) => {
       defer(release);
       throw failure;
     });
     await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
-    expect(log).toHaveBeenCalledWith("Worksplit issue", {
-      code: "operation-failed",
-      id: "editor",
-      error: failure,
-    });
+    expect(log).toHaveBeenCalledWith("Worksplit issue", failure);
     const reporterFailure = new Error("reporter failed");
     const reporter = vi.fn<(issue: unknown) => void>(() => {
       throw reporterFailure;
     });
-    const other = setup({ onIssue: reporter });
+    const other = await setup({ onIssue: reporter });
     const first = vi.fn<() => void>();
     const second = vi.fn<() => void>();
-    const stop = other.content.effect(({ defer }) => {
+    const stop = other.content.runEffect(({ defer }) => {
       defer(first);
       defer(() => {
         throw failure;
@@ -315,12 +329,9 @@ describe("content effects through close, disposal and native receipts", () => {
     await vi.waitFor(() => expect(first).toHaveBeenCalledTimes(1));
     expect(second).toHaveBeenCalledTimes(1);
     expect(reporter).toHaveBeenCalledTimes(1);
-    const diagnostic = log.mock.calls.find(
-      ([message]) => message === "Worksplit issue reporter failed",
-    )?.[1] as { error: AggregateError } | undefined;
-    expect(diagnostic?.error.errors).toEqual([failure, reporterFailure]);
+    expect(log).toHaveBeenCalledWith("Worksplit issue reporter failed", reporterFailure, failure);
     expect(await other.workbench.close("editor")).toMatchObject({
-      status: "closed",
+      status: "applied",
       cleanupErrors: [],
     });
   });

@@ -4,6 +4,6 @@
     "composite": true,
     "types": ["vite/client"]
   },
-  "references": [{ "path": "../core" }, { "path": "../react" }],
+  "references": [{ "path": "../split-view" }, { "path": "../react" }],
   "include": ["src", "vite.config.ts"]
 }

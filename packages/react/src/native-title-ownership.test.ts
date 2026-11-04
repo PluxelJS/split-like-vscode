@@ -36,7 +36,12 @@ function setup({
       entry: typeof search.entry === "string" ? search.entry : "main",
     }),
     loader: load,
-    staticData: { worksplit: { title: "Document", identitySearch: ["entry"] } },
+    staticData: {
+      worksplit: {
+        title: "Document",
+        documentKey: ({ params, search }) => JSON.stringify([params.id, search.entry]),
+      },
+    },
   });
   const settings = createRoute({
     getParentRoute: () => root,
@@ -66,17 +71,22 @@ function setup({
       return router;
     },
     onIssue,
-    ...(snapshot ? { snapshot } : {}),
+    workspaceId: "titles",
+    ...(snapshot ? { initial: { snapshot } } : {}),
   });
   instances.push(workbench);
   const open = async (id: string, view = "edit") => {
-    const result = await workbench.open({
-      to: "/documents/$id",
-      params: { id },
-      search: { view, entry: "main" },
-    });
-    if (result.status !== "committed") throw new Error(`Fixture open: ${result.status}`);
-    return result;
+    await workbench.start();
+    const result = await workbench.open(
+      {
+        to: "/documents/$id",
+        params: { id },
+        search: { view, entry: "main" },
+      },
+      { reuse: "navigate" },
+    );
+    if (result.status !== "applied") throw new Error(`Fixture open: ${result.status}`);
+    return result.value;
   };
   return { workbench, routers, open, onIssue };
 }
@@ -85,7 +95,7 @@ describe("native document title ownership", () => {
   it("reloads an accepted ordinary owner beside its explicit copy without a new conflict", async () => {
     const first = setup();
     const a = (await first.open("A")).document;
-    expect((await first.workbench.duplicate(a.id)).status).toBe("committed");
+    expect((await first.workbench.duplicate(a.id)).status).toBe("applied");
     await first.routers[1]!.invalidate();
     expect(first.onIssue).not.toHaveBeenCalled();
     expect(first.workbench.getDocuments()).toHaveLength(2);
@@ -94,11 +104,11 @@ describe("native document title ownership", () => {
   it("lazily restores an accepted ordinary owner beside its explicit copy without a new conflict", async () => {
     const first = setup();
     const a = (await first.open("A")).document;
-    expect((await first.workbench.duplicate(a.id)).status).toBe("committed");
-    const restored = setup({ snapshot: first.workbench.snapshot() });
-    await restored.workbench.start(a.href);
-    restored.workbench.activate(a.id, { focus: false });
-    expect(await restored.open("A")).toMatchObject({ status: "committed", reused: true });
+    expect((await first.workbench.duplicate(a.id)).status).toBe("applied");
+    const restored = setup({ snapshot: first.workbench.createSnapshot() });
+    await restored.workbench.start({ href: a.href });
+    await restored.workbench.activate(a.id);
+    expect(await restored.open("A")).toMatchObject({ reused: true });
     expect(restored.onIssue).not.toHaveBeenCalled();
     expect(restored.workbench.getDocuments()).toHaveLength(2);
   });
@@ -109,7 +119,7 @@ describe("native document title ownership", () => {
     const router = routers.at(-1)!;
     const id = first.document.id;
     expect(first.document.title).toBe("Document");
-    expect(await workbench.dispatch(Actions.renameTab(id, "Studio A"))).toEqual({
+    expect(await workbench.dispatch(Actions.renameTab(id, "Studio A"))).toMatchObject({
       status: "applied",
     });
     const reused = await open("A", "preview");
@@ -124,9 +134,9 @@ describe("native document title ownership", () => {
     });
     await router.invalidate();
     expect(workbench.getDocument(id)?.title).toBe("Studio A");
-    expect((Model.fromJson(workbench.snapshot().layout).getNodeById(id) as TabNode).getName()).toBe(
-      "Studio A",
-    );
+    expect(
+      (Model.fromJson(workbench.createSnapshot().layout).getNodeById(id) as TabNode).getName(),
+    ).toBe("Studio A");
     expect(onIssue).not.toHaveBeenCalled();
   });
 
@@ -136,18 +146,18 @@ describe("native document title ownership", () => {
     const b = (await first.open("B")).document;
     await first.workbench.dispatch(Actions.renameTab(a.id, "Studio A"));
     await first.workbench.dispatch(Actions.renameTab(b.id, "Studio B"));
-    first.workbench.activate(a.id, { focus: false });
-    const restored = setup({ snapshot: first.workbench.snapshot() });
-    expect(restored.routers).toHaveLength(1); // Only the inert typed URL builder exists.
+    await first.workbench.activate(a.id);
+    const restored = setup({ snapshot: first.workbench.createSnapshot() });
+    expect(restored.routers).toHaveLength(0); // Restored inactive documents have no Router yet.
     expect(restored.workbench.getDocuments()).toMatchObject([
       { id: a.id, title: "Studio A" },
       { id: b.id, title: "Studio B" },
     ]);
-    expect(await restored.workbench.start(a.href)).toMatchObject({
-      status: "committed",
-      document: { id: a.id, title: "Studio A" },
+    expect(await restored.workbench.start({ href: a.href })).toMatchObject({
+      status: "applied",
+      value: { document: { id: a.id, title: "Studio A" } },
     });
-    expect(restored.routers).toHaveLength(2);
+    expect(restored.routers.filter((router) => !router.history.signal?.aborted)).toHaveLength(1);
     expect(await restored.open("B")).toMatchObject({
       reused: true,
       document: { id: b.id, title: "Studio B" },
@@ -158,39 +168,46 @@ describe("native document title ownership", () => {
     ]);
   });
 
-  it("applies the route default after actual params, identity search or owner changes", async () => {
+  it("retains manual titles across params, reuse-key and route changes; new copies start automatic", async () => {
     const { workbench, open, routers } = setup();
     const id = (await open("A")).document.id;
     const router = routers.at(-1)!;
     await workbench.dispatch(Actions.renameTab(id, "Studio A"));
     await router.navigate({ href: "/documents/B?view=edit&entry=main" });
     expect(workbench.getDocument(id)).toMatchObject({
-      title: "Document",
+      title: "Studio A",
       href: "/documents/B?view=edit&entry=main",
     });
     await workbench.dispatch(Actions.renameTab(id, "Studio B"));
     await router.navigate({ href: "/documents/B?view=edit&entry=outline" });
-    expect(workbench.getDocument(id)?.title).toBe("Document");
+    expect(workbench.getDocument(id)?.title).toBe("Studio B");
     await workbench.dispatch(Actions.renameTab(id, "Outline B"));
     await router.navigate({ href: "/documents/B?view=preview&entry=outline#details" });
     expect(workbench.getDocument(id)?.title).toBe("Outline B");
     await router.navigate({ href: "/settings" });
-    expect(workbench.getDocument(id)).toMatchObject({ title: "Settings", href: "/settings" });
+    expect(workbench.getDocument(id)).toMatchObject({ title: "Outline B", href: "/settings" });
     expect(workbench.getDocuments()).toHaveLength(1);
+    expect(await workbench.duplicate(id)).toMatchObject({
+      status: "applied",
+      value: { document: { title: "Settings" } },
+    });
   });
 
-  it("uses a redirected owner's default when a restored URL resolves to different content", async () => {
+  it("preserves restored manual ownership when a restored URL redirects", async () => {
     const first = setup();
+    await first.workbench.start();
     const opened = await first.workbench.open({ to: "/legacy" });
-    if (opened.status !== "committed") throw new Error(opened.status);
-    await first.workbench.dispatch(Actions.renameTab(opened.document.id, "Legacy draft"));
-    const restored = setup({ snapshot: first.workbench.snapshot(), redirectLegacy: true });
-    expect(await restored.workbench.start("/legacy")).toMatchObject({
-      status: "committed",
-      document: {
-        id: opened.document.id,
-        title: "Document",
-        href: "/documents/A?view=edit&entry=main",
+    if (opened.status !== "applied") throw new Error(opened.status);
+    await first.workbench.dispatch(Actions.renameTab(opened.value.document.id, "Legacy draft"));
+    const restored = setup({ snapshot: first.workbench.createSnapshot(), redirectLegacy: true });
+    expect(await restored.workbench.start({ href: "/legacy" })).toMatchObject({
+      status: "applied",
+      value: {
+        document: {
+          id: opened.value.document.id,
+          title: "Legacy draft",
+          href: "/documents/A?view=edit&entry=main",
+        },
       },
     });
   });
@@ -203,14 +220,14 @@ describe("native document title ownership", () => {
       finish = resolve;
     });
     finishLoads.push(() => finish());
-    const restored = setup({ snapshot: first.workbench.snapshot(), load: () => gate });
-    const startup = restored.workbench.start(original.href);
-    await vi.waitUntil(() => restored.routers.length === 2);
-    await restored.workbench.dispatch(Actions.renameTab(original.id, "Edited while loading"));
+    const restored = setup({ snapshot: first.workbench.createSnapshot(), load: () => gate });
+    const startup = restored.workbench.start({ href: original.href });
+    await vi.waitUntil(() => restored.routers.some((router) => router.state.isLoading));
+    restored.workbench.model.doAction(Actions.renameTab(original.id, "Edited while loading"));
     finish();
     expect(await startup).toMatchObject({
-      status: "committed",
-      document: { id: original.id, title: "Edited while loading" },
+      status: "applied",
+      value: { document: { id: original.id, title: "Edited while loading" } },
     });
   });
 });

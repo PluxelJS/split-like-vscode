@@ -1,0 +1,46 @@
+{
+  "name": "@worksplit/split-view",
+  "version": "0.1.0",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": [
+    "dist/style.css",
+    "src/style.css"
+  ],
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json",
+    "./style.css": "./src/style.css"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": "./dist/index.js",
+      "./package.json": "./package.json",
+      "./style.css": "./dist/style.css"
+    }
+  },
+  "scripts": {
+    "build": "vp run compile",
+    "test": "vp run check-tests",
+    "typecheck": "vp run check-types",
+    "check": "vp check",
+    "fix": "vp check --fix"
+  },
+  "devDependencies": {
+    "@testing-library/react": "catalog:test",
+    "@types/react": "catalog:frontend",
+    "@types/react-dom": "catalog:frontend",
+    "jsdom": "catalog:dev",
+    "react": "catalog:frontend",
+    "react-dom": "catalog:frontend",
+    "vite-plus": "catalog:build"
+  },
+  "peerDependencies": {
+    "react": ">=18.3.0 || >=19.0.0"
+  }
+}

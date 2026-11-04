@@ -1,0 +1,996 @@
+diff --git a/dist/cjs/index.cjs b/dist/cjs/index.cjs
+index 6d3ac145..e4708c56 100644
+--- a/dist/cjs/index.cjs
++++ b/dist/cjs/index.cjs
+@@ -361,44 +361,207 @@ function createHashHistory(opts) {
+ * Ideal for server rendering, tests, and non-DOM environments.
+ * @link https://tanstack.com/router/latest/docs/framework/react/guide/history-types
+ */
+-function createMemoryHistory(opts = { initialEntries: ["/"] }) {
+-	const entries = opts.initialEntries;
+-	let index = opts.initialIndex ? Math.min(Math.max(opts.initialIndex, 0), entries.length - 1) : entries.length - 1;
+-	const states = entries.map((_entry, index) => assignKeyAndIndex(index, void 0));
+-	const getLocation = () => parseHref(entries[index], states[index]);
+-	let blockers = [];
+-	const _getBlockers = () => blockers;
+-	const _setBlockers = (newBlockers) => blockers = newBlockers;
+-	return createHistory({
+-		getLocation,
+-		getLength: () => entries.length,
+-		pushState: (path, state) => {
+-			index = index < entries.length - 1 ? index + 1 : entries.length;
+-			states[index] = state;
+-			entries[index] = path;
+-			if (index < entries.length - 1) {
+-				entries.length = index + 1;
+-				states.length = index + 1;
+-			}
+-		},
+-		replaceState: (path, state) => {
+-			states[index] = state;
+-			entries[index] = path;
+-		},
+-		back: () => {
+-			index = Math.max(index - 1, 0);
+-		},
+-		forward: () => {
+-			index = Math.min(index + 1, entries.length - 1);
+-		},
+-		go: (n) => {
+-			index = Math.min(Math.max(index + n, 0), entries.length - 1);
+-		},
+-		createHref: normalizeHref,
+-		getBlockers: _getBlockers,
+-		setBlockers: _setBlockers
+-	});
++function createMemoryHistory(opts = {
++    initialEntries: [
++        '/'
++    ]
++}) {
++    if (!opts.initialEntries.length) throw new Error('Memory history requires an entry');
++    const entries = opts.initialEntries.map((href, index)=>parseHref(href, assignKeyAndIndex(index, undefined)));
++    let index = Math.min(Math.max(opts.initialIndex ?? entries.length - 1, 0), entries.length - 1);
++    let blockers = [];
++    const subscribers = new Set();
++    const subscriptions = new Map();
++    const records = new WeakMap();
++    const live = new Set();
++    let pending;
++    let destroyed = false;
++    const lifetime = new AbortController();
++    const completeNavigation = (navigation, result, error)=>{
++        const record = records.get(navigation);
++        if (!record || navigation.result) return;
++        Object.defineProperty(navigation, 'result', {
++            value: result
++        });
++        if (error !== undefined) Object.defineProperty(navigation, 'error', {
++            value: error
++        });
++        live.delete(navigation);
++        if (pending === navigation) pending = undefined;
++        record.resolveCommit(record.committed);
++        record.resolveFinished(result);
++        record.controller.abort();
++        if (navigation.parent) completeNavigation(navigation.parent, result, error);
++    };
++    const notify = (action, navigation)=>{
++        const location = entries[index];
++        for (const subscriber of subscribers){
++            Promise.resolve(subscriber({
++                location,
++                action,
++                navigation
++            })).catch((error)=>{
++                if (navigation) completeNavigation(navigation, 'failed', error);
++            });
++        }
++    };
++    const request = (action, value, state, options)=>{
++        const previousPending = pending;
++        const currentLocation = entries[index];
++        const targetIndex = action === 'GO' ? Math.min(Math.max(index + value, 0), entries.length - 1) : action === 'BACK' ? Math.max(index - 1, 0) : action === 'FORWARD' ? Math.min(index + 1, entries.length - 1) : index;
++        const nextLocation = action === 'PUSH' || action === 'REPLACE' ? parseHref(value, assignKeyAndIndex(index + (action === 'PUSH' ? 1 : 0), state)) : entries[targetIndex];
++        const parentRecord = options?.navigation && records.get(options.navigation);
++        const parent = parentRecord?.committed && !options.navigation.result ? options.navigation : undefined;
++        const controller = new AbortController();
++        let resolveCommit;
++        let resolveFinished;
++        const navigation = {
++            currentLocation,
++            nextLocation,
++            action,
++            parent,
++            signal: controller.signal,
++            committed: new Promise((resolve)=>{
++                resolveCommit = resolve;
++            }),
++            finished: new Promise((resolve)=>{
++                resolveFinished = resolve;
++            })
++        };
++        const record = {
++            controller,
++            committed: false,
++            resolveCommit,
++            resolveFinished,
++            checks: parent ? [
++                ...parentRecord.checks
++            ] : []
++        };
++        records.set(navigation, record);
++        live.add(navigation);
++        pending = navigation;
++        try {
++            options?.onNavigationStart?.(navigation);
++        } catch (error) {
++            completeNavigation(navigation, 'failed', error);
++        }
++        if (previousPending) completeNavigation(previousPending, 'superseded');
++        const args = {
++            currentLocation,
++            nextLocation,
++            action,
++            navigation
++        };
++        const run = async ()=>{
++            try {
++                if (destroyed) {
++                    completeNavigation(navigation, 'superseded');
++                    return;
++                }
++                if (!parent && (opts.requireNavigationApproval || !options?.ignoreBlocker)) {
++                    for (const blocker of [
++                        ...blockers
++                    ]){
++                        if (controller.signal.aborted) return;
++                        record.checks.push({
++                            blocker,
++                            args
++                        });
++                        if (await blocker.blockerFn(args)) {
++                            completeNavigation(navigation, 'denied');
++                            return;
++                        }
++                    }
++                }
++                if (destroyed || controller.signal.aborted || pending !== navigation || entries[index] !== currentLocation || (action === 'GO' || action === 'BACK' || action === 'FORWARD') && entries[targetIndex] !== nextLocation) {
++                    completeNavigation(navigation, 'superseded');
++                    return;
++                }
++                for (const check of record.checks){
++                    if (check.blocker.beforeCommit && !check.blocker.beforeCommit(check.args)) {
++                        completeNavigation(navigation, 'denied');
++                        return;
++                    }
++                    if (controller.signal.aborted || pending !== navigation || entries[index] !== currentLocation) {
++                        completeNavigation(navigation, 'superseded');
++                        return;
++                    }
++                }
++                if (action === 'PUSH') {
++                    nextLocation.state.__TSR_index = index + 1;
++                    entries.splice(++index, entries.length, nextLocation);
++                } else if (action === 'REPLACE') {
++                    nextLocation.state.__TSR_index = index;
++                    entries[index] = nextLocation;
++                } else index = targetIndex;
++                record.committed = true;
++                pending = undefined;
++                resolveCommit(true);
++                notify(action === 'GO' ? {
++                    type: action,
++                    index: value
++                } : {
++                    type: action
++                }, navigation);
++            } catch (error) {
++                completeNavigation(navigation, 'failed', error);
++            }
++        };
++        void run();
++        return navigation;
++    };
++    return {
++        signal: lifetime.signal,
++        get location () {
++            return entries[index];
++        },
++        get length () {
++            return entries.length;
++        },
++        subscribers,
++        subscribe (cb) {
++            subscriptions.set(cb, (subscriptions.get(cb) ?? 0) + 1);
++            subscribers.add(cb);
++            let active = true;
++            return ()=>{
++                if (!active) return;
++                active = false;
++                const remaining = (subscriptions.get(cb) ?? 1) - 1;
++                if (remaining) subscriptions.set(cb, remaining);
++                else {
++                    subscriptions.delete(cb);
++                    subscribers.delete(cb);
++                }
++            };
++        },
++        push: (path, state, options)=>request('PUSH', path, state, options),
++        replace: (path, state, options)=>request('REPLACE', path, state, options),
++        go: (delta, options)=>request('GO', delta, undefined, options),
++        back: (options)=>request('BACK', undefined, undefined, options),
++        forward: (options)=>request('FORWARD', undefined, undefined, options),
++        canGoBack: ()=>index > 0,
++        createHref: normalizeHref,
++        block (blocker) {
++            blockers.push(blocker);
++            return ()=>{
++                blockers = blockers.filter((item)=>item !== blocker);
++            };
++        },
++        flush () {},
++        destroy () {
++            destroyed = true;
++            lifetime.abort();
++            for (const navigation of live)completeNavigation(navigation, 'superseded');
++            subscribers.clear();
++            subscriptions.clear();
++        },
++        notify,
++        _getBlockers: ()=>blockers,
++        completeNavigation,
++        getEntry: (key)=>entries.find((entry)=>entry.state.__TSR_key === key)
++    };
+ }
++
+ var noop = () => {};
+ var ServerHistory = class {
+ 	constructor(location) {
+@@ -469,5 +632,3 @@ exports.createMemoryHistory = createMemoryHistory;
+ exports.createServerHistory = createServerHistory;
+ exports.normalizeProtocolRelative = normalizeProtocolRelative;
+ exports.parseHref = parseHref;
+-
+-//# sourceMappingURL=index.cjs.map
+\ No newline at end of file
+diff --git a/dist/cjs/index.d.cts b/dist/cjs/index.d.cts
+index e35a50b2..cb446ed3 100644
+--- a/dist/cjs/index.d.cts
++++ b/dist/cjs/index.d.cts
+@@ -1,5 +1,7 @@
+ export interface NavigateOptions {
+     ignoreBlocker?: boolean;
++    navigation?: HistoryNavigation;
++    onNavigationStart?: (navigation: HistoryNavigation) => void;
+ }
+ type SubscriberHistoryAction = {
+     type: Exclude<HistoryAction, 'GO'>;
+@@ -10,17 +12,20 @@ type SubscriberHistoryAction = {
+ type SubscriberArgs = {
+     location: HistoryLocation;
+     action: SubscriberHistoryAction;
++    navigation?: HistoryNavigation;
+ };
+ export interface RouterHistory {
++    readonly signal?: AbortSignal;
+     location: HistoryLocation;
++    completeNavigation?: (navigation: HistoryNavigation, result: HistoryNavigationResult, error?: unknown) => void;
+     length: number;
+     subscribers: Set<(opts: SubscriberArgs) => void>;
+     subscribe: (cb: (opts: SubscriberArgs) => void) => () => void;
+-    push: (path: string, state?: any, navigateOpts?: NavigateOptions) => void;
+-    replace: (path: string, state?: any, navigateOpts?: NavigateOptions) => void;
+-    go: (index: number, navigateOpts?: NavigateOptions) => void;
+-    back: (navigateOpts?: NavigateOptions) => void;
+-    forward: (navigateOpts?: NavigateOptions) => void;
++    push: (path: string, state?: any, navigateOpts?: NavigateOptions) => void | HistoryNavigation;
++    replace: (path: string, state?: any, navigateOpts?: NavigateOptions) => void | HistoryNavigation;
++    go: (index: number, navigateOpts?: NavigateOptions) => void | HistoryNavigation;
++    back: (navigateOpts?: NavigateOptions) => void | HistoryNavigation;
++    forward: (navigateOpts?: NavigateOptions) => void | HistoryNavigation;
+     canGoBack: () => boolean;
+     createHref: (href: string) => string;
+     block: (blocker: NavigationBlocker) => () => void;
+@@ -53,10 +58,12 @@ export type BlockerFnArgs = {
+     currentLocation: HistoryLocation;
+     nextLocation: HistoryLocation;
+     action: HistoryAction;
++    navigation?: HistoryNavigation;
+ };
+ export type BlockerFn = (args: BlockerFnArgs) => Promise<ShouldAllowNavigation> | ShouldAllowNavigation;
+ export type NavigationBlocker = {
+     blockerFn: BlockerFn;
++    beforeCommit?: (args: BlockerFnArgs) => boolean;
+     enableBeforeUnload?: (() => boolean) | boolean;
+ };
+ export declare function normalizeProtocolRelative(url: string): string;
+@@ -113,8 +120,41 @@ export declare function createHashHistory(opts?: {
+ export declare function createMemoryHistory(opts?: {
+     initialEntries: Array<string>;
+     initialIndex?: number;
+-}): RouterHistory;
++    requireNavigationApproval?: boolean;
++}): MemoryHistory;
+ /** A fixed request location; server navigation is a no-op. */
+ export declare function createServerHistory(href: string): RouterHistory;
+ export declare function parseHref(href: string, state: ParsedHistoryState | undefined): HistoryLocation;
+ export {};
++
++/** A request identity, not a URL permission or a second history. */
++export type HistoryNavigationResult = 'accepted' | 'denied' | 'superseded' | 'failed'
++export interface HistoryNavigationOutcome {
++  status: HistoryNavigationResult
++  navigation?: HistoryNavigation
++  error?: unknown
++}
++export interface HistoryNavigation {
++  readonly currentLocation: HistoryLocation
++  readonly nextLocation: HistoryLocation
++  readonly action: HistoryAction
++  readonly parent?: HistoryNavigation
++  readonly signal: AbortSignal
++  readonly committed: Promise<boolean>
++  readonly finished: Promise<HistoryNavigationResult>
++  readonly error?: unknown
++  readonly result?: HistoryNavigationResult
++}
++export interface MemoryHistory extends RouterHistory {
++  readonly signal: AbortSignal
++  push: (path: string, state?: any, options?: NavigateOptions) => HistoryNavigation
++  replace: (path: string, state?: any, options?: NavigateOptions) => HistoryNavigation
++  go: (delta: number, options?: NavigateOptions) => HistoryNavigation
++  back: (options?: NavigateOptions) => HistoryNavigation
++  forward: (options?: NavigateOptions) => HistoryNavigation
++  /** Called by the Router at its actual acceptance or retirement boundary. */
++  completeNavigation: (navigation: HistoryNavigation, result: HistoryNavigationResult, error?: unknown) => void
++  /** Resolve a real session entry; replaced or truncated entries are absent. */
++  getEntry: (key: string) => HistoryLocation | undefined
++}
++
+diff --git a/dist/esm/index.d.ts b/dist/esm/index.d.ts
+index e35a50b2..cb446ed3 100644
+--- a/dist/esm/index.d.ts
++++ b/dist/esm/index.d.ts
+@@ -1,5 +1,7 @@
+ export interface NavigateOptions {
+     ignoreBlocker?: boolean;
++    navigation?: HistoryNavigation;
++    onNavigationStart?: (navigation: HistoryNavigation) => void;
+ }
+ type SubscriberHistoryAction = {
+     type: Exclude<HistoryAction, 'GO'>;
+@@ -10,17 +12,20 @@ type SubscriberHistoryAction = {
+ type SubscriberArgs = {
+     location: HistoryLocation;
+     action: SubscriberHistoryAction;
++    navigation?: HistoryNavigation;
+ };
+ export interface RouterHistory {
++    readonly signal?: AbortSignal;
+     location: HistoryLocation;
++    completeNavigation?: (navigation: HistoryNavigation, result: HistoryNavigationResult, error?: unknown) => void;
+     length: number;
+     subscribers: Set<(opts: SubscriberArgs) => void>;
+     subscribe: (cb: (opts: SubscriberArgs) => void) => () => void;
+-    push: (path: string, state?: any, navigateOpts?: NavigateOptions) => void;
+-    replace: (path: string, state?: any, navigateOpts?: NavigateOptions) => void;
+-    go: (index: number, navigateOpts?: NavigateOptions) => void;
+-    back: (navigateOpts?: NavigateOptions) => void;
+-    forward: (navigateOpts?: NavigateOptions) => void;
++    push: (path: string, state?: any, navigateOpts?: NavigateOptions) => void | HistoryNavigation;
++    replace: (path: string, state?: any, navigateOpts?: NavigateOptions) => void | HistoryNavigation;
++    go: (index: number, navigateOpts?: NavigateOptions) => void | HistoryNavigation;
++    back: (navigateOpts?: NavigateOptions) => void | HistoryNavigation;
++    forward: (navigateOpts?: NavigateOptions) => void | HistoryNavigation;
+     canGoBack: () => boolean;
+     createHref: (href: string) => string;
+     block: (blocker: NavigationBlocker) => () => void;
+@@ -53,10 +58,12 @@ export type BlockerFnArgs = {
+     currentLocation: HistoryLocation;
+     nextLocation: HistoryLocation;
+     action: HistoryAction;
++    navigation?: HistoryNavigation;
+ };
+ export type BlockerFn = (args: BlockerFnArgs) => Promise<ShouldAllowNavigation> | ShouldAllowNavigation;
+ export type NavigationBlocker = {
+     blockerFn: BlockerFn;
++    beforeCommit?: (args: BlockerFnArgs) => boolean;
+     enableBeforeUnload?: (() => boolean) | boolean;
+ };
+ export declare function normalizeProtocolRelative(url: string): string;
+@@ -113,8 +120,41 @@ export declare function createHashHistory(opts?: {
+ export declare function createMemoryHistory(opts?: {
+     initialEntries: Array<string>;
+     initialIndex?: number;
+-}): RouterHistory;
++    requireNavigationApproval?: boolean;
++}): MemoryHistory;
+ /** A fixed request location; server navigation is a no-op. */
+ export declare function createServerHistory(href: string): RouterHistory;
+ export declare function parseHref(href: string, state: ParsedHistoryState | undefined): HistoryLocation;
+ export {};
++
++/** A request identity, not a URL permission or a second history. */
++export type HistoryNavigationResult = 'accepted' | 'denied' | 'superseded' | 'failed'
++export interface HistoryNavigationOutcome {
++  status: HistoryNavigationResult
++  navigation?: HistoryNavigation
++  error?: unknown
++}
++export interface HistoryNavigation {
++  readonly currentLocation: HistoryLocation
++  readonly nextLocation: HistoryLocation
++  readonly action: HistoryAction
++  readonly parent?: HistoryNavigation
++  readonly signal: AbortSignal
++  readonly committed: Promise<boolean>
++  readonly finished: Promise<HistoryNavigationResult>
++  readonly error?: unknown
++  readonly result?: HistoryNavigationResult
++}
++export interface MemoryHistory extends RouterHistory {
++  readonly signal: AbortSignal
++  push: (path: string, state?: any, options?: NavigateOptions) => HistoryNavigation
++  replace: (path: string, state?: any, options?: NavigateOptions) => HistoryNavigation
++  go: (delta: number, options?: NavigateOptions) => HistoryNavigation
++  back: (options?: NavigateOptions) => HistoryNavigation
++  forward: (options?: NavigateOptions) => HistoryNavigation
++  /** Called by the Router at its actual acceptance or retirement boundary. */
++  completeNavigation: (navigation: HistoryNavigation, result: HistoryNavigationResult, error?: unknown) => void
++  /** Resolve a real session entry; replaced or truncated entries are absent. */
++  getEntry: (key: string) => HistoryLocation | undefined
++}
++
+diff --git a/dist/esm/index.js b/dist/esm/index.js
+index 795c98a8..bef758e5 100644
+--- a/dist/esm/index.js
++++ b/dist/esm/index.js
+@@ -360,44 +360,207 @@ function createHashHistory(opts) {
+ * Ideal for server rendering, tests, and non-DOM environments.
+ * @link https://tanstack.com/router/latest/docs/framework/react/guide/history-types
+ */
+-function createMemoryHistory(opts = { initialEntries: ["/"] }) {
+-	const entries = opts.initialEntries;
+-	let index = opts.initialIndex ? Math.min(Math.max(opts.initialIndex, 0), entries.length - 1) : entries.length - 1;
+-	const states = entries.map((_entry, index) => assignKeyAndIndex(index, void 0));
+-	const getLocation = () => parseHref(entries[index], states[index]);
+-	let blockers = [];
+-	const _getBlockers = () => blockers;
+-	const _setBlockers = (newBlockers) => blockers = newBlockers;
+-	return createHistory({
+-		getLocation,
+-		getLength: () => entries.length,
+-		pushState: (path, state) => {
+-			index = index < entries.length - 1 ? index + 1 : entries.length;
+-			states[index] = state;
+-			entries[index] = path;
+-			if (index < entries.length - 1) {
+-				entries.length = index + 1;
+-				states.length = index + 1;
+-			}
+-		},
+-		replaceState: (path, state) => {
+-			states[index] = state;
+-			entries[index] = path;
+-		},
+-		back: () => {
+-			index = Math.max(index - 1, 0);
+-		},
+-		forward: () => {
+-			index = Math.min(index + 1, entries.length - 1);
+-		},
+-		go: (n) => {
+-			index = Math.min(Math.max(index + n, 0), entries.length - 1);
+-		},
+-		createHref: normalizeHref,
+-		getBlockers: _getBlockers,
+-		setBlockers: _setBlockers
+-	});
++function createMemoryHistory(opts = {
++    initialEntries: [
++        '/'
++    ]
++}) {
++    if (!opts.initialEntries.length) throw new Error('Memory history requires an entry');
++    const entries = opts.initialEntries.map((href, index)=>parseHref(href, assignKeyAndIndex(index, undefined)));
++    let index = Math.min(Math.max(opts.initialIndex ?? entries.length - 1, 0), entries.length - 1);
++    let blockers = [];
++    const subscribers = new Set();
++    const subscriptions = new Map();
++    const records = new WeakMap();
++    const live = new Set();
++    let pending;
++    let destroyed = false;
++    const lifetime = new AbortController();
++    const completeNavigation = (navigation, result, error)=>{
++        const record = records.get(navigation);
++        if (!record || navigation.result) return;
++        Object.defineProperty(navigation, 'result', {
++            value: result
++        });
++        if (error !== undefined) Object.defineProperty(navigation, 'error', {
++            value: error
++        });
++        live.delete(navigation);
++        if (pending === navigation) pending = undefined;
++        record.resolveCommit(record.committed);
++        record.resolveFinished(result);
++        record.controller.abort();
++        if (navigation.parent) completeNavigation(navigation.parent, result, error);
++    };
++    const notify = (action, navigation)=>{
++        const location = entries[index];
++        for (const subscriber of subscribers){
++            Promise.resolve(subscriber({
++                location,
++                action,
++                navigation
++            })).catch((error)=>{
++                if (navigation) completeNavigation(navigation, 'failed', error);
++            });
++        }
++    };
++    const request = (action, value, state, options)=>{
++        const previousPending = pending;
++        const currentLocation = entries[index];
++        const targetIndex = action === 'GO' ? Math.min(Math.max(index + value, 0), entries.length - 1) : action === 'BACK' ? Math.max(index - 1, 0) : action === 'FORWARD' ? Math.min(index + 1, entries.length - 1) : index;
++        const nextLocation = action === 'PUSH' || action === 'REPLACE' ? parseHref(value, assignKeyAndIndex(index + (action === 'PUSH' ? 1 : 0), state)) : entries[targetIndex];
++        const parentRecord = options?.navigation && records.get(options.navigation);
++        const parent = parentRecord?.committed && !options.navigation.result ? options.navigation : undefined;
++        const controller = new AbortController();
++        let resolveCommit;
++        let resolveFinished;
++        const navigation = {
++            currentLocation,
++            nextLocation,
++            action,
++            parent,
++            signal: controller.signal,
++            committed: new Promise((resolve)=>{
++                resolveCommit = resolve;
++            }),
++            finished: new Promise((resolve)=>{
++                resolveFinished = resolve;
++            })
++        };
++        const record = {
++            controller,
++            committed: false,
++            resolveCommit,
++            resolveFinished,
++            checks: parent ? [
++                ...parentRecord.checks
++            ] : []
++        };
++        records.set(navigation, record);
++        live.add(navigation);
++        pending = navigation;
++        try {
++            options?.onNavigationStart?.(navigation);
++        } catch (error) {
++            completeNavigation(navigation, 'failed', error);
++        }
++        if (previousPending) completeNavigation(previousPending, 'superseded');
++        const args = {
++            currentLocation,
++            nextLocation,
++            action,
++            navigation
++        };
++        const run = async ()=>{
++            try {
++                if (destroyed) {
++                    completeNavigation(navigation, 'superseded');
++                    return;
++                }
++                if (!parent && (opts.requireNavigationApproval || !options?.ignoreBlocker)) {
++                    for (const blocker of [
++                        ...blockers
++                    ]){
++                        if (controller.signal.aborted) return;
++                        record.checks.push({
++                            blocker,
++                            args
++                        });
++                        if (await blocker.blockerFn(args)) {
++                            completeNavigation(navigation, 'denied');
++                            return;
++                        }
++                    }
++                }
++                if (destroyed || controller.signal.aborted || pending !== navigation || entries[index] !== currentLocation || (action === 'GO' || action === 'BACK' || action === 'FORWARD') && entries[targetIndex] !== nextLocation) {
++                    completeNavigation(navigation, 'superseded');
++                    return;
++                }
++                for (const check of record.checks){
++                    if (check.blocker.beforeCommit && !check.blocker.beforeCommit(check.args)) {
++                        completeNavigation(navigation, 'denied');
++                        return;
++                    }
++                    if (controller.signal.aborted || pending !== navigation || entries[index] !== currentLocation) {
++                        completeNavigation(navigation, 'superseded');
++                        return;
++                    }
++                }
++                if (action === 'PUSH') {
++                    nextLocation.state.__TSR_index = index + 1;
++                    entries.splice(++index, entries.length, nextLocation);
++                } else if (action === 'REPLACE') {
++                    nextLocation.state.__TSR_index = index;
++                    entries[index] = nextLocation;
++                } else index = targetIndex;
++                record.committed = true;
++                pending = undefined;
++                resolveCommit(true);
++                notify(action === 'GO' ? {
++                    type: action,
++                    index: value
++                } : {
++                    type: action
++                }, navigation);
++            } catch (error) {
++                completeNavigation(navigation, 'failed', error);
++            }
++        };
++        void run();
++        return navigation;
++    };
++    return {
++        signal: lifetime.signal,
++        get location () {
++            return entries[index];
++        },
++        get length () {
++            return entries.length;
++        },
++        subscribers,
++        subscribe (cb) {
++            subscriptions.set(cb, (subscriptions.get(cb) ?? 0) + 1);
++            subscribers.add(cb);
++            let active = true;
++            return ()=>{
++                if (!active) return;
++                active = false;
++                const remaining = (subscriptions.get(cb) ?? 1) - 1;
++                if (remaining) subscriptions.set(cb, remaining);
++                else {
++                    subscriptions.delete(cb);
++                    subscribers.delete(cb);
++                }
++            };
++        },
++        push: (path, state, options)=>request('PUSH', path, state, options),
++        replace: (path, state, options)=>request('REPLACE', path, state, options),
++        go: (delta, options)=>request('GO', delta, undefined, options),
++        back: (options)=>request('BACK', undefined, undefined, options),
++        forward: (options)=>request('FORWARD', undefined, undefined, options),
++        canGoBack: ()=>index > 0,
++        createHref: normalizeHref,
++        block (blocker) {
++            blockers.push(blocker);
++            return ()=>{
++                blockers = blockers.filter((item)=>item !== blocker);
++            };
++        },
++        flush () {},
++        destroy () {
++            destroyed = true;
++            lifetime.abort();
++            for (const navigation of live)completeNavigation(navigation, 'superseded');
++            subscribers.clear();
++            subscriptions.clear();
++        },
++        notify,
++        _getBlockers: ()=>blockers,
++        completeNavigation,
++        getEntry: (key)=>entries.find((entry)=>entry.state.__TSR_key === key)
++    };
+ }
++
+ var noop = () => {};
+ var ServerHistory = class {
+ 	constructor(location) {
+@@ -462,5 +625,3 @@ function createRandomKey() {
+ }
+ //#endregion
+ export { createBrowserHistory, createHashHistory, createHistory, createMemoryHistory, createServerHistory, normalizeProtocolRelative, parseHref };
+-
+-//# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/src/index.ts b/src/index.ts
+index d2f80581..cc70b044 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -3,7 +3,9 @@
+ // making assumptions about the way TanStack Router works
+ 
+ export interface NavigateOptions {
++  onNavigationStart?: (navigation: HistoryNavigation) => void
+   ignoreBlocker?: boolean
++  navigation?: HistoryNavigation
+ }
+ 
+ type SubscriberHistoryAction =
+@@ -18,18 +20,22 @@ type SubscriberHistoryAction =
+ type SubscriberArgs = {
+   location: HistoryLocation
+   action: SubscriberHistoryAction
++  navigation?: HistoryNavigation
+ }
+ 
+ export interface RouterHistory {
++  readonly signal?: AbortSignal
+   location: HistoryLocation
++  /** Memory history exposes exact native navigation settlement. */
++  completeNavigation?: (navigation: HistoryNavigation, result: HistoryNavigationResult, error?: unknown) => void
+   length: number
+   subscribers: Set<(opts: SubscriberArgs) => void>
+   subscribe: (cb: (opts: SubscriberArgs) => void) => () => void
+-  push: (path: string, state?: any, navigateOpts?: NavigateOptions) => void
+-  replace: (path: string, state?: any, navigateOpts?: NavigateOptions) => void
+-  go: (index: number, navigateOpts?: NavigateOptions) => void
+-  back: (navigateOpts?: NavigateOptions) => void
+-  forward: (navigateOpts?: NavigateOptions) => void
++  push: (path: string, state?: any, navigateOpts?: NavigateOptions) => void | HistoryNavigation
++  replace: (path: string, state?: any, navigateOpts?: NavigateOptions) => void | HistoryNavigation
++  go: (index: number, navigateOpts?: NavigateOptions) => void | HistoryNavigation
++  back: (navigateOpts?: NavigateOptions) => void | HistoryNavigation
++  forward: (navigateOpts?: NavigateOptions) => void | HistoryNavigation
+   canGoBack: () => boolean
+   createHref: (href: string) => string
+   block: (blocker: NavigationBlocker) => () => void
+@@ -68,6 +74,7 @@ export type BlockerFnArgs = {
+   currentLocation: HistoryLocation
+   nextLocation: HistoryLocation
+   action: HistoryAction
++  navigation?: HistoryNavigation
+ }
+ 
+ export type BlockerFn = (
+@@ -76,6 +83,8 @@ export type BlockerFn = (
+ 
+ export type NavigationBlocker = {
+   blockerFn: BlockerFn
++  /** Synchronous final approval check, after the full blocker chain. */
++  beforeCommit?: (args: BlockerFnArgs) => boolean
+   enableBeforeUnload?: (() => boolean) | boolean
+ }
+ 
+@@ -629,59 +638,191 @@ export function createHashHistory(opts?: { window?: any }): RouterHistory {
+  * Ideal for server rendering, tests, and non-DOM environments.
+  * @link https://tanstack.com/router/latest/docs/framework/react/guide/history-types
+  */
++/** A request identity, not a URL permission or a second history. */
++export type HistoryNavigationResult = 'accepted' | 'denied' | 'superseded' | 'failed'
++export interface HistoryNavigationOutcome {
++  status: HistoryNavigationResult
++  navigation?: HistoryNavigation
++  error?: unknown
++}
++export interface HistoryNavigation {
++  readonly currentLocation: HistoryLocation
++  readonly nextLocation: HistoryLocation
++  readonly action: HistoryAction
++  readonly parent?: HistoryNavigation
++  readonly signal: AbortSignal
++  readonly committed: Promise<boolean>
++  readonly finished: Promise<HistoryNavigationResult>
++  readonly error?: unknown
++  readonly result?: HistoryNavigationResult
++}
++export interface MemoryHistory extends RouterHistory {
++  readonly signal: AbortSignal
++  push: (path: string, state?: any, options?: NavigateOptions) => HistoryNavigation
++  replace: (path: string, state?: any, options?: NavigateOptions) => HistoryNavigation
++  go: (delta: number, options?: NavigateOptions) => HistoryNavigation
++  back: (options?: NavigateOptions) => HistoryNavigation
++  forward: (options?: NavigateOptions) => HistoryNavigation
++  /** Called by the Router at its actual acceptance or retirement boundary. */
++  completeNavigation: (navigation: HistoryNavigation, result: HistoryNavigationResult, error?: unknown) => void
++  /** Resolve a real session entry; replaced or truncated entries are absent. */
++  getEntry: (key: string) => HistoryLocation | undefined
++}
++
+ export function createMemoryHistory(
+   opts: {
+     initialEntries: Array<string>
+     initialIndex?: number
+-  } = {
+-    initialEntries: ['/'],
+-  },
+-): RouterHistory {
+-  const entries = opts.initialEntries
+-  let index = opts.initialIndex
+-    ? Math.min(Math.max(opts.initialIndex, 0), entries.length - 1)
+-    : entries.length - 1
+-  const states = entries.map((_entry, index) =>
+-    assignKeyAndIndex(index, undefined),
+-  )
+-
+-  const getLocation = () => parseHref(entries[index]!, states[index])
+-
++    /** Require an actual approved parent for redirect continuation; ignoreBlocker alone grants nothing. */
++    requireNavigationApproval?: boolean
++  } = { initialEntries: ['/'] },
++): MemoryHistory {
++  if (!opts.initialEntries.length) throw new Error('Memory history requires an entry')
++  const entries = opts.initialEntries.map((href, index) => parseHref(href, assignKeyAndIndex(index, undefined)))
++  let index = Math.min(Math.max(opts.initialIndex ?? entries.length - 1, 0), entries.length - 1)
+   let blockers: Array<NavigationBlocker> = []
+-  const _getBlockers = () => blockers
+-  const _setBlockers = (newBlockers: Array<NavigationBlocker>) =>
+-    (blockers = newBlockers)
+-
+-  return createHistory({
+-    getLocation,
+-    getLength: () => entries.length,
+-    pushState: (path, state) => {
+-      // Removes all subsequent entries after the current index to start a new branch
+-      index = index < entries.length - 1 ? index + 1 : entries.length
+-      states[index] = state
+-      entries[index] = path
+-      if (index < entries.length - 1) {
+-        entries.length = index + 1
+-        states.length = index + 1
++  const subscribers = new Set<(opts: SubscriberArgs) => void>()
++  const subscriptions = new Map<(opts: SubscriberArgs) => void, number>()
++  type Record = {
++    controller: AbortController
++    committed: boolean
++    resolveCommit: (value: boolean) => void
++    resolveFinished: (value: HistoryNavigationResult) => void
++    checks: Array<{ blocker: NavigationBlocker; args: BlockerFnArgs }>
++  }
++  const records = new WeakMap<HistoryNavigation, Record>()
++  const live = new Set<HistoryNavigation>()
++  let pending: HistoryNavigation | undefined
++  let destroyed = false
++  const lifetime = new AbortController()
++  const completeNavigation = (navigation: HistoryNavigation, result: HistoryNavigationResult, error?: unknown) => {
++    const record = records.get(navigation)
++    if (!record || navigation.result) return
++    Object.defineProperty(navigation, 'result', { value: result })
++    if (error !== undefined) Object.defineProperty(navigation, 'error', { value: error })
++    live.delete(navigation)
++    if (pending === navigation) pending = undefined
++    record.resolveCommit(record.committed)
++    record.resolveFinished(result)
++    record.controller.abort()
++    if (navigation.parent) completeNavigation(navigation.parent, result, error)
++  }
++  const notify = (action: SubscriberHistoryAction, navigation?: HistoryNavigation) => {
++    const location = entries[index]!
++    for (const subscriber of subscribers) {
++      Promise.resolve(subscriber({ location, action, navigation })).catch((error) => {
++        if (navigation) completeNavigation(navigation, 'failed', error)
++      })
++    }
++  }
++  const request = (action: HistoryAction, value?: string | number, state?: any, options?: NavigateOptions): HistoryNavigation => {
++    const previousPending = pending
++    const currentLocation = entries[index]!
++    const targetIndex = action === 'GO' ? Math.min(Math.max(index + (value as number), 0), entries.length - 1)
++      : action === 'BACK' ? Math.max(index - 1, 0)
++      : action === 'FORWARD' ? Math.min(index + 1, entries.length - 1) : index
++    const nextLocation = action === 'PUSH' || action === 'REPLACE'
++      ? parseHref(value as string, assignKeyAndIndex(index + (action === 'PUSH' ? 1 : 0), state))
++      : entries[targetIndex]!
++    const parentRecord = options?.navigation && records.get(options.navigation)
++    const parent = parentRecord?.committed && !options!.navigation!.result ? options!.navigation : undefined
++    const controller = new AbortController()
++    let resolveCommit!: Record['resolveCommit']
++    let resolveFinished!: Record['resolveFinished']
++    const navigation: HistoryNavigation = {
++      currentLocation, nextLocation, action, parent, signal: controller.signal,
++      committed: new Promise((resolve) => { resolveCommit = resolve }),
++      finished: new Promise((resolve) => { resolveFinished = resolve }),
++    }
++    const record: Record = { controller, committed: false, resolveCommit, resolveFinished, checks: parent ? [...parentRecord!.checks] : [] }
++    records.set(navigation, record)
++    live.add(navigation)
++    pending = navigation
++    try { options?.onNavigationStart?.(navigation) } catch (error) { completeNavigation(navigation, 'failed', error) }
++    if (previousPending) completeNavigation(previousPending, 'superseded')
++    const args: BlockerFnArgs = { currentLocation, nextLocation, action, navigation }
++    const run = async () => {
++      try {
++        if (destroyed) { completeNavigation(navigation, 'superseded'); return }
++        if (!parent && (opts.requireNavigationApproval || !options?.ignoreBlocker)) {
++          for (const blocker of [...blockers]) {
++            if (controller.signal.aborted) return
++            record.checks.push({ blocker, args })
++            if (await blocker.blockerFn(args)) {
++              completeNavigation(navigation, 'denied')
++              return
++            }
++          }
++        }
++        if (destroyed || controller.signal.aborted || pending !== navigation || entries[index] !== currentLocation ||
++          ((action === 'GO' || action === 'BACK' || action === 'FORWARD') && entries[targetIndex] !== nextLocation)) {
++          completeNavigation(navigation, 'superseded')
++          return
++        }
++        // Every asynchronous blocker has completed. No await between these
++        // checks and mutation. Each check retains its own approval identity.
++        for (const check of record.checks) {
++          if (check.blocker.beforeCommit && !check.blocker.beforeCommit(check.args)) {
++            completeNavigation(navigation, 'denied')
++            return
++          }
++          if (controller.signal.aborted || pending !== navigation || entries[index] !== currentLocation) {
++            completeNavigation(navigation, 'superseded')
++            return
++          }
++        }
++        if (action === 'PUSH') {
++          nextLocation.state.__TSR_index = index + 1
++          entries.splice(++index, entries.length, nextLocation)
++        } else if (action === 'REPLACE') {
++          nextLocation.state.__TSR_index = index
++          entries[index] = nextLocation
++        } else index = targetIndex
++        record.committed = true
++        pending = undefined
++        resolveCommit(true)
++        // All internal state is final before synchronous subscriber reentry.
++        notify(action === 'GO' ? { type: action, index: value as number } : { type: action }, navigation)
++      } catch (error) {
++        completeNavigation(navigation, 'failed', error)
++        // Consumers receive failure through finished; no orphan async throw.
++      }
++    }
++    void run()
++    return navigation
++  }
++  return {
++    signal: lifetime.signal,
++    get location() { return entries[index]! },
++    get length() { return entries.length },
++    subscribers,
++    subscribe(cb) {
++      subscriptions.set(cb, (subscriptions.get(cb) ?? 0) + 1)
++      subscribers.add(cb)
++      let active = true
++      return () => {
++        if (!active) return
++        active = false
++        const remaining = (subscriptions.get(cb) ?? 1) - 1
++        if (remaining) subscriptions.set(cb, remaining)
++        else { subscriptions.delete(cb); subscribers.delete(cb) }
+       }
+     },
+-    replaceState: (path, state) => {
+-      states[index] = state
+-      entries[index] = path
+-    },
+-    back: () => {
+-      index = Math.max(index - 1, 0)
+-    },
+-    forward: () => {
+-      index = Math.min(index + 1, entries.length - 1)
+-    },
+-    go: (n) => {
+-      index = Math.min(Math.max(index + n, 0), entries.length - 1)
+-    },
++    push: (path, state, options) => request('PUSH', path, state, options),
++    replace: (path, state, options) => request('REPLACE', path, state, options),
++    go: (delta, options) => request('GO', delta, undefined, options),
++    back: (options) => request('BACK', undefined, undefined, options),
++    forward: (options) => request('FORWARD', undefined, undefined, options),
++    canGoBack: () => index > 0,
+     createHref: normalizeHref,
+-    getBlockers: _getBlockers,
+-    setBlockers: _setBlockers,
+-  })
++    block(blocker) { blockers.push(blocker); return () => { blockers = blockers.filter((item) => item !== blocker) } },
++    flush() {},
++    destroy() { destroyed = true; lifetime.abort(); for (const navigation of live) completeNavigation(navigation, 'superseded'); subscribers.clear(); subscriptions.clear() },
++    notify,
++    _getBlockers: () => blockers,
++    completeNavigation,
++    getEntry: (key) => entries.find((entry) => entry.state.__TSR_key === key),
++  }
+ }
+ 
+ const noop = () => {}

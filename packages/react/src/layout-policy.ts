@@ -67,8 +67,7 @@ export function getLayoutTopology(model: Model): LayoutTopology {
 
 /**
  * Copies native structure without Model.toJson(), which fires every tab's save listener.
- * Materialize inherited empty-container settings because Model exposes no public global
- * attribute snapshot. The candidate has no views, listeners, Routers or retained lifetime.
+ * Preserve empty-container settings across native fromJson tidy. The candidate has no views, listeners, Routers or retained lifetime.
  */
 function topologyCandidate(model: Model): Model {
   const emptyContainers: { id: string; enableDeleteWhenEmpty: boolean }[] = [];
@@ -97,10 +96,7 @@ function topologyCandidate(model: Model): Model {
   const root = model.getRootRow();
   if (!root) throw new Error("A layout policy requires a main native layout");
   const candidate = Model.fromJson({
-    global: {
-      rootOrientationVertical: model.isRootOrientationVertical(),
-      tabGroupType: model.getTabGroupType(),
-    },
+    global: model.getGlobalAttributes(),
     layout: rowJson(root),
     borders: model.getBorderSet().toJson(),
   });
@@ -122,7 +118,7 @@ function topologyCandidate(model: Model): Model {
  * close coordinator's responsibility (including upstream grouped-tab deletion adaptations).
  * Native drag restrictions and arbitrary host callbacks remain separate checks.
  */
-export function createLayoutPolicy(limits: LayoutLimits): WorkbenchLayoutPolicy {
+export function createLayoutPolicy(limits: LayoutLimits = {}): WorkbenchLayoutPolicy {
   const { maxRows, maxColumns, maxTabsets } = limits;
   for (const [name, value] of Object.entries({ maxRows, maxColumns, maxTabsets })) {
     if (value !== undefined && (!Number.isSafeInteger(value) || value < 1))
@@ -138,6 +134,8 @@ export function createLayoutPolicy(limits: LayoutLimits): WorkbenchLayoutPolicy 
   };
   const allowsAction = (model: Model, action: Action): boolean => {
     const leaves = actionsIn(action);
+    if (!leaves.some((leaf) => leaf.type === Actions.MOVE_NODE || leaf.type === Actions.ADD_TAB))
+      return allows(model);
     if (
       leaves.length > 1 &&
       leaves.some((leaf) => leaf.type === Actions.MOVE_NODE || leaf.type === Actions.ADD_TAB)

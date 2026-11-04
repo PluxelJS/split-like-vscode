@@ -18,11 +18,11 @@ catalogs:
       version: 30.1.2
   frontend:
     '@tanstack/react-hotkeys':
-      specifier: ^0.13.0
-      version: 0.13.0
+      specifier: ^0.16.0
+      version: 0.16.0
     '@tanstack/react-router':
-      specifier: ^1.170.42
-      version: 1.170.42
+      specifier: 1.170.46
+      version: 1.170.46
     '@tanstack/react-store':
       specifier: ^0.11.2
       version: 0.11.2
@@ -33,7 +33,7 @@ catalogs:
       specifier: ^19.3.0
       version: 19.3.0
     flexlayout-react:
-      specifier: ^0.11.1
+      specifier: 0.11.1
       version: 0.11.1
     react:
       specifier: ^19.3.0
@@ -41,6 +41,17 @@ catalogs:
     react-dom:
       specifier: ^19.3.0
       version: 19.3.0
+  internal:
+    '@worksplit/split-view':
+      specifier: workspace:*
+      version: 0.1.0
+  peer:
+    '@tanstack/react-router':
+      specifier: 1.170.46
+      version: 1.170.46
+    flexlayout-react:
+      specifier: 0.11.1
+      version: 0.11.1
   test:
     '@playwright/test':
       specifier: ^1.64.0
@@ -72,7 +83,10 @@ overrides:
   vite@*: npm:@voidzero-dev/vite-plus-core@1.2.0
 
 patchedDependencies:
-  flexlayout-react@0.11.1: 14f3b32f3b39b3902e90af5208f80789600646fa3d0308fa1ccb52165986fb83
+  '@tanstack/history@1.162.5': 2744adda2da7e44c051b00ff7fd33ce9c6aec67ca381429d005be134bc5d8710
+  '@tanstack/react-router@1.170.46': a06f7fffde2d0daf0c006a0f415da14330df13d063afb0849cf85951b6f93a51
+  '@tanstack/router-core@1.171.39': 8730462ac8f2667ce77f6252337cc607821bfd0d9056b6ae51916a1dd68475f9
+  flexlayout-react@0.11.1: 372b8a39eed33bb2faf78ef5124437b02c67e543ce1f9aba4852887f83d55ca9
 
 importers:
 
@@ -103,29 +117,23 @@ importers:
         specifier: catalog:test
         version: 5.0.4(@types/node@26.6.4)(@vitest/browser-preview@5.0.4)(@vitest/ui@5.0.4(vitest@5.0.4))(@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1))(jiti@2.7.0)(jsdom@30.1.2)(typescript@7.0.2)(yaml@2.9.1)
 
-  packages/core:
-    devDependencies:
-      vite-plus:
-        specifier: catalog:build
-        version: 1.2.0(@types/node@26.6.4)(@vitest/ui@5.0.4)(jiti@2.7.0)(jsdom@30.1.2)(playwright@1.64.0)(typescript@7.0.2)(yaml@2.9.1)
-
   packages/demo:
     dependencies:
-      '@tanstack/react-hotkeys':
-        specifier: catalog:frontend
-        version: 0.13.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tanstack/react-router':
         specifier: catalog:frontend
-        version: 1.170.42(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        version: 1.170.46(patch_hash=a06f7fffde2d0daf0c006a0f415da14330df13d063afb0849cf85951b6f93a51)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tanstack/react-store':
         specifier: catalog:frontend
         version: 0.11.2(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@worksplit/react':
         specifier: workspace:*
         version: link:../react
+      '@worksplit/split-view':
+        specifier: catalog:internal
+        version: link:../split-view
       flexlayout-react:
         specifier: catalog:frontend
-        version: 0.11.1(patch_hash=14f3b32f3b39b3902e90af5208f80789600646fa3d0308fa1ccb52165986fb83)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        version: 0.11.1(patch_hash=372b8a39eed33bb2faf78ef5124437b02c67e543ce1f9aba4852887f83d55ca9)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       react:
         specifier: catalog:frontend
         version: 19.3.0
@@ -154,16 +162,16 @@ importers:
 
   packages/react:
     dependencies:
-      '@worksplit/core':
-        specifier: workspace:*
-        version: link:../core
+      '@tanstack/react-router':
+        specifier: catalog:peer
+        version: 1.170.46(patch_hash=a06f7fffde2d0daf0c006a0f415da14330df13d063afb0849cf85951b6f93a51)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      flexlayout-react:
+        specifier: catalog:peer
+        version: 0.11.1(patch_hash=372b8a39eed33bb2faf78ef5124437b02c67e543ce1f9aba4852887f83d55ca9)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
     devDependencies:
       '@tanstack/react-hotkeys':
         specifier: catalog:frontend
-        version: 0.13.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@tanstack/react-router':
-        specifier: catalog:frontend
-        version: 1.170.42(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        version: 0.16.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tanstack/react-store':
         specifier: catalog:frontend
         version: 0.11.2(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -179,9 +187,33 @@ importers:
       capnweb:
         specifier: catalog:dev
         version: 0.12.0
-      flexlayout-react:
+      jsdom:
+        specifier: catalog:dev
+        version: 30.1.2
+      react:
         specifier: catalog:frontend
-        version: 0.11.1(patch_hash=14f3b32f3b39b3902e90af5208f80789600646fa3d0308fa1ccb52165986fb83)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+        version: 19.3.0
+      react-dom:
+        specifier: catalog:frontend
+        version: 19.3.0(react@19.3.0)
+      vite:
+        specifier: catalog:tooling
+        version: '@voidzero-dev/vite-plus-core@1.2.0(@types/node@26.6.4)(jiti@2.7.0)(typescript@7.0.2)(yaml@2.9.1)'
+      vite-plus:
+        specifier: catalog:build
+        version: 1.2.0(@types/node@26.6.4)(@vitest/ui@5.0.4)(jiti@2.7.0)(jsdom@30.1.2)(playwright@1.64.0)(typescript@7.0.2)(yaml@2.9.1)
+
+  packages/split-view:
+    devDependencies:
+      '@testing-library/react':
+        specifier: catalog:test
+        version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@types/react':
+        specifier: catalog:frontend
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: catalog:frontend
+        version: 19.3.0(@types/react@19.3.0)
       jsdom:
         specifier: catalog:dev
         version: 30.1.2
@@ -590,19 +622,19 @@ packages:
     resolution: {integrity: sha512-w1+YvwmTkwt5n8yUqEH3IWZ9DsmorCZW/EQ3KYHnqEgIkOZpH54NvW6/Epq3Dzb8H0ifIeYX8PExvrNLIH5FIA==}
     engines: {node: '>=20.19'}
 
-  '@tanstack/hotkeys@0.11.0':
-    resolution: {integrity: sha512-uFKTuknj3sNp5ERoxsI0ISMMOVw3KmSkgy2iIcp19QR/zheYm7bkwzNndMv5NDAqhXpavOn6h4A6HPVJFCBXPg==}
+  '@tanstack/hotkeys@0.17.0':
+    resolution: {integrity: sha512-HhgfF+Wqz3ofCQaDHXSkItRbLXmigoHsxJsQGbGc3Kgu/gunwcFLqVubfoUmdRK/YN7fuZYN2vEOk3oMGxSWTg==}
     engines: {node: '>=20'}
 
-  '@tanstack/react-hotkeys@0.13.0':
-    resolution: {integrity: sha512-+iF7bQe1YegbMa/mL7Zl490OXjSuGLlu2IPYd2YcvdeI8OcTHfdENPrRNk7PklWQ2WAIJjCVxMXiQ/Uiq8fzIQ==}
+  '@tanstack/react-hotkeys@0.16.0':
+    resolution: {integrity: sha512-mP1ZFjBdqllK5xrUU2BGi2ZAryrVmgCAsWSEVJWq1w+qkxRNZ+c5h+J7+99sTwhVa2dLIgnJwE2PzITSopUZnA==}
     engines: {node: '>=20'}
     peerDependencies:
       react: '>=16.8'
       react-dom: '>=16.8'
 
-  '@tanstack/react-router@1.170.42':
-    resolution: {integrity: sha512-4wBptX7DRvc+v/XQ0MxL9rKlmSFb0ob3tSEZWF4ssSl1DD+1HAofWM3HwSn9liQN0r7e00qiv5WQMp6rObOc1g==}
+  '@tanstack/react-router@1.170.46':
+    resolution: {integrity: sha512-ez1iNIhsPjGlaDHg3BXWs67EWVIYzB2tbopEHYDESdkO7owgkGb5de52+5Kv2v1fxdkggcNzo35bdk4arTVGQw==}
     engines: {node: '>=20.19'}
     peerDependencies:
       react: '>=18.0.0 || >=19.0.0'
@@ -614,8 +646,8 @@ packages:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
       react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  '@tanstack/router-core@1.171.35':
-    resolution: {integrity: sha512-fNKsx/rrxppFNmCQ9mPwg4OCb1O3qfLPVrE9FVyyWyRPQk0f0NK5bdJUzTYZQ+T/Ajfllr3SEx9pntM45F5amQ==}
+  '@tanstack/router-core@1.171.39':
+    resolution: {integrity: sha512-qUhoJ0meuSUqGYQbHbcJYdASr06YtK+bulbj6vtrhKYFkLgkSsZ6tXmMyym7sFxiSJSPYgasgozrL01LyyR/6A==}
     engines: {node: '>=20.19'}
 
   '@tanstack/store@0.11.2':
@@ -1833,24 +1865,24 @@ snapshots:
 
   '@rolldown/pluginutils@1.0.1': {}
 
-  '@tanstack/history@1.162.5': {}
+  '@tanstack/history@1.162.5(patch_hash=2744adda2da7e44c051b00ff7fd33ce9c6aec67ca381429d005be134bc5d8710)': {}
 
-  '@tanstack/hotkeys@0.11.0':
+  '@tanstack/hotkeys@0.17.0':
     dependencies:
       '@tanstack/store': 0.11.2
 
-  '@tanstack/react-hotkeys@0.13.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@tanstack/react-hotkeys@0.16.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
-      '@tanstack/hotkeys': 0.11.0
+      '@tanstack/hotkeys': 0.17.0
       '@tanstack/react-store': 0.11.2(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)
 
-  '@tanstack/react-router@1.170.42(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+  '@tanstack/react-router@1.170.46(patch_hash=a06f7fffde2d0daf0c006a0f415da14330df13d063afb0849cf85951b6f93a51)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
-      '@tanstack/history': 1.162.5
+      '@tanstack/history': 1.162.5(patch_hash=2744adda2da7e44c051b00ff7fd33ce9c6aec67ca381429d005be134bc5d8710)
       '@tanstack/react-store': 0.11.2(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@tanstack/router-core': 1.171.35
+      '@tanstack/router-core': 1.171.39(patch_hash=8730462ac8f2667ce77f6252337cc607821bfd0d9056b6ae51916a1dd68475f9)
       isbot: 5.2.2
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)
@@ -1862,9 +1894,9 @@ snapshots:
       react-dom: 19.3.0(react@19.3.0)
       use-sync-external-store: 1.7.0(react@19.3.0)
 
-  '@tanstack/router-core@1.171.35':
+  '@tanstack/router-core@1.171.39(patch_hash=8730462ac8f2667ce77f6252337cc607821bfd0d9056b6ae51916a1dd68475f9)':
     dependencies:
-      '@tanstack/history': 1.162.5
+      '@tanstack/history': 1.162.5(patch_hash=2744adda2da7e44c051b00ff7fd33ce9c6aec67ca381429d005be134bc5d8710)
       cookie-es: 3.1.1
       seroval: 1.6.9
       seroval-plugins: 1.6.9(seroval@1.6.9)
@@ -2280,7 +2312,7 @@ snapshots:
 
   flatted@3.4.4: {}
 
-  flexlayout-react@0.11.1(patch_hash=14f3b32f3b39b3902e90af5208f80789600646fa3d0308fa1ccb52165986fb83)(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
+  flexlayout-react@0.11.1(patch_hash=372b8a39eed33bb2faf78ef5124437b02c67e543ce1f9aba4852887f83d55ca9)(react-dom@19.3.0(react@19.3.0))(react@19.3.0):
     dependencies:
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)

@@ -1,10 +1,4 @@
-import type { RegisterableHotkey } from "@tanstack/react-hotkeys";
-import {
-  createMemoryHistory,
-  type AnyRouter,
-  type NavigateOptions,
-  type RouterHistory,
-} from "@tanstack/react-router";
+import { createMemoryHistory, type AnyRouter, type ParsedLocation } from "@tanstack/react-router";
 import { createStore } from "@tanstack/react-store";
 import {
   Actions,
@@ -16,2504 +10,2606 @@ import {
   TabNode,
   TabSetNode,
   type Action,
-  type IJsonModel,
+  type ModelChangeListener,
   type IJsonTabNode,
+  type ILayoutApi,
   type Node,
 } from "flexlayout-react";
-import type { ReactNode } from "react";
 
-import { BrowserHistoryCoordinator } from "./browser-history";
-import { ContentEffects, type WorkbenchContentEffect } from "./content-effects";
-export type { WorkbenchContentEffect } from "./content-effects";
-import { createDocumentHistory, navigateDocument } from "./document-history";
 import {
-  DocumentLinkController,
-  type DocumentLink,
-  type DocumentLinkResultHandler,
-} from "./document-link";
+  BrowserHistoryCoordinator,
+  type BrowserEntryReference,
+  type BrowserVisitResult,
+} from "./browser-history";
+import { ContentEffects } from "./content-effects";
+import type { ContentRecord, ControllerOwner, DocumentRecord } from "./content-record";
 import {
-  applySplitRatio,
-  centralTabsets,
-  isInSplitDirection,
-  type DocumentPlacement,
-} from "./document-placement";
-import type { WorkbenchLayoutPolicy } from "./layout-policy";
+  createDocumentRuntime,
+  type NativeNavigation,
+  type DocumentRuntime,
+} from "./document-history";
+import { DocumentLinkController } from "./document-link";
+import { applySplitRatio, centralTabsets } from "./document-placement";
+import { installIntegration } from "./internal";
+import { LeaveAttempt } from "./leave-attempt";
 import { actionsIn, closedGroup, revealTab, tabContainer, tabsIn } from "./native-layout";
+import { checkHref, DOCUMENT_COMPONENT, initialLayout, tabMetadata } from "./snapshot";
+import type {
+  ActivateOptions,
+  Applied,
+  CloseOptions,
+  CloseResult,
+  CloseTarget,
+  CloseWorkspaceOptions,
+  ContentController,
+  ContentHandle,
+  ContentInfo,
+  ContainerInfo,
+  DenialReason,
+  Destination,
+  DocumentInfo,
+  DocumentNavigationOptions,
+  DisposeResult,
+  Failed,
+  LeaveDecision,
+  LeaveRequest,
+  LeaveState,
+  LeaveToken,
+  LinkOptions,
+  OpenOptions,
+  OpenResult,
+  OperationResult,
+  PlacementContext,
+  StartOptions,
+  StartResult,
+  ToolDefinition,
+  WorkbenchContext,
+  WorkbenchInstance,
+  WorkbenchOptions,
+  WorkbenchSnapshot,
+  WorkbenchState,
+} from "./types";
 
-export interface WorkbenchRouteMetadata {
-  title?: string;
-  navigationKey?: string;
-  /** Search fields that change document identity. Arrays retain their order. */
-  identitySearch?: readonly string[];
-}
-declare module "@tanstack/react-router" {
-  interface StaticDataRouteOption {
-    worksplit?: WorkbenchRouteMetadata;
-  }
-}
-
-export interface WorkbenchDocument {
-  readonly id: string;
-  readonly href: string;
-  /** Current native TabSet or Border; TabGroups do not create another container. */
-  readonly containerId: string;
-  readonly title: string;
-  /** Replaceable workspace preview; independent of native pinned/closeable state. */
-  readonly preview: boolean;
-  readonly navigationKey: string | null;
-}
-export interface WorkbenchEditingContext {
-  activeGroupId: string | null;
-  activeTabId: string | null;
-  focusedArea: "document" | "tool" | "shell" | null;
-  focusedTabId: string | null;
-  windowFocused: boolean;
-}
-export interface WorkbenchState {
-  readonly activeDocumentId: string | null;
-  /** Invalidates read-only layout/catalog queries; it is not another layout tree. */
-  readonly revision: number;
-  readonly focusedTabId: string | null;
-  readonly focusedArea: WorkbenchEditingContext["focusedArea"];
-  readonly windowFocused: boolean;
-}
-export type NavigationResult =
-  | { status: "committed"; document: WorkbenchDocument; reused: boolean }
-  | {
-      status: "rejected";
-      reason:
-        | "decision"
-        | "closed"
-        | "history-busy"
-        | "router-blocked"
-        | "layout-policy"
-        | "focus-conflict";
-    }
-  | { status: "superseded" }
-  | { status: "failed"; stage: "load" | "navigate"; error: unknown };
-/** Startup can accept a document-free home without manufacturing a route document. */
-export type StartResult = NavigationResult | { status: "empty"; href: string };
-export type CloseResult =
-  | { status: "closed"; id: string; cleanupErrors: readonly unknown[] }
-  | {
-      status: "rejected";
-      reason: "decision" | "changed" | "closing" | "not-closeable" | "revision-required";
-    }
-  | { status: "superseded" }
-  | { status: "failed"; error: unknown };
-/** Native actions retain their existing close receipts and ordinary admission result. */
-export type DispatchResult = CloseResult | { status: "applied" | "rejected" };
-export interface WorkbenchLeaveContext {
-  id: string;
-  from?: string;
-  to?: string;
-  /** A host traversal may be superseded while its close confirmation is open. */
-  signal?: AbortSignal;
-}
-export interface WorkbenchContentLifecycle {
-  isDirty?: (() => boolean) | undefined;
-  /** Existing application editing revision. Dirty multi-content close requires this token. */
-  getCloseRevision?: (() => string | number) | undefined;
-  /** The application must recheck its editing revision/save receipt before approving. */
-  beforeLeave?:
-    | ((reason: "close" | "navigate", context: WorkbenchLeaveContext) => boolean | Promise<boolean>)
-    | undefined;
-  focus?: (() => void) | undefined;
-  save?: (() => void | Promise<void>) | undefined;
-}
-/** A stable handle bound to one content instance, including after its id is reused. */
-export interface WorkbenchContent {
-  readonly id: string;
-  executeCommand(id: string): Promise<void>;
-  /** Start from useEffect or an event. The returned synchronous stop is React cleanup. */
-  effect(setup: (effect: WorkbenchContentEffect) => void | Promise<void>): () => void;
-}
-export interface WorkbenchTool {
-  id: string;
-  render: (context: { id: string }) => ReactNode;
-}
-export interface WorkbenchCommand {
-  id: string;
-  target: "document" | "focused";
-  hotkey?: RegisterableHotkey;
-  /** Inputs are ignored by default. Set false for an intentional editor command. */
-  ignoreInputs?: boolean;
-  execute: (target: { id: string; document: WorkbenchDocument | null }) => void | Promise<void>;
-}
-export interface WorkbenchSnapshot {
-  version: 1;
-  workspaceId: string;
-  layout: IJsonModel;
-}
-export interface WorkbenchOptions<TRouter extends AnyRouter> {
-  createRouter: (history: RouterHistory) => TRouter;
-  layout?: IJsonModel;
-  tools?: readonly WorkbenchTool[];
-  /** Pure resolver for non-static tool tabs during restore and native ADD_TAB validation.
-   * Return undefined for unknown/invalid definitions. Returned id must equal tab.id.
-   * Receives detached JSON; may run more than once without committing a tool.
-   */
-  resolveTool?: (tab: Readonly<IJsonTabNode>) => WorkbenchTool | undefined;
-  commands?: readonly WorkbenchCommand[];
-  home?: string;
-  /** Empty applies only to start(home) and owned home history anchors; open remains routed. */
-  homeMode?: "route" | "empty";
-  workspaceId?: string;
-  snapshot?: unknown;
-  /** Optional native topology limits, checked before new document admission. */
-  layoutPolicy?: WorkbenchLayoutPolicy;
-  /** Trusted native policy callback; do not mutate the supplied nodes or their Model. */
-  allowDrop?: (tabs: readonly TabNode[], target: Node, location: DockLocation) => boolean;
-  onIssue?: (issue: {
-    code: "operation-failed" | "native-identity-conflict" | "history" | "history-outside-scope";
-    id?: string;
-    error: unknown;
-  }) => void;
-}
-export interface OpenDocumentOptions {
-  /** Automatic placement for a new document; cannot be combined with target/location. */
-  placement?: DocumentPlacement;
-  /** Native TabSet/Border target, captured at invocation and revalidated before admission. */
-  target?: string;
-  /** New admission only; defaults to CENTER. Edge locations require a central TabSet. */
-  location?: DockLocation;
-  /** Reveal a separate pane while retaining the active document, URL and DOM focus. */
-  preserveFocus?: boolean;
-  newInstance?: boolean;
-  background?: boolean;
-  /** Reveal a matching document with its existing location. Default honors the requested URL. */
-  reuse?: "navigate" | "preserve";
-  /** One replaceable preview per workspace. Explicit copies are always ordinary documents. */
-  preview?: boolean;
-}
-
-type EditorOwner = { lifecycle: WorkbenchContentLifecycle };
-type DocumentSession = {
-  id: string;
-  href: string;
-  router?: AnyRouter | undefined;
-  identity?: string | undefined;
-  multi: boolean;
-  preview: boolean;
-  operation: number;
-  contentVersion: number;
-  owner?: EditorOwner | undefined;
-  release: (() => void)[];
-};
-class FocusConflict extends Error {}
-class PlacementChanged extends Error {}
-type OpenPresentation = {
-  focus: number;
-  background: boolean;
-  preserve: DocumentSession | undefined;
-  focusedContent: Node | undefined;
-  replace: boolean;
-  fromPop: boolean;
-};
-type Internal = {
-  model: Model;
-  documentLinks: DocumentLinkController;
-  documents: Map<string, DocumentSession>;
-  store: ReturnType<typeof createStore<WorkbenchState>>;
-  tools: Map<string, WorkbenchTool>;
-  commands: readonly WorkbenchCommand[];
-  loadDocument: (id: string) => Promise<void>;
-  registerOwner: (
-    id: string,
-    lifecycle: WorkbenchContentLifecycle,
-    expectedNode?: Node,
-  ) => () => void;
-  content: (id: string, expectedNode?: Node) => WorkbenchContent;
-  focus: (id: string | null, area: WorkbenchState["focusedArea"]) => void;
-  setWindowFocus: (focused: boolean) => void;
-  modelAction: (action: Action) => undefined;
-  report: (error: unknown) => void;
-};
-type CloseActionResult = CloseResult | { status: "applied" };
-type CloseScope = {
-  node: TabNode | TabSetNode;
-  members: readonly TabNode[];
-  closing: readonly TabNode[];
-};
-function sameMembers(before: readonly TabNode[], after: readonly TabNode[]) {
-  const expected = new Set(before);
-  return expected.size === after.length && after.every((tab) => expected.has(tab));
-}
-const instances = new WeakMap<object, Internal>();
-export function integrationState(instance: object): Internal {
-  const state = instances.get(instance);
-  if (!state) throw new Error("Unknown Worksplit instance");
-  return state;
-}
-
-const DOCUMENT_COMPONENT = "worksplit.document";
-const TOOL_COMPONENT = "worksplit.tool";
-export const defaultWorkbenchLayout = (): IJsonModel => ({
-  global: {
-    tabEnableFloat: false,
-    tabEnablePopout: false,
-    tabEnablePin: true,
-    tabSetEnableTabGroups: true,
-  },
-  borders: [],
-  layout: { type: "row", children: [] },
+// The public methods retain the caller's route parameters; this internal boundary passes
+// the unchanged native options to the router selected for the document.
+type RuntimeNavigation = Parameters<DocumentRuntime<AnyRouter>["navigate"]>[0];
+const applied = <T>(value: T, cleanupErrors: readonly unknown[] = []): Applied<T> => ({
+  status: "applied",
+  value,
+  cleanupErrors,
 });
+const denied = (reason: DenialReason): { status: "denied"; reason: DenialReason } => ({
+  status: "denied",
+  reason,
+});
+const superseded = { status: "superseded" } as const;
+function failed(
+  error: unknown,
+  phase: Failed["phase"] = "prepare",
+  affectedIds: readonly string[] = [],
+  cleanupErrors: readonly unknown[] = [],
+): Failed {
+  return {
+    status: "failed",
+    phase,
+    error,
+    changes: affectedIds.length ? "some" : "none",
+    affectedIds,
+    cleanupErrors,
+  };
+}
+function validToken(token: LeaveToken): void {
+  if (
+    !(typeof token === "string"
+      ? token.length > 0
+      : typeof token === "number" && Number.isSafeInteger(token))
+  )
+    throw new TypeError("Leave tokens must be nonempty strings or finite safe integers");
+}
+function stateOf(controller: { getState(): LeaveState }): LeaveState {
+  const state = controller.getState();
+  if (!state || typeof state.hasUnsavedChanges !== "boolean")
+    throw new TypeError("Invalid leave state");
+  validToken(state.token);
+  return { hasUnsavedChanges: state.hasUnsavedChanges, token: state.token };
+}
+function same<T>(left: readonly T[], right: readonly T[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+interface Approval {
+  readonly attempt: LeaveAttempt;
+  readonly decision: Promise<boolean>;
+  validate(): boolean;
+  finish(): readonly unknown[];
+  committed(): void;
+}
+interface BrowserVisitSource {
+  readonly current: () => boolean;
+  readonly signal: AbortSignal;
+  pending: boolean;
+}
+interface OpenCapture {
+  source: ContentRecord | undefined;
+  sourceContainer: TabSetNode | BorderNode | undefined;
+  anchor: TabSetNode | undefined;
+  destination: { value: Destination; target: Node; children: readonly Node[] } | undefined;
+  focus: number;
+  presentation: "activate" | "reveal" | "background";
+  current?: () => boolean;
+}
 
-/** One owner for the native Model and document Router lifetimes. */
-export class WorkbenchInstance<TRouter extends AnyRouter> {
-  private readonly state: Internal;
-  private readonly resolver: TRouter;
-  private browser: BrowserHistoryCoordinator | undefined;
-  private disposed = false;
-  private focusEpoch = 0;
-  private pendingFocus:
-    | { id: string; epoch: number; node: TabNode; cancel?: () => void }
-    | undefined;
-  private openEpoch = 0;
-  private nextId = 0;
-  private readonly instancePrefix = Array.from(
-    crypto.getRandomValues(new Uint32Array(4)),
-    (value) => value.toString(16).padStart(8, "0"),
-  ).join("");
-  private selecting = false;
-  private restoringFocus = false;
+/** The sole owner of native Model, content records, and their finite lifetimes. */
+class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<TRouter> {
+  readonly model: Model;
+  private readonly records = new Map<string, ContentRecord>();
+  // Pending native ADDs carry admission callbacks, never a second content lifetime.
+  private readonly admissions = new Map<string, (node: TabNode) => void>();
+  private readonly reportedResults = new WeakSet<object>();
+  private readonly reportedCleanups = new WeakSet<object>();
+  private readonly attempts = new Map<
+    LeaveAttempt,
+    { record: ContentRecord | undefined; committed: boolean }
+  >();
+  private readonly workspaceId: string;
+  private readonly options: WorkbenchOptions<TRouter>;
+  private readonly store;
   private readonly mru: string[] = [];
-  private readonly modelListener: (action: Action) => void;
-  private readonly pending = new Set<AnyRouter>();
+  private readonly prefix = crypto.randomUUID();
+  private sequence = 0;
+  private phase: WorkbenchState["lifecycle"] = "created";
+  private startInput: StartOptions | undefined;
+  private startPromise: Promise<StartResult> | undefined;
+  private disposePromise: Promise<DisposeResult> | undefined;
+  private view: { getLayout: () => ILayoutApi | null; root: HTMLElement } | undefined;
+  private focusEpoch = 0;
+  private focusing = false;
+  private focusRequest:
+    | {
+        record: ContentRecord;
+        epoch: number;
+        owner: ControllerOwner | undefined;
+        callback?: () => void;
+        cancel?: () => void;
+      }
+    | undefined;
+  private autoTitle = 0;
+  private selecting = 0;
+  private restoredActive: string | undefined;
+  private projections: readonly DocumentInfo[] = [];
+  private containers: readonly ContainerInfo[] = [];
+  private context: WorkbenchContext | undefined;
   private readonly closing = new Map<
-    string,
-    { key: string; promise: Promise<CloseActionResult>; signal?: AbortSignal }
+    ContentRecord,
+    { members: readonly ContentRecord[]; promise: Promise<CloseResult> }
   >();
-  private disposePromise: Promise<readonly unknown[]> | undefined;
-  private readonly contents = new Map<
-    TabNode,
-    { handle: WorkbenchContent; effects: ContentEffects }
-  >();
-  private readonly nativeOperations = new WeakSet<Promise<DispatchResult>>();
-  // Native Model has no public global-attribute reader. Retain its explicit inputs for
-  // detached ADD candidates; native change notifications keep direct global Actions current.
-  // Node structure/configuration is always read from the live Model, never cached here.
-  private readonly admissionGlobals: NonNullable<IJsonModel["global"]>;
+  private workspaceClosing:
+    | Promise<OperationResult<{ snapshot: WorkbenchSnapshot | null }>>
+    | undefined;
+  private workspaceCloseRequest: { destination: string | undefined; handoff: boolean } | undefined;
+  private readonly pendingRouters = new Set<DocumentRuntime<AnyRouter>>();
+  private readonly previewEpochs = new Map<string, number>();
+  private browser: BrowserHistoryCoordinator | undefined;
+  private readonly browserRequests = new WeakMap<NativeNavigation, BrowserVisitSource>();
+  private readonly links: DocumentLinkController;
+  private readonly modelListener: ModelChangeListener;
+  private readonly movedPreviews = new WeakMap<Action, Set<ContentRecord>>();
+  private readonly priorSelection = new WeakMap<Action, Node | undefined>();
 
-  constructor(private readonly options: WorkbenchOptions<TRouter>) {
-    const layout =
-      options.snapshot === undefined
-        ? structuredClone(options.layout ?? defaultWorkbenchLayout())
-        : this.validateSnapshot(options.snapshot);
-    this.admissionGlobals = structuredClone(layout.global ?? {});
-    this.validateLayout(layout, options.snapshot !== undefined);
-    const model = Model.fromJson(layout);
-    const documents = new Map<string, DocumentSession>();
-    const tools = new Map((options.tools ?? []).map((tool) => [tool.id, tool]));
-    if (tools.size !== (options.tools?.length ?? 0)) throw new Error("Duplicate Worksplit tool id");
-    const documentLinks = new DocumentLinkController(
-      model,
-      (drag, target, location) => this.allowMove(drag, target, location),
-      options.layoutPolicy,
-      (id) => {
-        this.keep(id);
-        return this.getDocument(id);
-      },
-      (error) => this.issue("operation-failed", error),
-    );
-    this.state = {
-      model,
-      documentLinks,
-      documents,
-      tools,
-      commands: options.commands ?? [],
-      store: createStore<WorkbenchState>({
-        activeDocumentId: null,
-        revision: 0,
-        focusedTabId: null,
-        focusedArea: null,
-        windowFocused: typeof document !== "undefined" && document.hasFocus(),
-      }),
-      loadDocument: (id) => this.loadDocument(id),
-      registerOwner: (id, lifecycle, expectedNode) =>
-        this.registerOwner(id, lifecycle, expectedNode),
-      content: (id, expectedNode) => this.content(id, expectedNode),
-      focus: (id, area) => this.observeFocus(id, area),
-      setWindowFocus: (windowFocused) => {
-        if (!windowFocused) this.cancelContentFocus();
-        this.state.store.setState((s) => ({
-          ...s,
-          windowFocused,
-          ...(!windowFocused ? { focusedArea: null } : {}),
-        }));
-      },
-      modelAction: (action) => {
-        if (documentLinks.consume(action)) return undefined;
-        this.reportNative(this.dispatch(action));
-        return undefined;
-      },
-      report: (error) => this.issue("operation-failed", error),
+  constructor(options: WorkbenchOptions<TRouter>) {
+    this.options = {
+      ...options,
+      ...(options.tools ? { tools: { ...options.tools } } : {}),
+      ...(options.home ? { home: { ...options.home } } : {}),
     };
-    instances.set(this, this.state);
-    model.visitNodes((node) => {
+    this.workspaceId = options.workspaceId ?? crypto.randomUUID();
+    if (!this.workspaceId) throw new TypeError("workspaceId must be nonempty");
+    if (options.home) checkHref(options.home.href);
+    const initial = initialLayout(options, this.workspaceId);
+    this.restoredActive = initial.activeDocumentId;
+    this.model = Model.fromJson(initial.layout);
+    if (options.layoutPolicy && !options.layoutPolicy.allows(this.model))
+      throw new TypeError("Initial layout violates the layout policy");
+    this.store = createStore<WorkbenchState>({
+      lifecycle: "created",
+      revision: 0,
+      snapshotRevision: 0,
+      activeDocumentId: null,
+      activeContainerId: this.model.getActiveTabset()?.getId() ?? null,
+      focusedContentId: null,
+      source: null,
+      windowFocused: false,
+    });
+    this.model.visitNodes((node) => {
       if (!(node instanceof TabNode)) return;
-      if (node.isEnableFloat() || node.isEnablePopout())
-        throw new Error(`Disable unsupported popouts at ${node.getId()}`);
+      const metadata = tabMetadata(node.toJson());
       if (node.getComponent() === DOCUMENT_COMPONENT) {
-        if (tools.has(node.getId()))
-          throw new Error(`Worksplit tool id ${node.getId()} conflicts with a document identity`);
-        const config: unknown = node.getConfig();
-        if (
-          !config ||
-          typeof config !== "object" ||
-          typeof (config as Record<string, unknown>).href !== "string"
-        )
-          throw new Error(`Document ${node.getId()} requires config.href`);
-        const href = (config as { href: string }).href;
-        this.checkHref(href);
-        documents.set(node.getId(), {
-          id: node.getId(),
-          href,
-          multi: (config as Record<string, unknown>).multi === true,
-          preview: (config as Record<string, unknown>).preview === true && !node.isPinned(),
-          operation: 0,
-          contentVersion: 0,
-          release: [],
+        const record = this.makeRecord(node, "document");
+        Object.assign(record, {
+          href: metadata.href!,
+          preview: metadata.preview === true && !node.isPinned(),
+          manualTitle: metadata.manualTitle === true,
         });
       } else {
-        const tool =
-          node.getComponent() === TOOL_COMPONENT ? this.resolveTool(node.toJson()) : undefined;
-        if (!tool)
-          throw new Error(`Unknown Worksplit content: ${node.getId()} (${node.getComponent()})`);
-        tools.set(node.getId(), tool);
+        const definition = this.resolveTool(node.toJson());
+        if (!definition) throw new TypeError(`Unknown tool definition ${node.getComponent()}`);
+        const record = this.makeRecord(node, definition);
+        record.manualTitle = metadata.manualTitle === true;
       }
+      const config: unknown = node.getConfig();
+      if (config && typeof config === "object" && Object.hasOwn(config, "worksplit")) {
+        const host = { ...config } as Record<string, unknown>;
+        delete host.worksplit;
+        this.model.doAction(Actions.updateNodeAttributes(node.getId(), { config: host }));
+      }
+      if (node.isEnableFloat() || node.isEnablePopout())
+        throw new TypeError("Floating and popout content is unsupported");
     });
-    if ([...documents.values()].filter((session) => session.preview).length > 1)
-      throw new Error("A workspace snapshot may contain only one preview");
-    if (options.layoutPolicy && !options.layoutPolicy.allows(model))
-      throw new Error("Snapshot violates layout policy; explicitly convert it before restoring");
-    model.setOnAllowDrop(
+    const previews = new Set<string>();
+    for (const record of this.records.values())
+      if (record.role === "document" && record.preview) {
+        const scope = this.previewScope(record.node);
+        if (previews.has(scope))
+          throw new TypeError("Initial layout contains multiple previews in the same scope");
+        previews.add(scope);
+      }
+    this.links = new DocumentLinkController(
+      this.model,
+      (drag, target, location) => this.allowMove(drag, target, location),
+      this.options.layoutPolicy,
+      (error) => this.issue(error),
+    );
+    this.modelListener = {
+      onBeforeAction: (action) => {
+        this.priorSelection.set(action, this.model.getActiveTabset()?.getSelectedNode());
+        const moved = new Set<ContentRecord>();
+        for (const leaf of actionsIn(action))
+          if (leaf.type === Actions.MOVE_NODE) {
+            const from = this.model.getNodeById(leaf.data.fromNode);
+            if (from)
+              for (const tab of tabsIn(from)) {
+                const record = this.records.get(tab.getId());
+                if (record) moved.add(record);
+              }
+          }
+        if (moved.size) this.movedPreviews.set(action, moved);
+      },
+      onAfterAction: (action) => this.modelChanged(action),
+    };
+    this.model.addChangeListener(this.modelListener);
+    this.model.setOnAllowDrop(
       (drag, drop) =>
-        documentLinks.allowsDrop(drag, drop.node, drop.location) ??
+        this.links.allowsDrop(drag, drop.node, drop.location, drop.index) ??
         (this.allowMove(drag, drop.node, drop.location) &&
-          (options.layoutPolicy?.allowsDrop(model, drag, drop.node, drop.location, drop.index) ??
+          (this.options.layoutPolicy?.allowsDrop(
+            this.model,
+            drag,
+            drop.node,
+            drop.location,
+            drop.index,
+          ) ??
             true)),
     );
-    if (options.allowDrop) {
-      model.visitNodes((node) => {
-        if (
-          node instanceof TabNode &&
-          node.getParent() &&
-          !this.allowMove(node, node.getParent()!, DockLocation.CENTER)
-        )
-          throw new Error(`Snapshot violates docking policy at ${node.getId()}`);
-        if (
-          node instanceof TabGroupNode &&
-          node.getParent() &&
-          !this.allowMove(node, node.getParent()!, DockLocation.CENTER)
-        )
-          throw new Error(`Snapshot violates group docking policy at ${node.getId()}`);
-      });
-    }
-    this.resolver = options.createRouter(
-      createMemoryHistory({ initialEntries: [options.home ?? "/"] }),
-    );
-    this.modelListener = (action) => {
-      for (const leaf of actionsIn(action))
-        if (leaf.type === Actions.UPDATE_MODEL_ATTRIBUTES)
-          Object.assign(this.admissionGlobals, structuredClone(leaf.data.json));
-      this.changed();
-      const id =
-        typeof action.data.tabNode === "string"
-          ? action.data.tabNode
-          : typeof action.data.node === "string"
-            ? action.data.node
-            : undefined;
-      if (
-        !this.selecting &&
-        action.type === Actions.SELECT_TAB &&
-        id &&
-        documents.has(id) &&
-        (model.getNodeById(id) as TabNode).isSelected()
-      )
-        this.activate(id, { focus: false });
-      if (!this.selecting && action.type === Actions.SET_ACTIVE_TABSET)
-        this.activateSelected(model.getActiveTabset());
-    };
-    model.addChangeListener(this.modelListener);
-  }
-
-  /** Type inference follows the application's TanStack route tree. */
-  open<const TFrom extends string = string, const TTo extends string | undefined = ".">(
-    navigation: NavigateOptions<TRouter, TFrom, TTo>,
-    options: OpenDocumentOptions = {},
-  ): Promise<NavigationResult> {
-    const location = this.resolver.buildLocation(
-      navigation as Parameters<AnyRouter["buildLocation"]>[0],
-    );
-    return this.openHref(location.publicHref, options, !!navigation.replace);
-  }
-
-  /** One routed target for activation and native docking, with optional lazy resolution. */
-  createLink<const TFrom extends string = string, const TTo extends string | undefined = ".">(
-    navigation:
-      | NavigateOptions<TRouter, TFrom, TTo>
-      | (() => Promise<NavigateOptions<TRouter, TFrom, TTo>>),
-    options: OpenDocumentOptions = {},
-    onResult?: DocumentLinkResultHandler,
-  ): DocumentLink {
-    const deferred = typeof navigation === "function";
-    const configuredSource = options.placement?.source;
-    let href = deferred
-      ? undefined
-      : this.resolver.buildLocation(navigation as Parameters<AnyRouter["buildLocation"]>[0])
-          .publicHref;
-    const replace = !deferred && !!navigation.replace;
-    return this.state.documentLinks.create(
-      () => href,
-      async (requested, current) => {
-        if (!current() || this.disposed) return { status: "rejected", reason: "closed" };
-
-        // Keep the initiating content and explicit drop target alive through resolution
-        // and route loading, even when a drop replaces the configured placement.
-        const focus = this.focusEpoch;
-        const editing = this.state.store.get();
-        const sourceId =
-          requested.placement?.source ??
-          configuredSource ??
-          (editing.focusedArea === "document" || editing.focusedArea === "tool"
-            ? editing.focusedTabId
-            : null) ??
-          editing.activeDocumentId;
-        const source = sourceId ? this.state.model.getNodeById(sourceId) : undefined;
-        const sourceContainer = tabContainer(source);
-        if (sourceId && !source) return { status: "rejected", reason: "closed" };
-        const targetId =
-          requested.target ??
-          (deferred && !requested.placement
-            ? (this.state.model.getActiveTabset()?.getId() ??
-              this.state.model.getFirstTabSet()?.getId())
-            : undefined);
-        const target = targetId ? this.state.model.getNodeById(targetId) : undefined;
-        if (targetId && !target) return { status: "rejected", reason: "closed" };
-        const owned = () =>
-          current() &&
-          !this.disposed &&
-          (requested.background || focus === this.focusEpoch) &&
-          (!sourceId ||
-            (this.state.model.getNodeById(sourceId) === source &&
-              tabContainer(source) === sourceContainer)) &&
-          (!targetId || this.state.model.getNodeById(targetId) === target);
-        if (!deferred) return this.openHref(href!, requested, replace, owned);
-        // Reserve foreground admission before resolving an application-owned target.
-        const epoch = requested.background ? this.openEpoch : ++this.openEpoch;
-        const resolved = await navigation();
-        if (!owned() || (!requested.background && epoch !== this.openEpoch))
-          return { status: "superseded" };
-        href = this.resolver.buildLocation(
-          resolved as Parameters<AnyRouter["buildLocation"]>[0],
-        ).publicHref;
-        const captured = { ...requested };
-        if (captured.placement && !captured.placement.source && sourceId)
-          captured.placement = { ...captured.placement, source: sourceId };
-        else if (!captured.placement && targetId) captured.target = targetId;
-        // This is the same admission pipeline as open(); keep the original ownership
-        // check alive through Router loaders as well as through the deferred resolver.
-        return this.openHref(href, captured, !!resolved.replace, owned);
+    installIntegration(this, {
+      model: this.model,
+      store: this.store,
+      getRecord: (id) => this.records.get(id),
+      loadDocument: async (content) => {
+        const record = this.recordFor(content);
+        if (this.phase === "running" && record?.role === "document") await this.initialize(record);
       },
-      options,
-      onResult,
-    );
-  }
-
-  /** Copy committed view conditions, never a draft, into a new ordinary document lifetime. */
-  duplicate(
-    id: string,
-    options: Pick<OpenDocumentOptions, "target" | "background" | "location" | "preserveFocus"> = {},
-  ): Promise<NavigationResult> {
-    const session = this.state.documents.get(id);
-    if (!session || this.disposed) return Promise.resolve({ status: "rejected", reason: "closed" });
-    return this.openHref(session.href, { ...options, newInstance: true }, false);
-  }
-
-  getDocument(id: string): WorkbenchDocument | null {
-    const session = this.state.documents.get(id);
-    const node = this.state.model.getNodeById(id);
-    const container = tabContainer(node);
-    if (this.disposed || !session || !(node instanceof TabNode) || !container) return null;
-    const metadata = [...(session.router?.state.matches ?? [])]
-      .toReversed()
-      .find((m) => m.staticData?.worksplit)?.staticData.worksplit;
-    return {
-      id,
-      href: session.href,
-      containerId: container.getId(),
-      title: node.getName(),
-      preview: session.preview,
-      navigationKey: metadata?.navigationKey ?? null,
-    };
-  }
-  /** Keep a preview as an ordinary, still-closeable document. Does not pin the native tab. */
-  keep(id: string): void {
-    const session = this.state.documents.get(id);
-    if (!session?.preview || this.disposed) return;
-    session.preview = false;
-    this.changed();
-  }
-  getDocuments(): readonly WorkbenchDocument[] {
-    return [...this.state.documents.keys()].flatMap((id) => {
-      const document = this.getDocument(id);
-      return document ? [document] : [];
+      registerController: (content, owner) => this.registerController(content, owner),
+      updateController: (content, owner, controller) =>
+        this.updateController(content, owner, controller),
+      bindLayout: (getLayout, root) => this.bindLayout(getLayout, root),
+      bindContentRoot: (content, root) => {
+        const record = this.recordFor(content);
+        if (record) {
+          record.root = root ?? undefined;
+          this.scheduleFocus();
+        }
+      },
+      focus: (id, origin, intent) => this.observeFocus(id, origin, intent),
+      setWindowFocus: (windowFocused) => {
+        if (!windowFocused) this.cancelFocus();
+        this.store.setState((state) => ({ ...state, windowFocused }));
+      },
+      modelAction: (action) => {
+        if (this.links.consume(action)) return undefined;
+        void this.dispatch(action).then((result) => this.reportResult(result));
+        return undefined;
+      },
+      closeTargets: (target) => this.closeTargets(target),
+      report: (error) => this.issue(error),
+      reportResult: (result) => this.reportResult(result),
     });
   }
-  getActiveDocument(): WorkbenchDocument | null {
-    const id = this.state.store.get().activeDocumentId;
-    return id ? this.getDocument(id) : null;
-  }
-  getEditingContext(): WorkbenchEditingContext {
-    const s = this.state.store.get();
-    const node = s.activeDocumentId ? this.state.model.getNodeById(s.activeDocumentId) : undefined;
-    return {
-      activeGroupId: tabContainer(node)?.getId() ?? null,
-      activeTabId: s.activeDocumentId,
-      focusedArea: s.focusedArea,
-      focusedTabId: s.focusedTabId,
-      windowFocused: s.windowFocused,
-    };
-  }
-  /** Returns detached native FlexLayout JSON. */
-  getLayout(): IJsonModel {
-    return structuredClone(this.state.model.toJson());
-  }
 
-  /** Reveal existing document/tool content; false means missing or disposed. Tools preserve the document URL. */
-  activate(id: string, options: { focus?: boolean; history?: boolean } = {}): boolean {
-    const session = this.state.documents.get(id);
-    if (this.disposed || (!session && !this.state.tools.has(id))) return false;
-    const node = this.state.model.getNodeById(id);
-    if (!(node instanceof TabNode)) return false;
-    const selecting = this.selecting;
-    this.selecting = true;
-    try {
-      const group = revealTab(this.state.model, node);
-      const maximized = this.state.model.getMaximizedTabset();
-      // Selecting an obscured tab does not reveal it in FlexLayout. Follow the explicit
-      // document target while retaining the user's maximized workspace mode.
-      if (group instanceof TabSetNode && maximized && maximized !== group)
-        this.state.model.doAction(Actions.maximizeToggle(group.getId()));
-      if (group instanceof TabSetNode && this.state.model.getActiveTabset() !== group)
-        this.state.model.doAction(Actions.setActiveTabset(group.getId()));
-    } finally {
-      this.selecting = selecting;
-    }
-    this.cancelContentFocus();
-    if (session) {
-      if (this.state.store.get().activeDocumentId !== id)
-        this.state.store.setState((s) => ({ ...s, activeDocumentId: id }));
-      this.remember(id);
-      if (session.router && options.history !== false)
-        this.browser?.publish(session.href, id, true);
-      void this.loadDocument(id).catch((error: unknown) =>
-        this.issue("operation-failed", error, id),
-      );
-    }
-    if (options.focus !== false) {
-      this.pendingFocus = { id, epoch: this.focusEpoch, node };
-      this.restoreContentFocus(id);
-    }
-    return true;
-  }
-
-  async close(
-    id: string,
-    options: { history?: boolean; signal?: AbortSignal } = {},
-  ): Promise<CloseResult> {
-    if (
-      this.disposed ||
-      !(this.state.model.getNodeById(id) instanceof TabNode) ||
-      (!this.state.documents.has(id) && !this.state.tools.has(id))
-    )
-      return { status: "superseded" };
-    return this.closeAction(
-      Actions.deleteTab(id),
-      options.history !== false,
-      options.signal,
-    ) as Promise<CloseResult>;
-  }
-
-  /** Synchronous eligibility only. Close still makes asynchronous content decisions. */
-  canDispatch(action: Action): boolean {
-    if (this.disposed) return false;
-    const actions = actionsIn(action);
-    if (actions.length === 0) return false;
-    const removals = actions.filter(
-      (a) => a.type === Actions.DELETE_TAB || a.type === Actions.DELETE_TABSET,
+  private live(record: ContentRecord): boolean {
+    return (
+      !record.closed &&
+      this.phase !== "disposed" &&
+      this.records.get(record.id) === record &&
+      this.model.getNodeById(record.id) === record.node
     );
-    if (removals.length > 0)
-      return (
-        removals.length === actions.length &&
-        removals.every((a) => {
-          const node = this.state.model.getNodeById(a.data.node as string);
-          return a.type === Actions.DELETE_TAB
-            ? node instanceof TabNode && node.isCloseable()
-            : node instanceof TabSetNode && node.isEnableClose();
-        })
-      );
-    if (actions.length !== 1 && actions.some((a) => a.type === Actions.ADD_TAB)) return false;
+  }
+  private recordFor(handle: ContentHandle): ContentRecord | undefined {
+    const record = this.records.get(handle.id);
+    return record && record.handle === handle && this.live(record) ? record : undefined;
+  }
+  private makeRecord(node: TabNode, role: "document" | ToolDefinition): ContentRecord {
+    const id = node.getId();
+    if (this.records.has(id)) throw new TypeError(`Duplicate content ${id}`);
+    const effects = new ContentEffects(
+      () => {
+        if (!this.live(record)) throw new Error("Content instance has ended");
+      },
+      (error) => this.issue(error, id),
+    );
+    const handle: ContentHandle = Object.freeze({ id, runEffect: effects.effect.bind(effects) });
+    const base = {
+      id,
+      lifetime: crypto.randomUUID(),
+      node,
+      handle,
+      effects,
+      closed: false,
+      manualTitle: false,
+      owner: undefined,
+      ownerRevision: 0,
+      hadProtection: false,
+      root: undefined,
+      projection: undefined,
+    };
+    const record: ContentRecord =
+      role === "document"
+        ? {
+            ...base,
+            role: "document",
+            href: "/",
+            preview: false,
+            key: undefined,
+            accepted: undefined,
+            acceptedRevision: 0,
+            runtime: undefined,
+            initialization: undefined,
+            ready: false,
+          }
+        : { ...base, role: "tool", definition: role };
+    this.records.set(id, record);
+    return record;
+  }
+  private resolveTool(tab: IJsonTabNode): ToolDefinition | undefined {
+    if (!tab.component || tab.component === DOCUMENT_COMPONENT) return;
+    tabMetadata(tab);
+    const definition =
+      this.options.tools?.[tab.component] ??
+      this.options.resolveTool?.(tab.component, structuredClone(tab));
+    if (definition && typeof definition.render !== "function")
+      throw new TypeError("Tool definitions require render");
+    return definition;
+  }
+  private changed(persistent = false): void {
+    this.store.setState((state) => ({
+      ...state,
+      lifecycle: this.phase,
+      revision: state.revision + 1,
+      snapshotRevision: state.snapshotRevision + Number(persistent),
+    }));
+  }
+  private issue(error: unknown, id?: string): void {
+    try {
+      if (this.options.onIssue)
+        this.options.onIssue({ code: "operation-failed", error, ...(id ? { id } : {}) });
+      // eslint-disable-next-line no-console -- Unhandled native/resource issues remain observable.
+      else console.error("Worksplit issue", error);
+    } catch (reporterError) {
+      // eslint-disable-next-line no-console -- A throwing host reporter cannot suppress the original issue.
+      console.error("Worksplit issue reporter failed", reporterError, error);
+    }
+  }
+  private reportResult(result: OperationResult<unknown>): void {
+    // Coalesced native close observers share the same completed receipt.
+    if (this.reportedResults.has(result)) return;
+    this.reportedResults.add(result);
+    if (result.status === "failed") this.issue(result.error);
     if (
-      this.options.allowDrop &&
-      actions.length > 1 &&
-      actions.some((a) =>
-        [
-          Actions.MOVE_NODE,
-          Actions.ADD_TAB_TO_NEW_GROUP,
-          Actions.UNGROUP,
-          Actions.REMOVE_TAB_FROM_GROUP,
-        ].includes(a.type),
+      (result.status === "applied" || result.status === "failed") &&
+      !this.reportedCleanups.has(result.cleanupErrors)
+    ) {
+      this.reportedCleanups.add(result.cleanupErrors);
+      result.cleanupErrors.forEach((error) => this.issue(error));
+    }
+  }
+  private modelChanged(action: Action): void {
+    // The library listener precedes external observers: an admitted native Tab always
+    // exposes its final record, even when an observer synchronously reenters.
+    for (const [id, admit] of this.admissions) {
+      const node = this.model.getNodeById(id);
+      if (node instanceof TabNode) {
+        this.admissions.delete(id);
+        admit(node);
+      }
+    }
+    for (const leaf of actionsIn(action)) {
+      if (
+        !this.autoTitle &&
+        (leaf.type === Actions.RENAME_TAB ||
+          (leaf.type === Actions.UPDATE_NODE_ATTRIBUTES &&
+            Object.hasOwn(leaf.data.json ?? {}, "name")))
+      ) {
+        const record = this.records.get(leaf.data.node ?? leaf.data.tabNode);
+        if (record) record.manualTitle = true;
+      }
+    }
+    for (const record of this.records.values())
+      if (record.role === "document" && record.preview && record.node.isPinned())
+        record.preview = false;
+    const moved = this.movedPreviews.get(action);
+    this.movedPreviews.delete(action);
+    for (const record of moved ?? [])
+      if (record.role === "document" && record.preview) {
+        const scope = this.previewScope(record.node);
+        if (
+          [...this.records.values()].some(
+            (other) =>
+              other !== record &&
+              !moved?.has(other) &&
+              other.role === "document" &&
+              other.preview &&
+              this.previewScope(other.node) === scope,
+          )
+        )
+          record.preview = false;
+      }
+    const scopes = new Set<string>();
+    // Native pin and moves end only the affected preview's replaceable status.
+    for (const record of this.records.values())
+      if (record.role === "document" && record.preview) {
+        const scope = this.previewScope(record.node);
+        if (scopes.has(scope)) record.preview = false;
+        else scopes.add(scope);
+      }
+    const contextSource = this.store.get().source;
+    const source = contextSource ? this.recordFor(contextSource) : undefined;
+    if (source) {
+      const containerId = tabContainer(source.node)?.getId() ?? null;
+      if (containerId !== this.store.get().activeContainerId)
+        this.store.setState((state) => ({ ...state, activeContainerId: containerId }));
+    }
+    this.changed(true);
+    if (!this.selecting) {
+      let selected: ContentRecord | undefined;
+      const active = this.model.getActiveTabset()?.getSelectedNode();
+      for (const leaf of actionsIn(action)) {
+        if ([Actions.SELECT_TAB, Actions.MOVE_NODE, Actions.ADD_TAB].includes(leaf.type)) {
+          const node = this.model.getNodeById(
+            leaf.data.tabNode ?? leaf.data.fromNode ?? leaf.data.json?.id,
+          );
+          if (node instanceof TabNode && node.isSelected() && !closedGroup(node))
+            selected = this.records.get(node.getId());
+        }
+        if (
+          leaf.type === Actions.SET_ACTIVE_TABSET ||
+          (active !== this.priorSelection.get(action) &&
+            [
+              Actions.MOVE_NODE,
+              Actions.ADD_TAB_TO_NEW_GROUP,
+              Actions.REMOVE_TAB_FROM_GROUP,
+              Actions.UNGROUP,
+              Actions.SET_TAB_PINNED,
+              Actions.UPDATE_NODE_ATTRIBUTES,
+            ].includes(leaf.type))
+        ) {
+          // Moving a tab into an open Border may select it independently of the central
+          // Tabset. A native group move, collapse or removal follows the final central selection.
+          if (
+            !(
+              leaf.type === Actions.MOVE_NODE &&
+              selected?.node === this.model.getNodeById(leaf.data.fromNode)
+            )
+          )
+            selected = active instanceof TabNode ? this.records.get(active.getId()) : undefined;
+        }
+      }
+      if (selected && this.live(selected)) {
+        this.browser?.cancelPending();
+        this.cancelFocus();
+        this.acceptActivity(selected, false);
+        if (selected.role === "document") this.publishActive("activate");
+      }
+    }
+    this.priorSelection.delete(action);
+  }
+
+  getContent(id: string): ContentInfo | null {
+    const record = this.records.get(id);
+    if (!record || !this.live(record)) return null;
+    const container = tabContainer(record.node);
+    const parent = record.node.getParent();
+    const max = this.model.getMaximizedTabset();
+    const visible =
+      !!this.view &&
+      !!container &&
+      record.node.isSelected() &&
+      !closedGroup(record.node) &&
+      (container instanceof BorderNode ? container.isShowing() : !max || max === container);
+    const fields: ContentInfo = {
+      id,
+      handle: record.handle,
+      role: record.role,
+      node: record.node,
+      containerId: container?.getId() ?? null,
+      tabGroupId: parent instanceof TabGroupNode ? parent.getId() : null,
+      title: record.node.getName(),
+      visible,
+    };
+    const next: ContentInfo =
+      record.role === "document"
+        ? ({
+            ...fields,
+            role: "document",
+            href: record.href,
+            preview: record.preview,
+            navigationKey: this.routeMetadata(record, "navigationKey") ?? null,
+          } as DocumentInfo)
+        : fields;
+    const previous = record.projection;
+    if (
+      previous &&
+      Object.keys(next).every((key) =>
+        Object.is(Reflect.get(next, key), Reflect.get(previous, key)),
       )
     )
-      return false;
-    return (
-      actions.every((a) => this.allowLayoutAction(a)) &&
-      (this.options.layoutPolicy?.allowsAction(this.state.model, action) ?? true)
-    );
+      return previous;
+    record.projection = Object.freeze(next);
+    return record.projection;
+  }
+  getDocument(id: string): DocumentInfo | null {
+    const content = this.getContent(id);
+    return content?.role === "document" ? (content as DocumentInfo) : null;
+  }
+  getDocuments(): readonly DocumentInfo[] {
+    const next = [...this.records.values()].flatMap((record) => {
+      const doc = this.getDocument(record.id);
+      return doc ? [doc] : [];
+    });
+    if (!same(next, this.projections)) this.projections = Object.freeze(next);
+    return this.projections;
+  }
+  getActiveDocument(): DocumentInfo | null {
+    const id = this.store.get().activeDocumentId;
+    return id ? this.getDocument(id) : null;
+  }
+  getContainers(): readonly ContainerInfo[] {
+    const nodes: (TabSetNode | BorderNode)[] = [...centralTabsets(this.model)];
+    this.model.visitNodes((node) => {
+      if (node instanceof BorderNode) nodes.push(node);
+    });
+    const next = nodes.map((node) => {
+      const selected = node.getSelectedNode();
+      const tabIds = tabsIn(node).map((tab) => tab.getId());
+      const selectedId = selected instanceof TabNode ? selected.getId() : null;
+      const previous = this.containers.find((item) => item.node === node);
+      return previous && previous.selectedId === selectedId && same(previous.tabIds, tabIds)
+        ? previous
+        : Object.freeze({
+            id: node.getId(),
+            kind: node instanceof BorderNode ? ("border" as const) : ("tabset" as const),
+            node,
+            tabIds: Object.freeze(tabIds),
+            selectedId,
+          });
+    });
+    if (!same(next, this.containers)) this.containers = Object.freeze(next);
+    return this.containers;
+  }
+  getContext(): WorkbenchContext {
+    const { activeDocumentId, activeContainerId, focusedContentId, source, windowFocused } =
+      this.store.get();
+    const next = { activeDocumentId, activeContainerId, focusedContentId, source, windowFocused };
+    if (
+      !this.context ||
+      Object.keys(next).some((key) => Reflect.get(next, key) !== Reflect.get(this.context!, key))
+    )
+      this.context = Object.freeze(next);
+    return this.context;
   }
 
-  /** Close actions may preserve the current browser entry when handing off to the host. */
-  dispatch(
-    action: Action,
-    options: { history?: boolean; signal?: AbortSignal } = {},
-  ): Promise<DispatchResult> {
-    if (this.disposed) return Promise.resolve({ status: "rejected" });
-    const actions = actionsIn(action);
-    const removals = actions.filter(
-      (a) => a.type === Actions.DELETE_TAB || a.type === Actions.DELETE_TABSET,
+  private registerController(content: ContentHandle, owner: ControllerOwner): () => void {
+    const record = this.recordFor(content);
+    if (!record) throw new Error("Cannot register a controller on ended content");
+    if (record.owner && record.owner !== owner)
+      throw new Error("Content already has a controller owner");
+    record.owner = owner;
+    record.ownerRevision++;
+    record.hadProtection ||= owner.controller.leave !== null;
+    this.updateTitle(record);
+    this.scheduleFocus();
+    this.changed();
+    return () => {
+      if (record.owner !== owner) return;
+      record.owner = undefined;
+      record.ownerRevision++;
+      this.endAttempts(record, true).forEach((error) => this.issue(error, record.id));
+      if (this.focusRequest?.record === record && this.focusRequest.owner === owner)
+        this.cancelFocus();
+      this.changed();
+    };
+  }
+  private updateController(
+    content: ContentHandle,
+    owner: ControllerOwner,
+    controller: ContentController,
+  ): void {
+    if (!controller || !Object.hasOwn(controller, "leave") || controller.leave === undefined)
+      throw new TypeError("Controllers must declare leave explicitly");
+    if (
+      controller.leave &&
+      (typeof controller.leave.getState !== "function" ||
+        typeof controller.leave.decide !== "function")
+    )
+      throw new TypeError("A leave guard requires getState and decide");
+    const record = this.recordFor(content);
+    const shapeChanged = (owner.controller.leave === null) !== (controller.leave === null);
+    owner.controller = controller;
+    if (!record || record.owner !== owner) return;
+    if (shapeChanged) {
+      record.ownerRevision++;
+      this.endAttempts(record, true).forEach((error) => this.issue(error, record.id));
+    }
+    record.hadProtection ||= controller.leave !== null;
+    this.updateTitle(record);
+    this.scheduleFocus();
+    if (shapeChanged) this.changed();
+  }
+  private newAttempt(record?: ContentRecord): LeaveAttempt {
+    const attempt = new LeaveAttempt((error) => this.issue(error, record?.id));
+    this.attempts.set(attempt, { record, committed: false });
+    attempt.signal.addEventListener(
+      "abort",
+      () => {
+        this.attempts.delete(attempt);
+      },
+      { once: true },
     );
-    if (removals.length > 0)
-      return removals.length === actions.length
-        ? this.closeAction(action, options.history !== false, options.signal)
-        : Promise.resolve({ status: "rejected" });
-    try {
-      if (!this.canDispatch(action)) return Promise.resolve({ status: "rejected" });
-      return Promise.resolve({
-        status: this.applyLayoutAction(action, actions) ? "applied" : "rejected",
-      });
-    } catch (error) {
-      return Promise.reject(error);
+    return attempt;
+  }
+  private endAttempts(record: ContentRecord, pendingOnly = false): unknown[] {
+    return LeaveAttempt.end(
+      [...this.attempts]
+        .filter(([, state]) => state.record === record && (!pendingOnly || !state.committed))
+        .map(([attempt]) => attempt),
+    );
+  }
+  private beginApproval(
+    record: ContentRecord,
+    reason: LeaveRequest["reason"],
+    to?: ParsedLocation,
+    destination: string | null = null,
+  ): Approval {
+    const attempt = this.newAttempt(record);
+    const owner = record.owner;
+    const revision = record.ownerRevision;
+    const locationRevision = record.role === "document" ? record.acceptedRevision : 0;
+    let token: LeaveToken | undefined;
+    let allowed = false;
+    const guard = owner?.controller.leave;
+    const validate = () =>
+      this.live(record) &&
+      !attempt.signal.aborted &&
+      record.owner === owner &&
+      record.ownerRevision === revision &&
+      (record.role !== "document" || record.acceptedRevision === locationRevision) &&
+      (guard
+        ? allowed && Object.is(stateOf(owner!.controller.leave!).token, token)
+        : !record.hadProtection || !!owner);
+    const decision = (async () => {
+      if (!this.live(record) || (!owner && record.hadProtection)) return false;
+      if (!guard) {
+        allowed = true;
+        return true;
+      }
+      const state = stateOf(guard);
+      const location =
+        record.role === "document"
+          ? (record.accepted ?? record.runtime?.router.state.resolvedLocation ?? null)
+          : null;
+      const detail =
+        reason === "navigate"
+          ? { reason, from: location!, to: to! }
+          : reason === "leave-workspace"
+            ? { reason, location, destination }
+            : { reason, location };
+      const result: LeaveDecision = await guard.decide({
+        ...detail,
+        content: record.handle,
+        state,
+        signal: attempt.signal,
+        defer: attempt.defer,
+      } as LeaveRequest);
+      if (result?.decision !== "allow") return false;
+      validToken(result.token);
+      token = result.token;
+      allowed = true;
+      return !attempt.signal.aborted;
+    })();
+    const cancelled = new Promise<false>((resolve) => {
+      if (attempt.signal.aborted) resolve(false);
+      else attempt.signal.addEventListener("abort", () => resolve(false), { once: true });
+    });
+    return {
+      attempt,
+      decision: Promise.race([decision, cancelled]),
+      validate,
+      finish: () => LeaveAttempt.end([attempt]),
+      committed: () => {
+        const state = this.attempts.get(attempt);
+        if (state) state.committed = true;
+      },
+    };
+  }
+
+  private bindLayout(getLayout: () => ILayoutApi | null, root: HTMLElement): () => void {
+    if (this.view) throw new Error("A Worksplit instance can bind only one Layout");
+    const binding = { getLayout, root };
+    const stopLinks = this.links.attach(getLayout);
+    this.view = binding;
+    this.changed();
+    this.scheduleFocus();
+    return () => {
+      if (this.view !== binding) return;
+      stopLinks();
+      this.view = undefined;
+      this.cancelFocus();
+      this.changed();
+    };
+  }
+  private cancelFocus(): void {
+    this.focusEpoch++;
+    this.focusRequest?.cancel?.();
+    this.focusRequest = undefined;
+  }
+  private scheduleFocus(): void {
+    const request = this.focusRequest;
+    if (!request || !this.view || !request.record.root || request.cancel) return;
+    const win = request.record.root.ownerDocument.defaultView;
+    const run = () => {
+      delete request.cancel;
+      if (
+        this.focusRequest !== request ||
+        request.epoch !== this.focusEpoch ||
+        !this.live(request.record) ||
+        !this.view ||
+        !request.record.root ||
+        (request.owner && request.record.owner !== request.owner)
+      )
+        return;
+      this.focusRequest = undefined;
+      this.focusing = true;
+      try {
+        (
+          request.callback ??
+          request.record.owner?.controller.focus ??
+          (() => request.record.root?.focus())
+        )();
+      } catch (error) {
+        this.issue(error, request.record.id);
+      } finally {
+        this.focusing = false;
+      }
+    };
+    if (win) {
+      const frame = win.requestAnimationFrame(run);
+      request.cancel = () => win.cancelAnimationFrame(frame);
+    } else queueMicrotask(run);
+  }
+  private observeFocus(
+    id: string | null,
+    origin: "content" | "chrome" | "outside",
+    intent = false,
+  ): void {
+    const record = id ? this.records.get(id) : undefined;
+    const changedSource = !!record && this.store.get().source !== record.handle;
+    if (!this.focusing && origin !== "chrome" && (origin === "outside" || intent || changedSource))
+      this.cancelFocus();
+    if (record && this.live(record) && origin === "content") {
+      // Closing a native dialog restores focus to its opener. Returning to the
+      // same source must not revoke that document's pending browser traversal.
+      if (!this.focusing && (intent || changedSource)) this.browser?.cancelPending();
+      this.acceptActivity(record, false);
+      if (!this.focusing && (intent || changedSource) && record.role === "document")
+        this.publishActive("activate");
+    }
+    this.store.setState((state) => ({
+      ...state,
+      focusedContentId: record?.id ?? null,
+      source: record?.handle ?? state.source,
+      windowFocused: origin !== "outside" || state.windowFocused,
+    }));
+  }
+  private acceptActivity(record: ContentRecord, focus: boolean, callback?: () => void): void {
+    const container = tabContainer(record.node);
+    const before = this.store.get().activeDocumentId;
+    if (record.role === "document") {
+      const at = this.mru.indexOf(record.id);
+      if (at >= 0) this.mru.splice(at, 1);
+      this.mru.unshift(record.id);
+    }
+    this.store.setState((state) => ({
+      ...state,
+      activeDocumentId: record.role === "document" ? record.id : state.activeDocumentId,
+      activeContainerId: container?.getId() ?? null,
+      source: record.handle,
+      snapshotRevision:
+        state.snapshotRevision + Number(record.role === "document" && before !== record.id),
+    }));
+    if (focus) {
+      this.cancelFocus();
+      this.focusRequest = {
+        record,
+        epoch: this.focusEpoch,
+        owner: record.owner,
+        ...(callback ? { callback } : {}),
+      };
+      this.scheduleFocus();
     }
   }
-
-  private resolveTool(tab: IJsonTabNode): WorkbenchTool | undefined {
-    const predefined = this.options.tools?.find((tool) => tool.id === tab.id);
-    if (predefined) return predefined;
-    const tool = this.options.resolveTool?.(structuredClone(tab));
-    if (tool && (tool.id !== tab.id || typeof tool.render !== "function"))
-      throw new Error(`Resolved Worksplit tool must render its declared id ${tab.id}`);
-    return tool;
+  private routeMetadata(
+    record: DocumentRecord,
+    field: "title" | "navigationKey",
+  ): string | undefined {
+    return record.runtime?.router.state.matches
+      .toReversed()
+      .find((match) => match.staticData?.worksplit?.[field] !== undefined)?.staticData.worksplit?.[
+      field
+    ];
+  }
+  private updateTitle(record: ContentRecord): void {
+    if (record.manualTitle || !this.live(record)) return;
+    const title =
+      record.owner?.controller.title ??
+      (record.role === "document"
+        ? (this.routeMetadata(record, "title") ?? record.href)
+        : record.definition.title);
+    if (title === undefined || title === record.node.getName()) return;
+    this.autoTitle++;
+    try {
+      this.model.doAction(Actions.renameTab(record.id, title));
+    } finally {
+      this.autoTitle--;
+    }
+  }
+  private previewScope(node: Node): string {
+    return this.options.previewScope === "workspace"
+      ? "workspace"
+      : (tabContainer(node)?.getId() ?? node.getId());
   }
 
-  private allowToolAdmission(action: Action): boolean {
-    const model = this.state.model;
-    const json = action.data.json as Record<string, unknown>;
+  private identity(router: AnyRouter, location: ParsedLocation): string {
+    const matches = router.matchRoutes(location);
+    const owner = matches
+      .toReversed()
+      .find((match) => match.staticData?.worksplit?.documentKey !== undefined);
+    if (owner) {
+      const key = owner.staticData.worksplit!.documentKey!({
+        params: owner.params,
+        search: owner.search,
+        location,
+      });
+      if (typeof key !== "string" || !key)
+        throw new TypeError("documentKey must return a nonempty string");
+      return JSON.stringify(["route", owner.routeId, key]);
+    }
+    return JSON.stringify(["url", location.pathname, location.searchStr]);
+  }
+  private findDocument(
+    key: string,
+    matcher: AnyRouter,
+    exclude?: DocumentRecord,
+  ): DocumentRecord | undefined {
+    const candidates = [...this.records.values()].filter((record): record is DocumentRecord => {
+      if (record.role !== "document" || record === exclude || !this.live(record)) return false;
+      if (record.key === undefined) {
+        const history = createMemoryHistory({ initialEntries: [record.href] });
+        try {
+          record.key = this.identity(matcher, matcher.parseLocation(history.location));
+        } finally {
+          history.destroy();
+        }
+      }
+      return record.key === key;
+    });
+    const active = candidates.find((record) => record.id === this.store.get().activeDocumentId);
+    if (active) return active;
+    for (const id of this.mru) {
+      const candidate = candidates.find((record) => record.id === id);
+      if (candidate) return candidate;
+    }
+    const selected = this.model.getActiveTabset()?.getSelectedNode();
+    return candidates.find((record) => record.node === selected) ?? candidates[0];
+  }
+  private runtime(href: string, existing?: DocumentRecord, source?: BrowserVisitSource) {
+    let owner = existing;
+    const runtime: DocumentRuntime<AnyRouter> = createDocumentRuntime<AnyRouter>({
+      href,
+      createRouter: this.options.createRouter,
+      isCurrent: (): boolean =>
+        this.phase !== "disposed" && (owner ? this.live(owner) : this.pendingRouters.has(runtime)),
+      beginNavigation: ({ to, navigation }) => {
+        if (!owner)
+          return {
+            decision: true,
+            validate: () => this.phase !== "disposed" && !source?.signal.aborted,
+            finish: () => [],
+          };
+        const approval = this.beginApproval(owner, "navigate", to);
+        const visit = this.browserRequests.get(navigation);
+        if (!visit?.pending) return approval;
+        let cancel!: (allowed: boolean) => void;
+        const cancelled = new Promise<boolean>((resolve) => {
+          cancel = resolve;
+        });
+        const abort = () => cancel(false);
+        visit.signal.addEventListener("abort", abort, { once: true });
+        if (visit.signal.aborted) abort();
+        return {
+          decision: Promise.race([approval.decision, cancelled]),
+          validate: () =>
+            !visit.signal.aborted && (!visit.pending || visit.current()) && approval.validate(),
+          committed: () => approval.committed?.(),
+          finish: () => {
+            visit.signal.removeEventListener("abort", abort);
+            return approval.finish();
+          },
+        };
+      },
+      onAccepted: (location, navigation) => {
+        if (owner && this.live(owner)) this.acceptLocation(owner, location, navigation);
+      },
+      onIssue: (error) => this.issue(error, owner?.id),
+    });
+    if (!existing) this.pendingRouters.add(runtime);
+    const cancelCandidate = () => {
+      if (owner) return;
+      this.pendingRouters.delete(runtime);
+      runtime.dispose().forEach((error) => this.issue(error));
+    };
+    source?.signal.addEventListener("abort", cancelCandidate, { once: true });
+    runtime.history.signal.addEventListener(
+      "abort",
+      () => source?.signal.removeEventListener("abort", cancelCandidate),
+      { once: true },
+    );
+    if (source?.signal.aborted) cancelCandidate();
+    return {
+      runtime,
+      adopt: (record: DocumentRecord) => {
+        source?.signal.removeEventListener("abort", cancelCandidate);
+        owner = record;
+        this.pendingRouters.delete(runtime);
+        record.runtime = runtime;
+      },
+    };
+  }
+  private acceptLocation(
+    record: DocumentRecord,
+    location: ParsedLocation,
+    navigation?: NativeNavigation,
+  ): void {
+    const changed =
+      record.accepted?.state["__TSR_key"] !== location.state["__TSR_key"] ||
+      record.href !== location.publicHref;
+    record.accepted = location;
+    record.href = location.publicHref;
+    if (changed) record.acceptedRevision++;
+    record.key = undefined;
+    try {
+      record.key = this.identity(record.runtime!.router, location);
+      this.updateTitle(record);
+    } finally {
+      this.changed(changed);
+    }
     if (
-      !json ||
-      typeof json !== "object" ||
-      Array.isArray(json) ||
-      typeof json.id !== "string" ||
-      !json.id ||
-      this.state.documents.has(json.id) ||
-      model.getNodeById(json.id) ||
-      this.closing.has(json.id) ||
-      (json.type !== undefined && json.type !== TabNode.TYPE) ||
-      json.component !== TOOL_COMPONENT ||
-      json.children !== undefined ||
-      json.subLayoutId !== undefined ||
-      ["enableFloat", "enablePopout"].some((key) => json[key] !== undefined && json[key] !== false)
+      changed &&
+      navigation &&
+      record.ready &&
+      this.store.get().activeDocumentId === record.id &&
+      !this.browserRequests.get(navigation)?.pending
+    ) {
+      let original = navigation;
+      while (original.parent) original = original.parent;
+      this.browser?.publish(record.href, this.reference(record), original.action === "REPLACE");
+    }
+  }
+  private publishActive(reason: "open" | "activate" | "close"): void {
+    if (!this.browser) return;
+    const active = this.store.get().activeDocumentId;
+    const record = active ? this.records.get(active) : undefined;
+    const href = record?.role === "document" ? record.href : this.options.home?.href;
+    if (href === undefined) return;
+    this.browser.publish(
+      href,
+      record?.role === "document" ? this.reference(record) : undefined,
+      reason !== "open" || this.browser.acceptedHref === href,
+    );
+  }
+  private initialize(record: DocumentRecord): Promise<void> {
+    if (record.ready) return Promise.resolve();
+    if (record.initialization) return record.initialization;
+    record.initialization = (async () => {
+      if (!this.live(record)) return;
+      const runtime = record.runtime ?? this.runtime(record.href, record).runtime;
+      record.runtime = runtime;
+      const result = await runtime.start();
+      if (result.status === "failed") throw result.error;
+      if (result.status !== "accepted" || !this.live(record)) return;
+      record.ready = true;
+      if (runtime.acceptedLocation) this.acceptLocation(record, runtime.acceptedLocation);
+      this.changed();
+    })();
+    return record.initialization;
+  }
+
+  private captureOpen(
+    options: OpenOptions,
+    claimFocus = true,
+  ): OpenCapture | { status: "denied"; reason: DenialReason } {
+    const presentation = options.presentation ?? "activate";
+    if (
+      !["activate", "reveal", "background"].includes(presentation) ||
+      (presentation === "background" && options.preview)
     )
-      return false;
-    if (!this.resolveTool(json as IJsonTabNode)) return false;
-    const target = model.getNodeById(action.data.toNode as string);
+      return denied("invalid-argument");
+    const source = options.source
+      ? this.recordFor(options.source)
+      : this.store.get().source
+        ? this.recordFor(this.store.get().source!)
+        : undefined;
+    if (options.source && !source) return denied("missing-content");
+    if (presentation === "reveal" && !source) return denied("focus-conflict");
+    const sourceContainer = source ? tabContainer(source.node) : undefined;
+    const anchor =
+      sourceContainer instanceof TabSetNode
+        ? sourceContainer
+        : (this.model.getActiveTabset() ?? centralTabsets(this.model)[0]);
+    let destination: OpenCapture["destination"];
+    if (options.destination && typeof options.destination !== "function") {
+      const target = this.model.getNodeById(options.destination.target);
+      if (!target) return denied("layout-policy");
+      destination = {
+        value: { ...options.destination },
+        target,
+        children: [...target.getChildren()],
+      };
+    }
+    if (presentation === "activate" && claimFocus) this.cancelFocus();
+    return { source, sourceContainer, anchor, destination, focus: this.focusEpoch, presentation };
+  }
+  private captureCurrent(capture: OpenCapture): boolean {
+    return (
+      this.phase !== "disposed" &&
+      (!capture.current || capture.current()) &&
+      (!capture.source ||
+        (this.live(capture.source) &&
+          tabContainer(capture.source.node) === capture.sourceContainer)) &&
+      (!capture.anchor || this.model.getNodeById(capture.anchor.getId()) === capture.anchor) &&
+      (!capture.destination ||
+        (this.model.getNodeById(capture.destination.target.getId()) ===
+          capture.destination.target &&
+          (capture.destination.value.index === undefined ||
+            capture.destination.value.index < 0 ||
+            same(capture.destination.children, capture.destination.target.getChildren()))))
+    );
+  }
+  private canPlace(
+    tab: IJsonTabNode,
+    destination: Destination,
+    capture: OpenCapture,
+    presentation = capture.presentation,
+  ): boolean {
+    if (!this.captureCurrent(capture)) return false;
+    const target = this.model.getNodeById(destination.target);
+    const location = destination.location;
     if (
-      !(
-        target instanceof TabSetNode ||
-        target instanceof BorderNode ||
-        target instanceof TabGroupNode ||
-        target instanceof RowNode
-      ) ||
+      !target ||
       ![
         DockLocation.CENTER,
         DockLocation.LEFT,
         DockLocation.RIGHT,
         DockLocation.TOP,
         DockLocation.BOTTOM,
-      ].some((location) => location.getName() === action.data.location)
+      ].includes(location)
     )
       return false;
-    let live = false;
-    model.visitNodes((node) => {
-      if (node === target) live = true;
-    });
-    if (!live) return false;
-    if (this.options.allowDrop) {
-      // Validate a detached candidate before publishing insertion or mounting resources.
-      const candidate = Model.fromJson(
-        structuredClone({
-          global: this.admissionGlobals,
-          layout: model.getRootRow()!.toJson(),
-          borders: model.getBorderSet().toJson(),
-        }),
-      );
-      candidate.doAction(action);
-      const tab = candidate.getNodeById(json.id);
-      const destination = candidate.getNodeById(target.getId());
-      const location = [
-        DockLocation.CENTER,
-        DockLocation.LEFT,
-        DockLocation.RIGHT,
-        DockLocation.TOP,
-        DockLocation.BOTTOM,
-      ].find((entry) => entry.getName() === action.data.location)!;
-      if (!(tab instanceof TabNode) || !destination || !this.allowMove(tab, destination, location))
+    if (
+      destination.index !== undefined &&
+      (!Number.isSafeInteger(destination.index) || destination.index < -1)
+    )
+      return false;
+    if (target instanceof BorderNode || target instanceof TabGroupNode) {
+      if (
+        location !== DockLocation.CENTER ||
+        destination.ratio !== undefined ||
+        (target instanceof TabGroupNode && tab.pinned)
+      )
         return false;
+    } else if (target instanceof RowNode) {
+      if (
+        target !== this.model.getRootRow() ||
+        centralTabsets(this.model).length ||
+        location !== DockLocation.CENTER
+      )
+        return false;
+    } else if (!(target instanceof TabSetNode)) return false;
+    if (
+      destination.ratio !== undefined &&
+      (!(target instanceof TabSetNode) ||
+        location === DockLocation.CENTER ||
+        !Number.isFinite(destination.ratio) ||
+        destination.ratio <= 0 ||
+        destination.ratio >= 1)
+    )
+      return false;
+    const container =
+      target instanceof TabSetNode || target instanceof BorderNode ? target : tabContainer(target);
+    if (container && !container.isEnableDrop()) return false;
+    if (
+      target instanceof TabSetNode &&
+      location !== DockLocation.CENTER &&
+      !target.isEnableDivide()
+    )
+      return false;
+    if (
+      destination.index !== undefined &&
+      destination.index >= 0 &&
+      destination.index > target.getChildren().length
+    )
+      return false;
+    if (
+      presentation === "reveal" &&
+      (capture.focus !== this.focusEpoch ||
+        !capture.source ||
+        (container === capture.sourceContainer && location === DockLocation.CENTER) ||
+        (this.model.getMaximizedTabset() &&
+          (!(container instanceof BorderNode) || capture.sourceContainer instanceof TabSetNode)))
+    )
+      return false;
+    if (
+      presentation === "background" &&
+      (!(container instanceof TabSetNode || container instanceof BorderNode) ||
+        location !== DockLocation.CENTER ||
+        !container.getSelectedNode())
+    )
+      return false;
+    const action = Actions.addTab(
+      tab,
+      destination.target,
+      location,
+      destination.index ?? -1,
+      presentation !== "background",
+    );
+    if (this.options.layoutPolicy && !this.options.layoutPolicy.allowsAction(this.model, action))
+      return false;
+    if (this.options.allowDrop) {
+      const temporary = Model.fromJson({
+        global: this.model.getGlobalAttributes(),
+        layout: { type: "row", children: [{ type: "tabset", children: [tab] }] },
+      });
+      const node = temporary.getNodeById(tab.id!);
+      if (!(node instanceof TabNode) || !this.allowMove(node, target, location)) return false;
     }
     return true;
   }
+  private defaultDestination(capture: OpenCapture): Destination | null {
+    const target = capture.anchor ?? centralTabsets(this.model)[0] ?? this.model.getRootRow();
+    return target ? { target: target.getId(), location: DockLocation.CENTER } : null;
+  }
 
-  private allowLayoutAction(action: Action): boolean {
-    const model = this.state.model;
-    const data = action.data;
-    switch (action.type) {
-      case Actions.ADD_TAB:
-        return this.allowToolAdmission(action);
-      case Actions.MOVE_NODE: {
-        const from = model.getNodeById(data.fromNode as string);
-        const to = model.getNodeById(data.toNode as string);
+  open<const TFrom extends string = string, const TTo extends string | undefined = ".">(
+    navigation: DocumentNavigationOptions<TRouter, TFrom, TTo>,
+    options: OpenOptions = {},
+  ): Promise<OpenResult> {
+    return this.openDocument(navigation as unknown as RuntimeNavigation, options, false);
+  }
+  private async openDocument(
+    navigation: RuntimeNavigation,
+    options: OpenOptions,
+    starting: boolean,
+    current?: () => boolean,
+    source?: BrowserVisitSource,
+  ): Promise<OpenResult> {
+    if (this.phase !== "running" && !(starting && this.phase === "starting"))
+      return denied("not-ready");
+    if (!current) this.browser?.cancelPending();
+    let prepared: ReturnType<WorkbenchSession<TRouter>["runtime"]> | undefined;
+    let previewApproval: Approval | undefined;
+    let oldPreview: DocumentRecord | undefined;
+    let removedPreview: DocumentRecord | undefined;
+    let admitted: DocumentRecord | undefined;
+    const cleanupErrors: unknown[] = [];
+    const requestOrder = ++this.sequence;
+    try {
+      if (
+        !navigation ||
+        navigation.reloadDocument !== undefined ||
+        navigation.ignoreBlocker !== undefined ||
+        Object.hasOwn(navigation, "navigation") ||
+        (options.reuse !== undefined && !["preserve", "navigate", "new"].includes(options.reuse))
+      )
+        return denied("invalid-argument");
+      const capture = this.captureOpen(options);
+      if ("status" in capture) return capture;
+      if (current) capture.current = current;
+      prepared = this.runtime(
+        capture.source?.role === "document"
+          ? capture.source.href
+          : (this.options.home?.href ?? "/"),
+        undefined,
+        source,
+      );
+      const router = prepared.runtime.router;
+      const location = router.buildLocation(
+        navigation as Parameters<AnyRouter["buildLocation"]>[0],
+      );
+      if (location.external) return denied("invalid-argument");
+      checkHref(location.publicHref);
+      const requestedKey = this.identity(router, location);
+      const reuse = options.reuse ?? "preserve";
+      const useExisting = async (record: DocumentRecord): Promise<OpenResult> => {
+        if (!this.captureCurrent(capture)) return superseded;
+        await this.initialize(record);
+        if (!this.captureCurrent(capture) || !this.live(record)) return superseded;
+        let navigated = false;
+        if (reuse === "navigate") {
+          if (capture.presentation === "reveal" && record === capture.source)
+            return denied("focus-conflict");
+          const result = await record.runtime!.navigate(navigation);
+          cleanupErrors.push(...result.cleanupErrors);
+          if (result.status === "failed") return failed(result.error, "prepare", [], cleanupErrors);
+          if (result.status === "denied") {
+            cleanupErrors.forEach((error) => this.issue(error));
+            return denied("decision");
+          }
+          if (result.status === "superseded") {
+            cleanupErrors.forEach((error) => this.issue(error));
+            return superseded;
+          }
+          navigated = true;
+        }
+        if (
+          !this.captureCurrent(capture) ||
+          (capture.presentation !== "background" && capture.focus !== this.focusEpoch)
+        ) {
+          return navigated && this.live(record)
+            ? applied(
+                {
+                  document: this.getDocument(record.id)!,
+                  reused: true,
+                  presentation: "background",
+                },
+                cleanupErrors,
+              )
+            : superseded;
+        }
+        const result = this.present(record, capture.presentation, capture.source);
+        if (result.status !== "applied") return result;
+        if (!options.preview) record.preview = false;
+        this.changed(true);
+        if (capture.presentation === "activate" && !source) this.publishActive("activate");
+        return applied(
+          {
+            document: this.getDocument(record.id)!,
+            reused: true,
+            presentation: capture.presentation,
+          },
+          cleanupErrors,
+        );
+      };
+      if (reuse !== "new") {
+        const match = this.findDocument(requestedKey, router);
+        if (match) return await useExisting(match);
+      }
+      const loaded = await prepared.runtime.navigate({ ...navigation, replace: true });
+      cleanupErrors.push(...loaded.cleanupErrors);
+      if (loaded.status === "failed") return failed(loaded.error, "prepare", [], cleanupErrors);
+      if (loaded.status === "denied") return denied("decision");
+      if (loaded.status !== "accepted" || !this.captureCurrent(capture)) return superseded;
+      const accepted = prepared.runtime.acceptedLocation;
+      if (!accepted) return failed(new Error("Router did not accept a location"));
+      const key = this.identity(router, accepted);
+      if (reuse !== "new") {
+        const match = this.findDocument(key, router);
+        if (match) return await useExisting(match);
+      }
+      let presentation = capture.presentation;
+      if (presentation === "activate" && capture.focus !== this.focusEpoch) {
+        if (options.preview) return superseded;
+        presentation = "background";
+      }
+      const id = `document-${this.prefix}-${++this.sequence}`;
+      const title =
+        router.state.matches
+          .toReversed()
+          .find((match) => match.staticData?.worksplit?.title !== undefined)?.staticData.worksplit
+          ?.title ?? accepted.publicHref;
+      const tab: IJsonTabNode = {
+        type: "tab",
+        id,
+        component: DOCUMENT_COMPONENT,
+        name: title,
+        enableFloat: false,
+        enablePopout: false,
+      };
+      const context: PlacementContext = {
+        model: this.model,
+        source: capture.source ? this.getContent(capture.source.id) : null,
+        anchor: capture.anchor ?? null,
+        containers: this.getContainers(),
+        previews: this.getDocuments().filter((doc) => doc.preview),
+        mru: [...this.mru],
+        defaultDestination: this.defaultDestination(capture),
+        canPlace: (destination) => this.canPlace(tab, destination, capture, presentation),
+      };
+      const destination =
+        typeof options.destination === "function"
+          ? options.destination(context)
+          : (capture.destination?.value ?? context.defaultDestination);
+      if (!destination || !this.canPlace(tab, destination, capture, presentation))
+        return denied("layout-policy");
+      const target = this.model.getNodeById(destination.target)!;
+      const targetChildren = [...target.getChildren()];
+      const scope =
+        this.options.previewScope === "workspace"
+          ? "workspace"
+          : destination.location === DockLocation.CENTER
+            ? (tabContainer(target) ?? target).getId()
+            : `split-${requestOrder}`;
+      const previewEpoch = requestOrder;
+      if (options.preview) {
+        if ((this.previewEpochs.get(scope) ?? 0) > previewEpoch) return superseded;
+        this.previewEpochs.set(scope, previewEpoch);
+        oldPreview = [...this.records.values()].find(
+          (record): record is DocumentRecord =>
+            record.role === "document" &&
+            record.preview &&
+            this.previewScope(record.node) === scope,
+        );
+        if (oldPreview) {
+          if (
+            !(
+              oldPreview.owner?.controller.leave &&
+              stateOf(oldPreview.owner.controller.leave).hasUnsavedChanges
+            )
+          ) {
+            previewApproval = this.beginApproval(oldPreview, "replace-preview");
+            await previewApproval.decision;
+          }
+        }
+      }
+      if (
+        !this.captureCurrent(capture) ||
+        this.model.getNodeById(destination.target) !== target ||
+        (destination.index !== undefined &&
+          destination.index >= 0 &&
+          !same(targetChildren, target.getChildren())) ||
+        (options.preview && this.previewEpochs.get(scope) !== previewEpoch)
+      )
+        return superseded;
+      if (!this.canPlace(tab, destination, capture, presentation)) return denied("layout-policy");
+      const action = Actions.addTab(
+        tab,
+        destination.target,
+        destination.location,
+        destination.index ?? -1,
+        presentation !== "background",
+      );
+      let commitError: unknown;
+      const admission: { record?: DocumentRecord } = {};
+      this.admissions.set(id, (node) => {
+        const record = this.makeRecord(node, "document") as DocumentRecord;
+        prepared!.adopt(record);
+        record.ready = true;
+        record.accepted = accepted;
+        record.acceptedRevision = 1;
+        record.href = accepted.publicHref;
+        record.key = key;
+        admission.record = record;
+      });
+      this.selecting++;
+      try {
+        this.model.doAction(action);
+      } catch (error) {
+        commitError = error;
+      } finally {
+        this.selecting--;
+        this.admissions.delete(id);
+      }
+      admitted = admission.record;
+      if (!admitted)
+        return failed(commitError ?? new Error("Native ADD did not admit content"), "commit");
+      if (!this.live(admitted))
+        return failed(
+          commitError ?? new Error("Admitted content ended during native observers"),
+          "commit",
+          [id],
+        );
+      const node = admitted.node;
+      if (destination.ratio !== undefined && target instanceof TabSetNode) {
+        const added = tabContainer(node);
+        if (!(added instanceof TabSetNode) || added === target)
+          commitError ??= new Error("Native split did not create a new TabSet");
+        else
+          try {
+            applySplitRatio(this.model, target, added, destination.ratio);
+          } catch (error) {
+            commitError ??= error;
+          }
+      }
+      const presented = this.present(admitted, presentation, capture.source);
+      if (presented.status !== "applied")
+        commitError ??= new Error(`Admitted content could not use ${presentation} presentation`);
+      if (oldPreview && this.live(oldPreview)) {
+        if (
+          oldPreview.preview &&
+          previewApproval &&
+          previewApproval.validate() &&
+          oldPreview.node.isEnableClose() &&
+          !oldPreview.node.isPinned()
+        ) {
+          try {
+            this.model.doAction(Actions.deleteTab(oldPreview.id));
+          } catch (error) {
+            commitError ??= error;
+          }
+          if (this.model.getNodeById(oldPreview.id) !== oldPreview.node)
+            removedPreview = oldPreview;
+          else oldPreview.preview = false;
+        } else oldPreview.preview = false;
+      }
+      admitted.preview = options.preview === true && !admitted.node.isPinned();
+      if (previewApproval) {
+        cleanupErrors.push(...previewApproval.finish());
+        previewApproval = undefined;
+      }
+      this.changed(true);
+      if (presentation === "activate" && !source) this.publishActive("open");
+      // Publish this commit before ending old effects: their cleanup can reenter,
+      // and an asynchronous cleanup must not delay preview state or browser URL.
+      const document = this.getDocument(admitted.id);
+      if (!document) commitError ??= new Error("Admitted content ended during commit");
+      if (removedPreview) {
+        const retired = removedPreview;
+        removedPreview = undefined;
+        cleanupErrors.push(...(await this.release([retired])));
+      }
+      if (commitError) return failed(commitError, "commit", [admitted.id], cleanupErrors);
+      return applied({ document: document!, reused: false, presentation }, cleanupErrors);
+    } catch (error) {
+      if (removedPreview) {
+        const retired = removedPreview;
+        removedPreview = undefined;
+        cleanupErrors.push(...(await this.release([retired])));
+      }
+      return failed(
+        error,
+        admitted ? "commit" : "prepare",
+        admitted ? [admitted.id] : [],
+        cleanupErrors,
+      );
+    } finally {
+      if (previewApproval) previewApproval.finish().forEach((error) => this.issue(error));
+      if (prepared && this.pendingRouters.delete(prepared.runtime))
+        prepared.runtime.dispose().forEach((error) => this.issue(error));
+    }
+  }
+
+  private present(
+    record: ContentRecord,
+    presentation: "activate" | "reveal" | "background",
+    source?: ContentRecord,
+    focus?: () => void,
+  ): OperationResult<ContentInfo> {
+    if (!this.live(record)) return denied("missing-content");
+    if (presentation === "background") return applied(this.getContent(record.id)!);
+    const container = tabContainer(record.node);
+    if (
+      presentation === "reveal" &&
+      (!source ||
+        !this.live(source) ||
+        tabContainer(source.node) === container ||
+        (this.model.getMaximizedTabset() && container instanceof TabSetNode))
+    )
+      return denied("focus-conflict");
+    this.selecting++;
+    try {
+      revealTab(this.model, record.node);
+      if (presentation === "activate") {
+        const max = this.model.getMaximizedTabset();
+        if (max && container instanceof TabSetNode && max !== container)
+          this.model.doAction(Actions.maximizeToggle(container.getId()));
+        if (container instanceof TabSetNode)
+          this.model.doAction(Actions.setActiveTabset(container.getId()));
+        this.acceptActivity(record, true, focus);
+      }
+    } catch (error) {
+      return failed(error, "commit", [record.id]);
+    } finally {
+      this.selecting--;
+    }
+    return applied(this.getContent(record.id)!);
+  }
+  async activate(id: string, options: ActivateOptions = {}): Promise<OperationResult<ContentInfo>> {
+    if (this.phase !== "running") return denied("not-ready");
+    this.browser?.cancelPending();
+    const record = this.records.get(id);
+    if (!record || !this.live(record)) return denied("missing-content");
+    try {
+      const source = options.source
+        ? this.recordFor(options.source)
+        : this.store.get().source
+          ? this.recordFor(this.store.get().source!)
+          : undefined;
+      if (options.source && !source) return denied("missing-content");
+      const result = this.present(
+        record,
+        options.presentation ?? "activate",
+        source,
+        options.focus,
+      );
+      if (
+        result.status === "applied" &&
+        options.presentation !== "reveal" &&
+        record.role === "document"
+      )
+        this.publishActive("activate");
+      return result;
+    } catch (error) {
+      return failed(error);
+    }
+  }
+  keepOpen(id: string): Promise<OperationResult<DocumentInfo>> {
+    if (this.phase !== "running") return Promise.resolve(denied("not-ready"));
+    const record = this.records.get(id);
+    if (!record || record.role !== "document" || !this.live(record))
+      return Promise.resolve(denied("missing-content"));
+    if (record.preview) {
+      record.preview = false;
+      this.changed(true);
+    }
+    return Promise.resolve(applied(this.getDocument(id)!));
+  }
+  duplicate(id: string, options: Omit<OpenOptions, "reuse" | "preview"> = {}): Promise<OpenResult> {
+    const doc = this.getDocument(id);
+    if (!doc) return Promise.resolve(denied("missing-content"));
+    return this.open({ href: doc.href } as DocumentNavigationOptions<TRouter>, {
+      source: doc.handle,
+      ...options,
+      reuse: "new",
+      preview: false,
+    });
+  }
+  async save(id: string): Promise<OperationResult<void>> {
+    if (this.phase !== "running") return denied("not-ready");
+    const record = this.records.get(id);
+    if (!record || !this.live(record)) return denied("missing-content");
+    const save = record.owner?.controller.save;
+    if (!save) return denied("missing-capability");
+    try {
+      await save();
+      return applied(undefined);
+    } catch (error) {
+      return failed(error);
+    }
+  }
+
+  private closeTargets(target: CloseTarget): readonly TabNode[] | null {
+    if (typeof target === "string" || Array.isArray(target)) {
+      const ids = typeof target === "string" ? [target] : [...new Set(target)];
+      const records = ids.map((id) => this.records.get(id));
+      if (
+        records.some(
+          (record) =>
+            !record || !this.live(record) || !record.node.isEnableClose() || record.node.isPinned(),
+        )
+      )
+        return null;
+      return records.map((record) => record!.node);
+    }
+    const range = target as Exclude<CloseTarget, string | readonly string[]>;
+    const node = range.target;
+    if (this.model.getNodeById(node.getId()) !== node) return null;
+    let nodes: TabNode[];
+    if (
+      range.scope === "all" &&
+      (node instanceof TabSetNode || node instanceof BorderNode || node instanceof TabGroupNode)
+    )
+      nodes = tabsIn(node);
+    else if (node instanceof TabNode && (range.scope === "others" || range.scope === "right")) {
+      const container = tabContainer(node);
+      if (!container || (range.scope === "right" && !(container instanceof TabSetNode)))
+        return null;
+      const all = tabsIn(container);
+      nodes =
+        range.scope === "others"
+          ? all.filter((tab) => tab !== node)
+          : all.slice(all.indexOf(node) + 1);
+    } else return null;
+    return nodes.filter((tab) => tab.isEnableClose() && !tab.isPinned());
+  }
+  close(target: CloseTarget, options: CloseOptions = {}): Promise<CloseResult> {
+    return this.closeScope(() => this.closeTargets(target), options);
+  }
+  private closeScope(
+    select: () => readonly TabNode[] | null,
+    options: CloseOptions = {},
+  ): Promise<CloseResult> {
+    if (this.phase !== "running") return Promise.resolve(denied("not-ready"));
+    if (this.workspaceClosing) return Promise.resolve(denied("busy"));
+    let nodes: readonly TabNode[] | null;
+    try {
+      nodes = select();
+    } catch (error) {
+      return Promise.resolve(failed(error));
+    }
+    if (!nodes) return Promise.resolve(denied("not-closeable"));
+    const members = nodes.map((node) => this.records.get(node.getId()));
+    if (members.some((record) => !record)) return Promise.resolve(denied("missing-content"));
+    const records = members as ContentRecord[];
+    const existing = records.map((record) => this.closing.get(record)).find(Boolean);
+    if (existing)
+      return same(existing.members, records) ? existing.promise : Promise.resolve(denied("busy"));
+    if (!records.length) return Promise.resolve(applied({ closedIds: [] }));
+    let resolve!: (result: CloseResult) => void;
+    const promise = new Promise<CloseResult>((done) => {
+      resolve = done;
+    });
+    const batch = { members: records, promise };
+    records.forEach((record) => this.closing.set(record, batch));
+    const settle = (result: CloseResult) => {
+      records.forEach((record) => {
+        if (this.closing.get(record) === batch) this.closing.delete(record);
+      });
+      resolve(result);
+    };
+    void this.performClose(
+      records,
+      () => {
+        const current = select();
+        return !!current && same(current, nodes!);
+      },
+      options,
+    ).then(settle, (error) => settle(failed(error)));
+    return promise;
+  }
+  private async performClose(
+    records: readonly ContentRecord[],
+    scopeCurrent: () => boolean,
+    options: CloseOptions,
+  ): Promise<CloseResult> {
+    const approvals: Approval[] = [];
+    const removed: ContentRecord[] = [];
+    let phase: Failed["phase"] = "prepare";
+    const containers = records.map((record) => tabContainer(record.node));
+    let endAbort!: () => void;
+    const cancelled = new Promise<false>((resolve) => {
+      endAbort = () => resolve(false);
+    });
+    const onAbort = () => {
+      LeaveAttempt.end(approvals.map((approval) => approval.attempt)).forEach((error) =>
+        this.issue(error),
+      );
+      endAbort();
+    };
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    const errors: unknown[] = [];
+    try {
+      if (options.signal?.aborted) return superseded;
+      for (const record of records) {
+        const approval = this.beginApproval(record, "close");
+        approvals.push(approval);
+        // eslint-disable-next-line no-await-in-loop -- One host decision dialog at a time; all approvals are rechecked before commit.
+        if (!(await Promise.race([approval.decision, cancelled])))
+          return options.signal?.aborted ? superseded : denied("decision");
+        if (options.signal?.aborted) return superseded;
+      }
+      if (!scopeCurrent() || !approvals.every((approval) => approval.validate()))
+        return denied("state-changed");
+      phase = "commit";
+      for (const [index, record] of records.entries()) {
+        for (let remaining = index; remaining < records.length; remaining++) {
+          const current = records[remaining]!;
+          if (
+            !approvals[remaining]!.validate() ||
+            !current.node.isEnableClose() ||
+            current.node.isPinned() ||
+            tabContainer(current.node) !== containers[remaining]
+          )
+            throw new Error("Close approval changed during native removal");
+        }
+        let mutationError: unknown;
+        try {
+          this.model.doAction(Actions.deleteTab(record.id));
+        } catch (error) {
+          mutationError = error;
+        }
+        for (const member of records)
+          if (this.model.getNodeById(member.id) !== member.node && !removed.includes(member)) {
+            member.closed = true;
+            removed.push(member);
+          }
+        if (mutationError) throw mutationError;
+        if (!removed.includes(record))
+          throw new Error("Native close did not remove the approved content");
+      }
+      const cleanup = this.release(removed);
+      errors.push(...LeaveAttempt.end(approvals.map((approval) => approval.attempt)));
+      errors.push(...(await cleanup));
+      return applied({ closedIds: removed.map((record) => record.id) }, errors);
+    } catch (error) {
+      const cleanup = this.release(removed);
+      errors.push(...LeaveAttempt.end(approvals.map((approval) => approval.attempt)));
+      errors.push(...(await cleanup));
+      return failed(
+        error,
+        phase,
+        removed.map((record) => record.id),
+        errors,
+      );
+    } finally {
+      options.signal?.removeEventListener("abort", onAbort);
+      LeaveAttempt.end(approvals.map((approval) => approval.attempt)).forEach((error) =>
+        this.issue(error),
+      );
+    }
+  }
+  private release(records: readonly ContentRecord[]): Promise<unknown[]> {
+    const unique = [...new Set(records)].filter((record) => this.records.get(record.id) === record);
+    unique.forEach((record) => {
+      record.closed = true;
+      this.records.delete(record.id);
+    });
+    const owner = {};
+    const effects = unique.map((record) => record.effects.prepareClose(owner));
+    const errors: unknown[] = [];
+    for (const record of unique) {
+      errors.push(...this.endAttempts(record));
+      if (this.focusRequest?.record === record) this.cancelFocus();
+      if (record.role === "document") errors.push(...(record.runtime?.dispose() ?? []));
+      const index = this.mru.indexOf(record.id);
+      if (index >= 0) this.mru.splice(index, 1);
+    }
+    effects.forEach((effect) => effect.stop());
+    this.store.setState((state) => ({
+      ...state,
+      activeDocumentId:
+        state.activeDocumentId && this.records.has(state.activeDocumentId)
+          ? state.activeDocumentId
+          : null,
+      focusedContentId:
+        state.focusedContentId && this.records.has(state.focusedContentId)
+          ? state.focusedContentId
+          : null,
+      source: state.source && this.recordFor(state.source) ? state.source : null,
+    }));
+    if (this.phase === "running" && !this.getActiveDocument()) {
+      const selected = centralTabsets(this.model)
+        .map((container) => container.getSelectedNode())
+        .find(
+          (node) => node instanceof TabNode && this.records.get(node.getId())?.role === "document",
+        );
+      const next =
+        selected instanceof TabNode
+          ? this.records.get(selected.getId())
+          : (this.records.get(this.mru[0] ?? "") ??
+            [...this.records.values()].find((record) => record.role === "document"));
+      if (next && this.live(next)) this.acceptActivity(next, false);
+      this.publishActive("close");
+    }
+    this.changed(true);
+    return Promise.all(effects.map((effect) => effect.result)).then((results) => [
+      ...errors,
+      ...results.flat(),
+    ]);
+  }
+
+  closeWorkspace(
+    options: CloseWorkspaceOptions = {},
+  ): Promise<OperationResult<{ snapshot: WorkbenchSnapshot | null }>> {
+    if (this.phase !== "running") return Promise.resolve(denied("not-ready"));
+    return this.beginWorkspaceClose(options);
+  }
+  private beginWorkspaceClose(
+    options: CloseWorkspaceOptions,
+    onCommitted?: (snapshot: WorkbenchSnapshot | null, cleanup: Promise<DisposeResult>) => void,
+  ): Promise<OperationResult<{ snapshot: WorkbenchSnapshot | null }>> {
+    if (this.workspaceClosing)
+      return this.workspaceCloseRequest?.destination === options.destination &&
+        this.workspaceCloseRequest?.handoff === !!onCommitted
+        ? this.workspaceClosing
+        : Promise.resolve(denied("busy"));
+    if (this.closing.size) return Promise.resolve(denied("busy"));
+    let resolve!: (result: OperationResult<{ snapshot: WorkbenchSnapshot | null }>) => void;
+    const promise = new Promise<OperationResult<{ snapshot: WorkbenchSnapshot | null }>>((done) => {
+      resolve = done;
+    });
+    this.workspaceClosing = promise;
+    this.workspaceCloseRequest = { destination: options.destination, handoff: !!onCommitted };
+    const settle = (result: OperationResult<{ snapshot: WorkbenchSnapshot | null }>) => {
+      if (this.workspaceClosing === promise) {
+        this.workspaceClosing = undefined;
+        this.workspaceCloseRequest = undefined;
+      }
+      resolve(result);
+    };
+    void this.performWorkspaceClose(options, onCommitted).then(settle, (error) =>
+      settle(failed(error)),
+    );
+    return promise;
+  }
+  private async performWorkspaceClose(
+    options: CloseWorkspaceOptions,
+    onCommitted?: (snapshot: WorkbenchSnapshot | null, cleanup: Promise<DisposeResult>) => void,
+  ): Promise<OperationResult<{ snapshot: WorkbenchSnapshot | null }>> {
+    const records = [...this.records.values()];
+    const approvals: Approval[] = [];
+    const workspaceAttempt = this.newAttempt();
+    let workspaceToken: LeaveToken | undefined;
+    const guard = this.options.workspaceLeave;
+    const initialPhase = this.phase;
+    const valid = () =>
+      this.phase === initialPhase &&
+      (initialPhase === "running" || initialPhase === "starting") &&
+      !options.signal?.aborted &&
+      same([...this.records.values()], records) &&
+      approvals.every((approval) => approval.validate()) &&
+      (!guard || Object.is(stateOf(guard).token, workspaceToken));
+    let abort!: () => void;
+    const cancelled = new Promise<false>((resolve) => {
+      abort = () => resolve(false);
+    });
+    workspaceAttempt.signal.addEventListener("abort", () => abort(), { once: true });
+    const onAbort = () => {
+      LeaveAttempt.end([
+        ...approvals.map((approval) => approval.attempt),
+        workspaceAttempt,
+      ]).forEach((error) => this.issue(error));
+      abort();
+    };
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      if (options.signal?.aborted) return superseded;
+      for (const record of records) {
+        const approval = this.beginApproval(
+          record,
+          "leave-workspace",
+          undefined,
+          options.destination ?? null,
+        );
+        approvals.push(approval);
+        // eslint-disable-next-line no-await-in-loop -- One host decision dialog at a time; all approvals are rechecked before commit.
+        if (!(await Promise.race([approval.decision, cancelled])))
+          return options.signal?.aborted ? superseded : denied("decision");
+      }
+      if (guard) {
+        const result = await Promise.race([
+          Promise.resolve(
+            guard.decide({
+              reason: "leave-workspace",
+              state: stateOf(guard),
+              destination: options.destination ?? null,
+              signal: workspaceAttempt.signal,
+              defer: workspaceAttempt.defer,
+            }),
+          ),
+          cancelled,
+        ]);
+        if (!result || result.decision !== "allow")
+          return options.signal?.aborted ? superseded : denied("decision");
+        validToken(result.token);
+        workspaceToken = result.token;
+      }
+      if (!valid()) return denied("state-changed");
+      const snapshot =
+        this.options.captureSnapshotOnClose && this.phase === "running"
+          ? this.createSnapshot()
+          : null;
+      if (!valid()) return denied("state-changed");
+      const cleanup = this.dispose();
+      const errors = LeaveAttempt.end([
+        ...approvals.map((approval) => approval.attempt),
+        workspaceAttempt,
+      ]);
+      onCommitted?.(snapshot, cleanup);
+      const result = await cleanup;
+      return applied({ snapshot }, [...errors, ...result.cleanupErrors]);
+    } catch (error) {
+      return failed(error);
+    } finally {
+      options.signal?.removeEventListener("abort", onAbort);
+      LeaveAttempt.end([
+        ...approvals.map((approval) => approval.attempt),
+        workspaceAttempt,
+      ]).forEach((error) => this.issue(error));
+    }
+  }
+  dispose(): Promise<DisposeResult> {
+    if (this.disposePromise) return this.disposePromise;
+    let resolve!: (result: DisposeResult) => void;
+    this.disposePromise = new Promise((done) => {
+      resolve = done;
+    });
+    this.phase = "disposed";
+    const errors: unknown[] = [];
+    const safely = (action: () => void) => {
+      try {
+        action();
+      } catch (error) {
+        errors.push(error);
+      }
+    };
+    safely(() => this.cancelFocus());
+    safely(() => this.browser?.dispose());
+    safely(() => this.links.dispose());
+    safely(() => this.model.removeChangeListener(this.modelListener));
+    errors.push(...LeaveAttempt.end([...this.attempts.keys()]));
+    for (const runtime of this.pendingRouters) errors.push(...runtime.dispose());
+    this.pendingRouters.clear();
+    safely(() => this.view?.getLayout()?.endDrag());
+    void this.release([...this.records.values()]).then(
+      (cleanup) => resolve(applied(undefined, [...errors, ...cleanup])),
+      (error) => resolve(failed(error, "commit", [], errors)),
+    );
+    this.changed();
+    return this.disposePromise;
+  }
+
+  createSnapshot(): WorkbenchSnapshot {
+    if (this.phase !== "running") throw new Error("Snapshots require a running workbench");
+    const revision = this.store.get().snapshotRevision;
+    const records = [...this.records.values()];
+    const layout = this.model.toJson();
+    if (
+      this.phase !== "running" ||
+      revision !== this.store.get().snapshotRevision ||
+      !same(records, [...this.records.values()]) ||
+      !records.every((record) => this.live(record))
+    )
+      throw new Error("Layout or content changed during snapshot export");
+    const annotate = (value: unknown): void => {
+      if (!value || typeof value !== "object") return;
+      const node = value as Record<string, unknown>;
+      if (node.type === "tab") {
+        const record = this.records.get(node.id as string);
+        if (!record) throw new Error("Snapshot contains unowned native content");
+        const config = node.config as Record<string, unknown> | undefined;
+        node.config = {
+          ...config,
+          worksplit:
+            record.role === "document"
+              ? { href: record.href, preview: record.preview, manualTitle: record.manualTitle }
+              : { manualTitle: record.manualTitle },
+        };
+      }
+      if (Array.isArray(node.children)) node.children.forEach(annotate);
+    };
+    annotate(layout.layout);
+    layout.borders?.forEach(annotate);
+    const activeDocumentId = this.getActiveDocument()?.id;
+    return structuredClone({
+      version: 2,
+      workspaceId: this.workspaceId,
+      layout,
+      ...(activeDocumentId ? { activeDocumentId } : {}),
+    });
+  }
+
+  private allowMove(drag: Node, target: Node, location: DockLocation): boolean {
+    const policy = this.options.allowDrop;
+    if (!policy) return true;
+    const tabs = tabsIn(drag);
+    if (!policy(tabs, target, location)) return false;
+    const container = tabContainer(target);
+    return !container || container === target || policy(tabs, container, location);
+  }
+  private canBatch(action: Action, leaves: readonly Action[]): boolean {
+    if (!leaves.length) return false;
+    if (leaves.every((leaf) => leaf.type === Actions.DELETE_TAB))
+      return leaves.every((leaf) => this.closeTargets(leaf.data.node) !== null);
+    // Resource admission and deletion need their own settlement. Combining them with native
+    // display actions would otherwise expose a partly applied group before guard completion.
+    if (
+      leaves.some((leaf) =>
+        [Actions.ADD_TAB, Actions.DELETE_TAB, Actions.DELETE_TABSET].includes(leaf.type),
+      )
+    )
+      return false;
+    if (!leaves.every((leaf) => this.canDispatch(leaf))) return false;
+    if (leaves.some((leaf) => leaf.type === Actions.MOVE_NODE)) {
+      if (this.options.allowDrop) return false;
+      if (
+        leaves.some(
+          (leaf) =>
+            leaf.type === Actions.MOVE_NODE && leaf.data.location !== DockLocation.CENTER.getName(),
+        )
+      )
+        return false;
+      if (this.options.layoutPolicy && !this.options.layoutPolicy.allowsAction(this.model, action))
+        return false;
+    }
+    const mayDisappear = new Set<Node>();
+    const changedPermissions = new Set<Node>();
+    for (const leaf of leaves) {
+      const references = [
+        leaf.data.node,
+        leaf.data.tabNode,
+        leaf.data.tabsetNode,
+        leaf.data.nodeId,
+        leaf.data.fromNode,
+        leaf.data.toNode,
+      ]
+        .filter((id): id is string => typeof id === "string")
+        .map((id) => this.model.getNodeById(id));
+      if (
+        references.some((node) => node && (mayDisappear.has(node) || changedPermissions.has(node)))
+      )
+        return false;
+      const node = references[0];
+      if (
+        leaf.type === Actions.UPDATE_NODE_ATTRIBUTES ||
+        leaf.type === Actions.UPDATE_MODEL_ATTRIBUTES
+      ) {
+        // Appearance stays native. Capability changes can alter later preflight decisions,
+        // so those updates remain scalar; no copied whitelist of native display attributes.
+        if (
+          Object.keys(leaf.data.json).some((key) =>
+            /(?:^enable|Enable|^rootOrientationVertical$)/u.test(key),
+          )
+        )
+          return false;
+      }
+      if (leaf.type === Actions.SET_TAB_PINNED && node) changedPermissions.add(node);
+      if (leaf.type === Actions.REMOVE_TAB_FROM_GROUP && node) {
+        const group = node.getParent();
+        if (!group || mayDisappear.has(group)) return false;
+        if (group.getChildren().length === 1) mayDisappear.add(group);
+      }
+      if (leaf.type === Actions.UNGROUP && node) mayDisappear.add(node);
+      if (leaf.type === Actions.MOVE_NODE && node) {
+        const target = this.model.getNodeById(leaf.data.toNode);
+        for (
+          let parent = node.getParent();
+          parent && parent !== target && !(parent instanceof RowNode);
+          parent = parent.getParent()
+        ) {
+          // Conservative dependency check: later actions may still name surviving tabs, but
+          // cannot depend on a group/container that native tidy could remove in this batch.
+          if (tabsIn(parent).every((tab) => tabsIn(node).includes(tab))) mayDisappear.add(parent);
+        }
+      }
+    }
+    return true;
+  }
+  canDispatch(action: Action): boolean {
+    if (this.phase !== "running") return false;
+    try {
+      const leaves = actionsIn(action);
+      if (leaves.length !== 1) return this.canBatch(action, leaves);
+      const leaf = leaves[0]!;
+      if (leaf.type === Actions.DELETE_TAB) return this.closeTargets(leaf.data.node) !== null;
+      if (leaf.type === Actions.DELETE_TABSET) {
+        const node = this.model.getNodeById(leaf.data.node);
+        return node instanceof TabSetNode && node.isEnableClose();
+      }
+      if (leaf.type === Actions.ADD_TAB) {
+        const json = leaf.data.json as IJsonTabNode;
+        if (
+          !json ||
+          (json.type !== undefined && json.type !== "tab") ||
+          Object.hasOwn(json, "children") ||
+          (json.id !== undefined &&
+            (typeof json.id !== "string" || !json.id || this.model.getNodeById(json.id))) ||
+          !this.resolveTool(json) ||
+          json.enableFloat ||
+          json.enablePopout ||
+          json.subLayoutId
+        )
+          return false;
         const location = [
           DockLocation.CENTER,
           DockLocation.LEFT,
           DockLocation.RIGHT,
           DockLocation.TOP,
           DockLocation.BOTTOM,
-        ].find((candidate) => candidate.getName() === data.location);
-        return !!from && !!to && !!location && this.allowMove(from, to, location);
-      }
-      case Actions.ADD_TAB_TO_NEW_GROUP:
-      case Actions.REMOVE_TAB_FROM_GROUP:
-      case Actions.UNGROUP: {
-        const node = model.getNodeById(data.node as string);
-        if (!node) return false;
-        const target = action.type === Actions.UNGROUP ? node.getParent() : tabContainer(node);
-        return !!target && this.allowMove(node, target, DockLocation.CENTER);
-      }
-      case Actions.UPDATE_NODE_ATTRIBUTES: {
-        const node = model.getNodeById(data.node as string);
-        const json = data.json as Record<string, unknown>;
-        if (!node || !json || typeof json !== "object" || Array.isArray(json)) return false;
-        // Preserve native display/layout attributes. Identity and document session configuration
-        // belong to the coordinator; floating/sub-layout content has a different lifetime owner.
-        if (["id", "type", "component", "subLayoutId", "children"].some((key) => key in json))
-          return false;
-        if (
-          node instanceof TabNode &&
-          "config" in json &&
-          (this.state.documents.has(node.getId()) ||
-            (this.state.tools.has(node.getId()) &&
-              !this.options.tools?.some((tool) => tool.id === node.getId())))
-        )
-          return false;
-        return !["enableFloat", "enablePopout"].some(
-          (key) => key in json && json[key] !== false && json[key] !== undefined,
-        );
-      }
-      case Actions.UPDATE_MODEL_ATTRIBUTES: {
-        const json = data.json as Record<string, unknown>;
+        ].find((value) => value.getName() === leaf.data.location);
+        if (!location) return false;
+        // Native tool ADD owns its select flag, including admission into a closed Border.
+        // Document background presentation constraints do not reinterpret a native Action.
+        const capture = this.captureOpen({}, false);
         return (
-          !!json &&
-          typeof json === "object" &&
-          !Array.isArray(json) &&
-          !["tabEnableFloat", "tabEnablePopout"].some(
-            (key) => key in json && json[key] !== false && json[key] !== undefined,
+          !("status" in capture) &&
+          this.canPlace(
+            { ...json, id: json.id ?? `candidate-${this.prefix}` },
+            { target: leaf.data.toNode, location, index: leaf.data.index },
+            capture,
           )
         );
       }
-      case Actions.RENAME_TAB:
-      case Actions.SELECT_TAB:
-      case Actions.SET_ACTIVE_TABSET:
-      case Actions.SET_TAB_PINNED:
-      case Actions.ADJUST_WEIGHTS:
-      case Actions.ADJUST_BORDER_SPLIT:
-      case Actions.MAXIMIZE_TOGGLE:
-      case Actions.SET_BORDER_TYPE:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private activateSelected(container: TabSetNode | BorderNode | undefined) {
-    const selected = container?.getSelectedNode();
-    if (selected && this.state.documents.has(selected.getId()))
-      this.activate(selected.getId(), { focus: false });
-  }
-
-  private applyLayoutAction(action: Action, actions: readonly Action[]): boolean {
-    const model = this.state.model;
-    // A batch with one leaf has the same selection/move meaning as that native Action.
-    // Execute the original batch so native notifications and observers retain its identity.
-    const operation = actions.length === 1 ? actions[0]! : action;
-    const admittedTool =
-      operation.type === Actions.ADD_TAB
-        ? this.resolveTool(operation.data.json as IJsonTabNode)
-        : undefined;
-    if (operation.type === Actions.ADD_TAB && !admittedTool) return false;
-    const activeSet = model.getActiveTabset();
-    const previousSet = activeSet?.getId();
-    const previousSelected = activeSet?.getSelectedNode()?.getId();
-    const activeId = this.state.store.get().activeDocumentId;
-    const current = activeId ? model.getNodeById(activeId) : undefined;
-    let movesActive = false;
-    if (operation.type === Actions.MOVE_NODE) {
-      let ancestor = current;
-      while (ancestor) {
-        if (ancestor.getId() === operation.data.fromNode) {
-          movesActive = true;
-          break;
-        }
-        ancestor = ancestor.getParent();
-      }
-    }
-    const container = tabContainer(current);
-    const selectedHere = container?.getSelectedNode()?.getId();
-    const selecting = this.selecting;
-    this.selecting = true;
-    if (admittedTool) this.state.tools.set(admittedTool.id, admittedTool);
-    try {
-      model.doAction(action);
-    } finally {
-      this.selecting = selecting;
-      if (
-        admittedTool &&
-        !model.getNodeById(admittedTool.id) &&
-        !this.options.tools?.some((tool) => tool.id === admittedTool.id)
-      )
-        this.state.tools.delete(admittedTool.id);
-    }
-    // Native ADD_TAB can return a detached node when a destination ignores insertion (e.g.
-    // a pinned tab into a TabGroup). updateIdMap has now rebuilt from the actual native tree.
-    if (
-      operation.type === Actions.ADD_TAB &&
-      !(model.getNodeById((operation.data.json as { id: string }).id) instanceof TabNode)
-    )
-      return false;
-    for (const session of this.state.documents.values()) {
-      const node = model.getNodeById(session.id);
-      if (session.preview && node instanceof TabNode && node.isPinned()) this.keep(session.id);
-    }
-    if (selecting) return true;
-    // Native selection cancels pending foreground work, including queued content focus.
-    if (
-      actions.some(
-        (a) =>
-          a.type === Actions.SET_ACTIVE_TABSET ||
-          a.type === Actions.MOVE_NODE ||
-          (a.type === Actions.SELECT_TAB &&
-            model.getNodeById(a.data.tabNode as string) instanceof TabNode),
-      )
-    )
-      this.cancelContentFocus();
-    // A single native selection owns only that tab. Selecting a tool or collapsing a Border
-    // must not reactivate an unrelated central document or steal the native strip's focus.
-    if (operation.type === Actions.SELECT_TAB) {
-      const selected = model.getNodeById(operation.data.tabNode as string);
-      if (selected instanceof TabNode && selected.isSelected()) {
-        if (this.state.documents.has(selected.getId()))
-          this.activate(selected.getId(), { focus: false });
-      }
-      return true;
-    }
-    // Moving an active document that stays selected changes its placement, not its identity
-    // or URL. Native source selection repair is not another foreground navigation request.
-    if (movesActive && current instanceof TabNode && current.isSelected()) return true;
-    // Native batches notify only once. Derive their final central selection without replaying
-    // the pipeline. A Border/tool-only selection must not activate an unrelated central tab.
-    const explicit = actions.some(
-      (a) =>
-        a.type === Actions.SET_ACTIVE_TABSET ||
-        (a.type === Actions.SELECT_TAB &&
-          this.state.documents.has(a.data.tabNode as string) &&
-          tabContainer(model.getNodeById(a.data.tabNode as string)) instanceof TabSetNode),
-    );
-    const finalSet = model.getActiveTabset();
-    const centralChanged =
-      previousSet !== finalSet?.getId() ||
-      previousSelected !== finalSet?.getSelectedNode()?.getId();
-    if (centralChanged || explicit) {
-      this.activateSelected(finalSet);
-    } else if (
-      selectedHere === activeId &&
-      container?.getSelectedNode()?.getId() !== selectedHere
-    ) {
-      this.activateSelected(container);
-    }
-    return true;
-  }
-
-  async executeCommand(id: string, options: { contentId?: string } = {}) {
-    const command = this.state.commands.find((c) => c.id === id);
-    if (this.disposed) return;
-    if (!command) throw new Error(`Unknown Worksplit command: ${id}`);
-    const s = this.state.store.get();
-    const target =
-      command.target === "document" ? s.activeDocumentId : (options.contentId ?? s.focusedTabId);
-    if (
-      target &&
-      (this.state.documents.has(target) ||
-        (this.state.tools.has(target) && this.state.model.getNodeById(target)))
-    )
-      await command.execute({ id: target, document: this.getDocument(target) });
-  }
-  async save(id: string) {
-    const session = this.state.documents.get(id);
-    if (session && !this.disposed) await session.owner?.lifecycle.save?.();
-  }
-
-  /** Explicitly attach to a browser workspace; returns the listener cleanup. */
-  connectBrowser(
-    options: {
-      window?: Window;
-      beforeOutsideScope?: (
-        href: string,
-        context: { signal: AbortSignal },
-      ) => boolean | Promise<boolean>;
-    } = {},
-  ) {
-    if (this.disposed) throw new Error("This Worksplit instance is disposed");
-    if (this.browser) throw new Error("This Worksplit instance already owns browser history");
-    const win = options.window ?? window;
-    this.browser = new BrowserHistoryCoordinator(
-      win,
-      this.options.workspaceId ?? "default",
-      async (href, hint, current) => {
-        const session = hint ? this.state.documents.get(hint) : undefined;
-        const result = session
-          ? await this.navigateSession(session, href, false, current, true)
-          : this.isEmptyHome(href)
-            ? await this.startHome(current, true)
-            : await this.openHref(href, {}, false, current, true);
-        if (result.status === "failed") this.issue("history", result.error);
-        return result.status === "committed"
-          ? { id: result.document.id, href: result.document.href }
-          : result.status === "empty"
-            ? { href: result.href }
-            : undefined;
-      },
-      (error, outside) => this.issue(outside ? "history-outside-scope" : "history", error),
-      options.beforeOutsideScope,
-    );
-    const browser = this.browser;
-    return () => {
-      browser.dispose();
-      if (this.browser === browser) this.browser = undefined;
-    };
-  }
-
-  /** Start from the address bar. Native render-on-demand defaults keep restored background tabs lazy. */
-  start(href: string): Promise<StartResult> {
-    return this.isEmptyHome(href) ? this.startHome() : this.openHref(href, {}, true);
-  }
-
-  private isEmptyHome(href: string) {
-    return this.options.homeMode === "empty" && href === (this.options.home ?? "/");
-  }
-
-  private async startHome(
-    current: () => boolean = () => true,
-    fromPop = false,
-  ): Promise<StartResult> {
-    if (this.disposed) return { status: "rejected", reason: "closed" };
-    if (!fromPop && this.browser?.busy) return { status: "rejected", reason: "history-busy" };
-    if (!current()) return { status: "superseded" };
-    const epoch = ++this.openEpoch;
-    this.cancelContentFocus();
-    const focus = this.focusEpoch;
-    const valid = () =>
-      !this.disposed && current() && epoch === this.openEpoch && focus === this.focusEpoch;
-    const { model, documents } = this.state;
-    const activeId = this.state.store.get().activeDocumentId;
-    const selectedId = model.getActiveTabset()?.getSelectedNode()?.getId();
-    let selected = selectedId ? documents.get(selectedId) : undefined;
-    if (!selected)
-      model.visitNodes((node) => {
-        if (!selected && (node instanceof TabSetNode || node instanceof BorderNode)) {
-          const id = node.getSelectedNode()?.getId();
-          if (id) selected = documents.get(id);
-        }
-      });
-    const session =
-      (activeId ? documents.get(activeId) : undefined) ??
-      selected ??
-      this.preferred([...documents.values()]);
-    if (!session) {
-      this.state.store.setState((state) => ({ ...state, activeDocumentId: null }));
-      const href = this.options.home ?? "/";
-      if (!fromPop) this.browser?.publish(href, undefined, true);
-      return { status: "empty", href };
-    }
-    try {
-      await this.loadDocument(session.id);
-      // A visible restored tab may already have started loading through the React binding.
-      // Its Router still owns the final URL; do not normalize a home anchor to a stale href.
-      if (session.router) await this.settle(session.router);
-      if (!valid() || documents.get(session.id) !== session) return { status: "superseded" };
-      this.activate(session.id, { history: false });
-      if (!fromPop) this.browser?.publish(session.href, session.id, true);
-      return { status: "committed", document: this.getDocument(session.id)!, reused: true };
-    } catch (error) {
-      if (!valid()) return { status: "superseded" };
-      return { status: "failed", stage: "load", error };
-    }
-  }
-
-  snapshot(): WorkbenchSnapshot {
-    const layout = this.getLayout();
-    const update = (node: {
-      type?: string | undefined;
-      id?: string | undefined;
-      children?: unknown[] | undefined;
-      config?: unknown;
-    }) => {
-      if (node.type === "tab" && node.id && this.state.documents.has(node.id)) {
-        const session = this.state.documents.get(node.id)!;
-        node.config = {
-          href: session.href,
-          multi: session.multi,
-          ...(session.preview ? { preview: true } : {}),
-        };
-      }
-      node.children?.forEach((child) => update(child as Parameters<typeof update>[0]));
-    };
-    update(layout.layout);
-    layout.borders?.forEach(update);
-    return { version: 1, workspaceId: this.options.workspaceId ?? "default", layout };
-  }
-
-  /**
-   * Immediately stops admission and releases owned resources without dirty/save decisions.
-   * Repeated calls share one Promise, which resolves with errors after cleanup settles.
-   */
-  dispose(): Promise<readonly unknown[]> {
-    if (this.disposePromise) return this.disposePromise;
-    let finish!: (errors: readonly unknown[]) => void;
-    this.disposePromise = new Promise((resolve) => {
-      finish = resolve;
-    });
-    this.disposed = true;
-    this.state.documentLinks.dispose();
-    const contentCleanup = this.closeContents([...this.contents.keys()]);
-    this.cancelContentFocus();
-    ++this.openEpoch;
-    const errors: unknown[] = [];
-    const browser = this.browser;
-    this.browser = undefined;
-    try {
-      browser?.dispose();
-    } catch (error) {
-      errors.push(error);
-    }
-    try {
-      this.state.model.removeChangeListener(this.modelListener);
-    } catch (error) {
-      errors.push(error);
-    }
-    const sessions = [...this.state.documents.values()];
-    const toolIds = [...this.state.tools.keys()];
-    this.state.documents.clear();
-    const pending = [...this.pending];
-    this.pending.clear();
-    for (const router of pending) errors.push(...this.releaseRouter(router));
-    errors.push(...this.releaseRouter(this.resolver));
-    try {
-      this.state.store.setState((s) => ({
-        ...s,
-        activeDocumentId: null,
-        focusedTabId: null,
-        focusedArea: null,
-        revision: s.revision + 1,
-      }));
-    } catch (error) {
-      errors.push(error);
-    }
-    void Promise.allSettled([
-      contentCleanup,
-      ...sessions.map((s) => this.releaseSession(s)),
-      ...toolIds.map((id) => this.releaseTool(id)),
-    ]).then((results) => {
-      return finish([
-        ...errors,
-        ...results.flatMap((result) =>
-          result.status === "fulfilled" ? result.value : [result.reason],
-        ),
-      ]);
-    });
-    return this.disposePromise;
-  }
-
-  private checkPreservedContainer(
-    container: Node | undefined,
-    presentation: OpenPresentation,
-    targetId?: string,
-  ) {
-    const source = presentation.preserve;
-    if (!source || presentation.focus !== this.focusEpoch) return;
-    const model = this.state.model;
-    if (source.id !== targetId && container === tabContainer(model.getNodeById(source.id)))
-      throw new FocusConflict("preserveFocus requires a separate document container");
-    const focused = presentation.focusedContent;
-    if (
-      focused &&
-      focused.getId() !== targetId &&
-      model.getNodeById(focused.getId()) === focused &&
-      container === tabContainer(focused)
-    )
-      throw new FocusConflict("preserveFocus cannot hide the focused content");
-  }
-
-  private checkPresentation(
-    session: DocumentSession,
-    href: string,
-    presentation: OpenPresentation,
-  ) {
-    const source = presentation.preserve;
-    if (!source) return;
-    if (session === source && href !== source.href)
-      throw new FocusConflict("preserveFocus cannot navigate the source document");
-    this.checkPreservedContainer(
-      tabContainer(this.state.model.getNodeById(session.id)),
-      presentation,
-      session.id,
-    );
-  }
-
-  private revealDocument(session: DocumentSession, presentation: OpenPresentation) {
-    if (presentation.background || presentation.focus !== this.focusEpoch) return;
-    const source = presentation.preserve;
-    if (!source) {
-      this.activate(session.id, { history: false });
-      if (!presentation.fromPop)
-        this.browser?.publish(session.href, session.id, presentation.replace);
-      return;
-    }
-    this.checkPresentation(session, session.href, presentation);
-    if (this.state.documents.get(source.id) !== source) return;
-    const model = this.state.model;
-    const node = model.getNodeById(session.id);
-    if (!(node instanceof TabNode)) return;
-    const hidden = closedGroup(node);
-    const maximized = model.getMaximizedTabset();
-    const container = tabContainer(node);
-    if (
-      session === source &&
-      node.isSelected() &&
-      !hidden &&
-      (!(container instanceof BorderNode) || container.isShowing()) &&
-      (!(container instanceof TabSetNode) || !maximized || maximized === container)
-    )
-      return;
-    const active = model.getActiveTabset();
-    const selecting = this.selecting;
-    this.selecting = true;
-    try {
-      if (maximized) model.doAction(Actions.maximizeToggle(maximized.getId()));
-      revealTab(model, node);
-      if (active && model.getActiveTabset() !== active)
-        model.doAction(Actions.setActiveTabset(active.getId()));
-    } finally {
-      this.selecting = selecting;
-    }
-  }
-
-  private async openHref(
-    href: string,
-    options: OpenDocumentOptions,
-    replace: boolean,
-    current: () => boolean = () => true,
-    fromPop = false,
-  ): Promise<NavigationResult> {
-    if (this.disposed) return { status: "rejected", reason: "closed" };
-    if (!fromPop && this.browser?.busy) return { status: "rejected", reason: "history-busy" };
-    this.checkHref(href);
-    if (options.preview && !options.newInstance && options.background)
-      throw new Error("A preview cannot open in the background");
-    const epoch = options.background ? this.openEpoch : ++this.openEpoch;
-    const focus = this.focusEpoch;
-    if (options.preserveFocus && options.background)
-      return { status: "rejected", reason: "focus-conflict" };
-    const sourceId = this.state.store.get().activeDocumentId;
-    const source = sourceId ? this.state.documents.get(sourceId) : undefined;
-    if (options.preserveFocus && !source) return { status: "rejected", reason: "focus-conflict" };
-    const editing = this.state.store.get();
-    const focusedId =
-      editing.focusedArea === "document" || editing.focusedArea === "tool"
-        ? editing.focusedTabId
-        : null;
-    const presentation: OpenPresentation = {
-      focus,
-      focusedContent: focusedId ? this.state.model.getNodeById(focusedId) : undefined,
-      background: !!options.background,
-      preserve: options.preserveFocus ? source : undefined,
-      replace,
-      fromPop,
-    };
-    const placement = options.placement ? { ...options.placement } : undefined;
-    let placementSource: TabNode | undefined;
-    let placementContainer: TabSetNode | BorderNode | undefined;
-    let placementAnchor: TabSetNode | undefined;
-    const liveNode = (candidate: Node | undefined) => {
-      let live = false;
-      this.state.model.visitNodes((node) => {
-        if (node === candidate) live = true;
-      });
-      return live;
-    };
-    const placementCurrent = () =>
-      !placement ||
-      (liveNode(placementContainer) &&
-        (placement.mode === "tab" || liveNode(placementAnchor)) &&
-        (!placementSource ||
-          (liveNode(placementSource) && tabContainer(placementSource) === placementContainer)));
-    let location = options.location ?? DockLocation.CENTER;
-    const initialPreview =
-      options.preview && !options.newInstance && options.location === undefined
-        ? [...this.state.documents.values()].find((session) => session.preview)
-        : undefined;
-    let target =
-      options.target ??
-      (initialPreview
-        ? tabContainer(this.state.model.getNodeById(initialPreview.id))?.getId()
-        : undefined) ??
-      this.state.model.getActiveTabset()?.getId() ??
-      this.state.model.getFirstTabSet()?.getId();
-    let targetNode = target ? this.state.model.getNodeById(target) : undefined;
-    const valid = () =>
-      !this.disposed &&
-      current() &&
-      placementCurrent() &&
-      (options.background || epoch === this.openEpoch) &&
-      (!options.preview || options.newInstance || focus === this.focusEpoch);
-    let router: AnyRouter | undefined;
-    try {
-      if (placement) {
-        if (options.target !== undefined || options.location !== undefined)
-          throw new Error("Document placement cannot be combined with target/location");
-        if (placement.mode !== "tab" && placement.mode !== "split")
-          throw new Error("Unsupported document placement mode");
-        if (placement.mode === "split") {
-          if (
-            placement.direction !== undefined &&
-            ![
-              DockLocation.BOTTOM,
-              DockLocation.RIGHT,
-              DockLocation.TOP,
-              DockLocation.LEFT,
-            ].includes(placement.direction)
-          )
-            throw new Error("Split placement requires an edge direction");
-          if (
-            placement.ratio !== undefined &&
-            (!Number.isFinite(placement.ratio) || placement.ratio <= 0 || placement.ratio >= 1)
-          )
-            throw new Error("Split ratio must be greater than zero and less than one");
-        }
-        if (placement.source !== undefined) {
-          const node = this.state.model.getNodeById(placement.source);
-          if (
-            !(node instanceof TabNode) ||
-            (!this.state.documents.has(placement.source) &&
-              !this.state.tools.has(placement.source)) ||
-            !liveNode(node)
-          )
-            throw new Error(`Unknown document placement source ${placement.source}`);
-          placementSource = node;
-          placementContainer = tabContainer(node);
-        } else {
-          placementContainer =
-            this.state.model.getActiveTabset() ?? this.state.model.getFirstTabSet();
-        }
-        placementAnchor =
-          placementContainer instanceof TabSetNode
-            ? placementContainer
-            : (this.state.model.getActiveTabset() ?? this.state.model.getFirstTabSet());
-        if (!placementCurrent())
-          throw new Error("Document placement requires a live central Tabset");
-      }
-      // Exact accepted URLs can be reused without speculative loaders.
-      const active = this.state.store.get().activeDocumentId;
-      const exact =
-        !options.newInstance &&
-        this.preferred([...this.state.documents.values()].filter((s) => s.href === href));
-      if (
-        exact &&
-        (!active || exact.id === active) &&
-        (!exact.router ||
-          (exact.router.history.location.href === href && !exact.router.state.isLoading))
-      ) {
-        await this.loadDocument(exact.id);
-        if (!valid() || this.state.documents.get(exact.id) !== exact)
-          return { status: "superseded" };
-        this.checkPresentation(exact, exact.href, presentation);
-        this.revealDocument(exact, { ...presentation, replace: true });
-        return { status: "committed", document: this.getDocument(exact.id)!, reused: true };
-      }
-      router = this.options.createRouter(createDocumentHistory(href));
-      this.pending.add(router);
-      const initialIdentity = this.identity(router, router.matchRoutes(router.state.location));
-      const initialTarget = options.newInstance
-        ? undefined
-        : (this.preferred(
-            [...this.state.documents.values()].filter(
-              (s) => this.sessionIdentity(s) === initialIdentity,
-            ),
-          ) ??
-          (exact || undefined));
-      const initialOperation = initialTarget ? ++initialTarget.operation : undefined;
-
-      if (
-        initialTarget &&
-        (initialTarget.href === href || options.reuse === "preserve") &&
-        (!initialTarget.router ||
-          (initialTarget.router.history.location.href === initialTarget.href &&
-            !initialTarget.router.state.isLoading))
-      ) {
-        await this.loadDocument(initialTarget.id);
-        if (!valid() || this.state.documents.get(initialTarget.id) !== initialTarget)
-          return { status: "superseded" };
-        this.checkPresentation(initialTarget, initialTarget.href, presentation);
-        this.revealDocument(initialTarget, { ...presentation, replace: true });
-        return { status: "committed", document: this.getDocument(initialTarget.id)!, reused: true };
-      }
-      await router.load();
-      // A redirect starts another real Router load. Await it via the public lifecycle event.
-      await this.settle(router);
-      if (!valid()) return { status: "superseded" };
-      if (
-        initialTarget &&
-        (this.state.documents.get(initialTarget.id) !== initialTarget ||
-          initialTarget.operation !== initialOperation)
-      )
-        return { status: "superseded" };
-      const identity = this.identity(router);
-      const existing =
-        !options.newInstance &&
-        (initialTarget?.href === router.state.location.publicHref
-          ? initialTarget
-          : this.preferred(
-              [...this.state.documents.values()].filter(
-                (s) => this.sessionIdentity(s) === identity,
-              ),
-            ));
-      if (existing) {
-        const finalHref = router.state.location.publicHref;
-        if (existing.href === finalHref || options.reuse === "preserve") {
-          this.checkPresentation(existing, existing.href, presentation);
-          this.revealDocument(existing, presentation);
-          return { status: "committed", document: this.getDocument(existing.id)!, reused: true };
-        }
-        this.checkPresentation(existing, finalHref, presentation);
-        // A live Router remains authoritative for its own view-state transition and blockers.
-        return await this.navigateSession(
-          existing,
-          finalHref,
-          replace,
-          valid,
-          fromPop,
-          options.background || focus !== this.focusEpoch || !!options.preserveFocus,
-          presentation,
-        );
-      }
-      const preview = !!options.preview && !options.newInstance;
-      const previousPreview = preview
-        ? [...this.state.documents.values()].find((session) => session.preview)
-        : undefined;
-      const id = this.freshId();
-      const title = this.routeMetadata(router)?.title ?? router.state.location.publicHref;
-      const insertionFor = (destination: string, direction: DockLocation) =>
-        Actions.addTab(
-          {
-            type: "tab",
-            id,
-            name: title,
-            component: DOCUMENT_COMPONENT,
-            config: { href: router!.state.location.publicHref, multi: !!options.newInstance },
-            enableFloat: false,
-            enablePopout: false,
-          },
-          destination,
-          direction,
-          -1,
-          false,
-        );
-      if (placement) {
-        let candidates: { node: TabSetNode | BorderNode; location: DockLocation }[];
-        if (placement.mode === "tab") {
-          candidates = [{ node: placementContainer!, location: DockLocation.CENTER }];
-        } else {
-          const central = centralTabsets(this.state.model);
-          const direction = placement.direction ?? DockLocation.BOTTOM;
-          const fallback =
-            direction === DockLocation.BOTTOM || direction === DockLocation.TOP
-              ? DockLocation.RIGHT
-              : DockLocation.BOTTOM;
-          const splits = [direction, fallback].map((edge) => ({
-            node: placementAnchor!,
-            location: edge,
-          }));
-          if (central.length > 1) {
-            const context = this.state.store.get();
-            const focused =
-              context.focusedArea === "document" || context.focusedArea === "tool"
-                ? this.state.model.getNodeById(context.focusedTabId ?? "")
-                : undefined;
-            const excluded = new Set([
-              placementContainer,
-              placementAnchor,
-              tabContainer(focused),
-              options.preserveFocus
-                ? tabContainer(this.state.model.getNodeById(sourceId ?? ""))
-                : undefined,
-              options.preserveFocus
-                ? tabContainer(this.state.model.getNodeById(context.activeDocumentId ?? ""))
-                : undefined,
-            ]);
-            const safe = central.filter((node) => !excluded.has(node));
-            if (safe.length === 0) throw new FocusConflict("No safe existing document container");
-            const ordered = [
-              previousPreview
-                ? tabContainer(this.state.model.getNodeById(previousPreview.id))
-                : undefined,
-              ...this.mru.map((documentId) =>
-                tabContainer(this.state.model.getNodeById(documentId)),
-              ),
-              ...central,
-            ];
-            const reusable = [...new Set(ordered)]
-              .filter(
-                (node): node is TabSetNode => node instanceof TabSetNode && safe.includes(node),
-              )
-              .map((node) => ({ node, location: DockLocation.CENTER }));
-            if (central.length === 2) {
-              // Two panes already provide the companion space, regardless of preference.
-              candidates = reusable;
-            } else {
-              const directional = reusable.filter(({ node }) =>
-                isInSplitDirection(placementAnchor!, node, direction),
-              );
-              candidates = [
-                ...directional,
-                ...(central.length < 4 ? splits : []),
-                ...reusable.filter((candidate) => !directional.includes(candidate)),
-              ];
-            }
-          } else if (placementAnchor!.getChildren().length === 0) {
-            candidates = [{ node: placementAnchor!, location: DockLocation.CENTER }];
-          } else {
-            candidates = splits;
-          }
-        }
-        const accepted = candidates.find(
-          (candidate) =>
-            !this.options.layoutPolicy ||
-            this.options.layoutPolicy.allowsAction(
-              this.state.model,
-              insertionFor(candidate.node.getId(), candidate.location),
-            ),
-        );
-        if (!accepted) return { status: "rejected", reason: "layout-policy" };
-        if (!placementCurrent()) return { status: "superseded" };
-        targetNode = accepted.node;
-        target = accepted.node.getId();
-        location = accepted.location;
-      }
-      if (!target) throw new Error("Layout requires a central Tabset for opening documents");
-      // fromJson can leave pruned empty Tabsets in the upstream idMap until its next Action.
-      // Validate the live tree rather than admitting content into a detached old container.
-      let liveTarget = false;
-      this.state.model.visitNodes((node) => {
-        if (node === targetNode && (node instanceof TabSetNode || node instanceof BorderNode))
-          liveTarget = true;
-      });
-      if (!liveTarget) throw new Error(`Cannot add document to missing Tabset or Border ${target}`);
-      if (
-        ![
+      if (leaf.type === Actions.MOVE_NODE) {
+        const from = this.model.getNodeById(leaf.data.fromNode),
+          to = this.model.getNodeById(leaf.data.toNode);
+        const location = [
           DockLocation.CENTER,
           DockLocation.LEFT,
           DockLocation.RIGHT,
           DockLocation.TOP,
           DockLocation.BOTTOM,
-        ].includes(location)
-      )
-        throw new Error("Unsupported document docking location");
-      if (targetNode instanceof BorderNode && location !== DockLocation.CENTER)
-        throw new Error("A Border only accepts center document admission");
-      if (location === DockLocation.CENTER) this.checkPreservedContainer(targetNode, presentation);
-      const session: DocumentSession = {
-        id,
-        router,
-        href: router.state.location.publicHref,
-        identity,
-        multi: !!options.newInstance,
-        preview,
-        operation: 0,
-        contentVersion: 0,
-        release: [],
-      };
-      const model = this.state.model;
-      const previousActive = model.getActiveTabset();
-      const destination = targetNode as TabSetNode | BorderNode;
-      const previousSelected = destination.getSelectedNode();
-      const restoreSelection = () => {
-        const actions: Action[] = [];
-        let liveSelected = false;
-        let liveActive = false;
-        model.visitNodes((node) => {
-          if (node === previousSelected) liveSelected = true;
-          if (node === previousActive) liveActive = true;
-        });
+        ].find((value) => value.getName() === leaf.data.location);
         if (
-          previousSelected instanceof TabNode &&
-          liveSelected &&
-          tabContainer(previousSelected) === destination &&
-          !previousSelected.isSelected()
+          !from ||
+          !to ||
+          !location ||
+          from === to ||
+          (from instanceof TabNode && from.isPinned())
         )
-          actions.push(Actions.selectTab(previousSelected.getId()));
+          return false;
         if (
-          previousActive &&
-          liveActive &&
-          (model.getActiveTabset() !== previousActive || actions.length > 0)
+          !(
+            from instanceof TabNode ||
+            from instanceof TabSetNode ||
+            from instanceof TabGroupNode
+          ) ||
+          !from.isEnableDrag()
         )
-          actions.push(Actions.setActiveTabset(previousActive.getId()));
-        if (actions.length === 0) return;
-        const selecting = this.selecting;
-        this.selecting = true;
-        try {
-          model.doAction(actions.length === 1 ? actions[0]! : Actions.group(actions));
-        } finally {
-          this.selecting = selecting;
-        }
-      };
-      const insertion = insertionFor(target, location);
-      if (
-        !placement &&
-        this.options.layoutPolicy &&
-        !this.options.layoutPolicy.allowsAction(model, insertion)
-      )
-        return { status: "rejected", reason: "layout-policy" };
-      const weights = new Map<RowNode | TabSetNode, number>();
-      if (location !== DockLocation.CENTER)
-        model.visitNodes((node) => {
-          if (node instanceof RowNode || node instanceof TabSetNode)
-            weights.set(node, node.getWeight());
-        });
-      let provisionalContainer: TabSetNode | BorderNode | undefined;
-      try {
-        const node = model.doAction(insertion) as TabNode | undefined;
-        if (!node || model.getNodeById(id) !== node)
-          throw new Error(`Cannot add document to ${target}`);
-        provisionalContainer = tabContainer(node);
-        // Admission is provisional until policy approval. Foreground selection belongs to
-        // activate below; native ADD may still change the active Tabset even with select:false.
+          return false;
+        for (let ancestor: Node | undefined = to; ancestor; ancestor = ancestor.getParent())
+          if (ancestor === from) return false;
         if (
-          !this.allowMove(node, destination, location) ||
-          (this.options.layoutPolicy && !this.options.layoutPolicy.allows(model))
-        )
-          throw new Error(`Docking policy rejected document in ${target}`);
-        if (placement && (!placementCurrent() || !liveNode(destination)))
-          throw new PlacementChanged("Document placement changed before admission");
-        if (
-          placement?.mode === "split" &&
-          location !== DockLocation.CENTER &&
-          destination instanceof TabSetNode &&
-          provisionalContainer instanceof TabSetNode
-        )
-          applySplitRatio(model, destination, provisionalContainer, placement.ratio ?? 0.35);
-        if (options.background || options.preserveFocus || focus !== this.focusEpoch)
-          restoreSelection();
-        if (
-          placement &&
-          (!placementCurrent() ||
-            !liveNode(destination) ||
-            !liveNode(node) ||
-            tabContainer(node) !== provisionalContainer)
-        )
-          throw new PlacementChanged("Document placement changed during native admission");
-      } catch (error) {
-        const errors = [error];
-        provisionalContainer ??= tabContainer(model.getNodeById(id));
-        const retained = () => {
-          let live = false;
-          model.visitNodes((node) => {
-            if (node instanceof TabNode && node.getId() === id) live = true;
-          });
-          return live;
-        };
-        if (retained()) {
-          try {
-            model.doAction(Actions.deleteTab(id));
-          } catch (cleanupError) {
-            errors.push(cleanupError);
-          }
-        }
-        if (retained())
-          errors.push(new Error(`Provisional document ${id} remains in the native layout`));
-        try {
-          if (
-            provisionalContainer instanceof TabSetNode &&
-            !weights.has(provisionalContainer) &&
-            location !== DockLocation.CENTER &&
-            provisionalContainer.getChildren().length === 0 &&
-            model.getNodeById(provisionalContainer.getId()) === provisionalContainer
+          !(
+            to instanceof TabSetNode ||
+            to instanceof BorderNode ||
+            to instanceof TabGroupNode ||
+            to instanceof RowNode
           )
-            model.doAction(Actions.deleteTabset(provisionalContainer.getId()));
-          for (const [node, weight] of weights) {
-            if (model.getNodeById(node.getId()) === node && node.getWeight() !== weight)
-              model.doAction(Actions.updateNodeAttributes(node.getId(), { weight }));
-          }
-          restoreSelection();
-        } catch (restoreError) {
-          errors.push(restoreError);
-        }
-        throw errors.length === 1
-          ? error
-          : new AggregateError(errors, `Failed to discard provisional document ${id}`);
+        )
+          return false;
+        const container = tabContainer(to);
+        if (
+          (container && !container.isEnableDrop()) ||
+          (to instanceof TabSetNode && location !== DockLocation.CENTER && !to.isEnableDivide()) ||
+          ((to instanceof BorderNode || to instanceof TabGroupNode) &&
+            location !== DockLocation.CENTER)
+        )
+          return false;
+        if (
+          !Number.isSafeInteger(leaf.data.index) ||
+          leaf.data.index < -1 ||
+          leaf.data.index > to.getChildren().length
+        )
+          return false;
+        return (
+          this.allowMove(from, to, location) &&
+          (this.options.layoutPolicy?.allowsAction(this.model, action) ?? true)
+        );
       }
-      const retirePreview =
-        previousPreview?.preview === true && previousPreview !== presentation.preserve;
-      if (previousPreview) this.keep(previousPreview.id);
-      this.state.documents.set(id, session);
-      this.pending.delete(router);
-      this.attachRouter(session);
-      this.changed();
-      this.revealDocument(session, presentation);
-      // Admission has succeeded before retiring the previous preview. A new Router/content id
-      // gives resource owners a real lifetime boundary; no same-path React state is repurposed.
-      // Dirty, protected or already-closing content is kept, never implicitly discarded.
       if (
-        retirePreview &&
-        previousPreview &&
-        this.state.documents.get(previousPreview.id) === previousPreview
+        leaf.type === Actions.UPDATE_NODE_ATTRIBUTES ||
+        leaf.type === Actions.UPDATE_MODEL_ATTRIBUTES
       ) {
-        try {
-          const previousNode = model.getNodeById(previousPreview.id);
-          if (
-            previousNode instanceof TabNode &&
-            previousNode.isCloseable() &&
-            !previousPreview.owner?.lifecycle.isDirty?.() &&
-            !this.closing.has(previousPreview.id)
-          )
-            this.reportNative(this.close(previousPreview.id));
-        } catch (error) {
-          // Retirement is post-admission cleanup. Keep the old document and preserve the
-          // committed receipt even if an application getter cannot establish safe removal.
-          this.issue("operation-failed", error, previousPreview.id);
-        }
-      }
-      return { status: "committed", document: this.getDocument(id)!, reused: false };
-    } catch (error) {
-      if (error instanceof PlacementChanged) return { status: "superseded" };
-      if (error instanceof FocusConflict) return { status: "rejected", reason: "focus-conflict" };
-      return { status: "failed", stage: "load", error };
-    } finally {
-      if (router && this.pending.delete(router))
-        this.releaseRouter(router).forEach((error) => this.issue("operation-failed", error));
-    }
-  }
-
-  private async navigateSession(
-    session: DocumentSession,
-    href: string,
-    replace: boolean,
-    current: () => boolean,
-    fromPop: boolean,
-    background = false,
-    presentation?: OpenPresentation,
-  ): Promise<NavigationResult> {
-    await this.loadDocument(session.id);
-    if (!this.state.documents.has(session.id) || !session.router)
-      return { status: "rejected", reason: "closed" };
-    const operation = ++session.operation;
-    if (
-      session.href === href &&
-      session.router.history.location.href === href &&
-      !session.router.state.isLoading
-    ) {
-      if (current()) {
-        if (presentation) this.revealDocument(session, presentation);
-        else if (!background) this.activate(session.id, { history: !fromPop });
-      }
-      return current()
-        ? { status: "committed", document: this.getDocument(session.id)!, reused: true }
-        : { status: "superseded" };
-    }
-    const router = session.router;
-    const focus = this.focusEpoch;
-    const before = session.contentVersion;
-    const valid = () =>
-      current() &&
-      this.state.documents.get(session.id) === session &&
-      operation === session.operation;
-    try {
-      if (!(await this.decide(session, "navigate", href)))
-        return { status: "rejected", reason: "decision" };
-      if (!valid() || before !== session.contentVersion) return { status: "superseded" };
-      // The application's native Router blockers still run. Our one-shot approval prevents a second prompt.
-      this.approved.set(session.id, href);
-      this.coordinating.add(session.id);
-      if (!(await navigateDocument(router, href, replace)))
-        return { status: "rejected", reason: "router-blocked" };
-      if (!valid()) return { status: "superseded" };
-      if (
-        router.state.location.publicHref !== href &&
-        router.state.location.publicHref === session.href &&
-        session.contentVersion === before
-      )
-        return { status: "rejected", reason: "router-blocked" };
-      this.acceptRouter(session);
-      if (presentation) this.revealDocument(session, presentation);
-      else if (!background && focus === this.focusEpoch) {
-        this.activate(session.id, { history: false });
-        if (!fromPop) this.browser?.publish(session.href, session.id, replace);
-      }
-      return { status: "committed", document: this.getDocument(session.id)!, reused: true };
-    } catch (error) {
-      return { status: "failed", stage: "navigate", error };
-    } finally {
-      this.approved.delete(session.id);
-      this.coordinating.delete(session.id);
-    }
-  }
-
-  private readonly approved = new Map<string, string>();
-  private readonly coordinating = new Set<string>();
-  private attachRouter(session: DocumentSession) {
-    const router = session.router!;
-    let replace = false;
-    session.release.push(router.history.subscribe(router.load));
-    session.release.push(
-      router.history.block({
-        enableBeforeUnload: false,
-        blockerFn: async ({
-          nextLocation,
-          action,
-        }: {
-          nextLocation: { href: string };
-          action: string;
-        }) => {
-          replace = action === "REPLACE";
-          if (!this.state.documents.has(session.id)) return true;
-          if (this.approved.get(session.id) === nextLocation.href) {
-            this.approved.delete(session.id);
-            return false;
-          }
-          const before = session.contentVersion;
-          const operation = ++session.operation;
-          return (
-            !(await this.decide(session, "navigate", nextLocation.href)) ||
-            !this.state.documents.has(session.id) ||
-            before !== session.contentVersion ||
-            operation !== session.operation
-          );
-        },
-      }),
-    );
-    session.release.push(
-      router.subscribe("onResolved", () => {
-        if (!this.state.documents.has(session.id)) return;
-        this.acceptRouter(session);
-        // URL publication follows the active document's accepted location. Focus can
-        // change inside that document when navigation replaces the clicked control;
-        // it must not leave the browser URL pointing at the previous search state.
+        const attributes = leaf.data.json as Record<string, unknown>;
         if (
-          !this.coordinating.has(session.id) &&
-          this.state.store.get().activeDocumentId === session.id
+          !attributes ||
+          ["component", "id", "type", "children", "subLayoutId"].some((key) =>
+            Object.hasOwn(attributes, key),
+          ) ||
+          ["enableFloat", "enablePopout", "tabEnableFloat", "tabEnablePopout"].some(
+            (key) =>
+              Object.hasOwn(attributes, key) &&
+              attributes[key] !== false &&
+              attributes[key] !== undefined,
+          )
         )
-          this.browser?.publish(session.href, session.id, replace);
-      }),
-    );
-  }
-  private acceptRouter(session: DocumentSession) {
-    const router = session.router!;
-    const href = router.state.location.publicHref;
-    const identity = this.identity(router);
-    // A lazy restored tab already owns its native name. Compare its saved location before
-    // accepting the new href; loading or view-state changes are not content replacements.
-    const identityChanged = this.sessionIdentity(session) !== identity;
-    if (href !== session.href) {
-      session.href = href;
-      ++session.contentVersion;
-    }
-    session.identity = identity;
-    const other = [...this.state.documents.values()].find(
-      (s) => s !== session && s.identity === session.identity,
-    );
-    // Reloading an accepted ordinary owner beside an explicit copy is not a new collision.
-    if (identityChanged && other && !session.multi)
-      this.issue(
-        "native-identity-conflict",
-        new Error(
-          `Native navigation committed ${href}, already open in ${other.id}. Both instances remain alive; use workbench.open for deduplication.`,
-        ),
-        session.id,
-      );
-    const node = this.state.model.getNodeById(session.id);
-    const title = this.routeMetadata(router)?.title;
-    if (identityChanged && node instanceof TabNode && title && node.getName() !== title)
-      this.state.model.doAction(Actions.renameTab(session.id, title));
-    this.changed();
-  }
-  private async settle(router: AnyRouter) {
-    if (!router.state.isLoading && router.state.matches.every((m) => m.status !== "pending"))
-      return;
-    await new Promise<void>((resolve) => {
-      const off = router.subscribe("onResolved", () => {
-        off();
-        resolve();
-      });
-    });
-  }
-  private async loadDocument(id: string) {
-    const session = this.state.documents.get(id);
-    if (!session || session.router || this.disposed) return;
-    const router = this.options.createRouter(createDocumentHistory(session.href));
-    session.router = router;
-    this.attachRouter(session);
-    await router.load();
-    await this.settle(router);
-    if (this.state.documents.get(id) === session) this.acceptRouter(session);
-  }
-  private async decide(session: DocumentSession, reason: "close" | "navigate", to?: string) {
-    if (!session.owner?.lifecycle.isDirty?.()) return true;
-    return session.owner.lifecycle.beforeLeave
-      ? await session.owner.lifecycle.beforeLeave(reason, {
-          id: session.id,
-          from: session.href,
-          ...(to ? { to } : {}),
-        })
-      : false;
-  }
-  /** Interpret removal effects only. Model remains the sole layout authority. */
-  private closeAction(
-    action: Action,
-    history = true,
-    signal?: AbortSignal,
-  ): Promise<CloseActionResult> {
-    if (signal?.aborted) return Promise.resolve({ status: "superseded" });
-    const model = this.state.model;
-    const actions = actionsIn(action);
-    const key = JSON.stringify([history, actions.map((a) => [a.type, a.data.node]).toSorted()]);
-    for (const a of actions) {
-      const pending = this.closing.get(a.data.node as string);
-      if (pending)
-        return Promise.resolve(
-          pending.key === key && pending.signal === signal
-            ? pending.promise
-            : { status: "rejected", reason: "closing" },
+          return false;
+        if (Object.hasOwn(attributes, "config")) {
+          const old = this.model.getNodeById(leaf.data.node);
+          if (!(old instanceof TabNode)) return false;
+          const config = attributes.config;
+          if (
+            !config ||
+            typeof config !== "object" ||
+            Array.isArray(config) ||
+            Object.hasOwn(config, "worksplit")
+          )
+            return false;
+          const record = this.records.get(old.getId());
+          if (record?.role === "tool" && !this.resolveTool({ ...old.toJson(), config }))
+            return false;
+        }
+        return (
+          leaf.type === Actions.UPDATE_MODEL_ATTRIBUTES || !!this.model.getNodeById(leaf.data.node)
         );
-    }
-    const scopes: CloseScope[] = [];
-    for (const a of actions) {
-      const node = model.getNodeById(a.data.node as string);
-      if (a.type === Actions.DELETE_TAB && node instanceof TabNode) {
-        if (!node.isCloseable())
-          return Promise.resolve({ status: "rejected", reason: "not-closeable" });
-        scopes.push({ node, members: [node], closing: [node] });
-      } else if (a.type === Actions.DELETE_TABSET && node instanceof TabSetNode) {
-        if (!node.isEnableClose())
-          return Promise.resolve({ status: "rejected", reason: "not-closeable" });
-        scopes.push({
-          node,
-          members: tabsIn(node),
-          // Native Tabset close skips non-closeable children, including a group with a
-          // non-closeable member. Preserve that meaning; don't close part of that group.
-          closing: node
-            .getChildren()
-            .filter((child) => child.isCloseable())
-            .flatMap(tabsIn),
-        });
-      } else return Promise.resolve({ status: "superseded" });
-    }
-    const tabs = [
-      ...new Map(
-        scopes.flatMap((scope) => scope.closing).map((tab) => [tab.getId(), tab]),
-      ).values(),
-    ];
-    const reserved = new Set(
-      scopes.flatMap((scope) => [scope.node.getId(), ...scope.members.map((tab) => tab.getId())]),
-    );
-    for (const id of reserved) {
-      const pending = this.closing.get(id);
-      if (pending) return Promise.resolve({ status: "rejected", reason: "closing" });
-    }
-    let finish!: (result: CloseActionResult) => void;
-    const promise = new Promise<CloseActionResult>((resolve) => {
-      finish = resolve;
-    });
-    for (const id of reserved)
-      this.closing.set(id, { key, promise, ...(signal ? { signal } : {}) });
-    // Reserve before invoking application decisions, including synchronous/reentrant ones.
-    void this.runCloseAction(scopes, tabs, history, signal).then((result) => {
-      for (const id of reserved)
-        if (this.closing.get(id)?.promise === promise) this.closing.delete(id);
-      finish(result);
-      return undefined;
-    });
-    return promise;
-  }
-
-  private async runCloseAction(
-    scopes: CloseScope[],
-    tabs: TabNode[],
-    history: boolean,
-    signal?: AbortSignal,
-  ): Promise<CloseActionResult> {
-    const sessions = tabs.flatMap((tab) => {
-      const session = this.state.documents.get(tab.getId());
-      return session ? [session] : [];
-    });
-    const versions = sessions.map((s) => s.contentVersion);
-    const owners = sessions.map((s) => s.owner);
-    const tools = tabs.filter((tab) => this.state.tools.has(tab.getId()));
-    const toolOwners = tools.map((tab) => this.toolOwners.get(tab.getId()));
-    try {
-      const contentLifecycles = tabs.map(
-        (tab) =>
-          (this.state.documents.get(tab.getId())?.owner ?? this.toolOwners.get(tab.getId()))
-            ?.lifecycle,
-      );
-      const dirty = contentLifecycles.map((lifecycle) => lifecycle?.isDirty?.() ?? false);
-      const revisionReaders = contentLifecycles.map((lifecycle) => lifecycle?.getCloseRevision);
-      const revisions = revisionReaders.map((read, i) => read?.call(contentLifecycles[i]));
-      if (
-        tabs.length > 1 &&
-        contentLifecycles.some((_lifecycle, i) => dirty[i] && !revisionReaders[i])
-      )
-        return { status: "rejected", reason: "revision-required" };
-      for (const [index, lifecycle] of contentLifecycles.entries()) {
-        if (this.disposed || signal?.aborted) return { status: "superseded" };
-        if (!lifecycle?.isDirty?.()) continue;
-        if (tabs.length > 1 && !lifecycle.getCloseRevision)
-          return { status: "rejected", reason: "revision-required" };
-        const id = tabs[index]!.getId();
-        const from = this.state.documents.get(id)?.href;
-        const decision = Promise.resolve(
-          lifecycle.beforeLeave?.("close", {
-            id,
-            ...(from ? { from } : {}),
-            ...(signal ? { signal } : {}),
-          }),
-        );
-        // eslint-disable-next-line no-await-in-loop -- Dirty decisions may display a dialog; ask in strip order.
-        const approved = await (signal
-          ? new Promise<boolean | undefined>((resolve, reject) => {
-              const abort = () => resolve(false);
-              signal.addEventListener("abort", abort, { once: true });
-              if (signal.aborted) abort();
-              void decision.then(
-                (value) => {
-                  signal.removeEventListener("abort", abort);
-                  return resolve(value);
-                },
-                (error) => {
-                  signal.removeEventListener("abort", abort);
-                  reject(error);
-                },
-              );
-            })
-          : decision);
-        if (signal?.aborted) return { status: "superseded" };
-        if (!approved) return { status: "rejected", reason: "decision" };
       }
-      if (
-        this.disposed ||
-        signal?.aborted ||
-        sessions.some((s) => this.state.documents.get(s.id) !== s)
-      )
-        return { status: "superseded" };
-      if (
-        sessions.some((s, i) => s.contentVersion !== versions[i] || s.owner !== owners[i]) ||
-        tools.some((tab, i) => this.toolOwners.get(tab.getId()) !== toolOwners[i]) ||
-        contentLifecycles.some((lifecycle, i) => {
-          const read = lifecycle?.getCloseRevision;
-          // Withdrawing a revision provider cannot disable an already approved member's recheck.
+      const node = this.model.getNodeById(
+        leaf.data.node ?? leaf.data.tabNode ?? leaf.data.tabsetNode ?? leaf.data.nodeId,
+      );
+      switch (leaf.type) {
+        case Actions.SELECT_TAB:
+          return node instanceof TabNode && this.getContent(node.getId()) !== null;
+        case Actions.SET_ACTIVE_TABSET:
           return (
-            Boolean(read) !== Boolean(revisionReaders[i]) ||
-            (read && !Object.is(read.call(lifecycle), revisions[i])) ||
-            (!dirty[i] && lifecycle?.isDirty?.())
+            (leaf.data.layoutId === undefined || leaf.data.layoutId === Model.MAIN_LAYOUT_ID) &&
+            (leaf.data.tabsetNode === undefined || node instanceof TabSetNode)
           );
-        }) ||
-        tabs.some(
-          (tab) => !tab.isCloseable() || this.state.model.getNodeById(tab.getId()) !== tab,
-        ) ||
-        scopes.some((scope) => {
-          if (this.state.model.getNodeById(scope.node.getId()) !== scope.node) return true;
-          if (scope.node instanceof TabNode) return false;
+        case Actions.ADJUST_BORDER_SPLIT:
           return (
-            !scope.node.isEnableClose() ||
-            !sameMembers(scope.members, tabsIn(scope.node)) ||
-            !sameMembers(
-              scope.closing,
-              scope.node
-                .getChildren()
-                .filter((child) => child.isCloseable())
-                .flatMap(tabsIn),
+            node instanceof BorderNode &&
+            Number.isFinite(leaf.data.size) &&
+            leaf.data.size >= node.getMinSize() &&
+            leaf.data.size <= node.getMaxSize()
+          );
+        case Actions.MAXIMIZE_TOGGLE:
+          return node instanceof TabSetNode && node.isEnableMaximize();
+        case Actions.RENAME_TAB:
+          return (
+            node instanceof TabNode && node.isEnableRename() && typeof leaf.data.text === "string"
+          );
+        case Actions.ADJUST_WEIGHTS:
+          return (
+            node instanceof RowNode &&
+            Array.isArray(leaf.data.weights) &&
+            leaf.data.weights.length === node.getChildren().length &&
+            leaf.data.weights.every(
+              (weight: unknown) =>
+                typeof weight === "number" && Number.isFinite(weight) && weight > 0,
             )
           );
-        })
-      )
-        return { status: "rejected", reason: "changed" };
-      const active = this.state.store.get().activeDocumentId;
-      const group = active
-        ? tabContainer(this.state.model.getNodeById(active))?.getId()
-        : undefined;
-      // FlexLayout 0.11.1 DELETE_TABSET calls .delete() on a TabGroup, which has no such method.
-      // Expand approved leaves through native Actions, then let the native Tabset action tidy
-      // its empty/group-free or non-closeable remainder. No custom layout repair or fork.
-      const removals = [
-        ...tabs.map((tab) => Actions.deleteTab(tab.getId())),
-        ...[
-          ...new Set(
-            scopes
-              .filter((scope) => scope.node instanceof TabSetNode)
-              .map((scope) => scope.node.getId()),
-          ),
-        ].map((id) => Actions.deleteTabset(id)),
-      ];
-      const selecting = this.selecting;
-      const errors: unknown[] = [];
-      let removed = tabs;
-      this.selecting = true;
-      try {
-        if (removals.length > 0)
-          this.state.model.doAction(removals.length === 1 ? removals[0]! : Actions.group(removals));
-      } catch (error) {
-        // An observer can throw after native mutation. Inspect the actual native tree and
-        // settle removed lifetimes rather than reporting a refusal and leaking their Routers.
-        const live = new Set<string>();
-        this.state.model.visitNodes((node) => {
-          if (node instanceof TabNode) live.add(node.getId());
-        });
-        removed = tabs.filter((tab) => !live.has(tab.getId()));
-        if (removed.length === 0) return { status: "failed", error };
-        errors.push(error);
-      } finally {
-        this.selecting = selecting;
+        case Actions.SET_TAB_PINNED:
+          return (
+            node instanceof TabNode &&
+            node.isEnablePin() &&
+            tabContainer(node) instanceof TabSetNode &&
+            typeof leaf.data.pinned === "boolean"
+          );
+        case Actions.SET_BORDER_TYPE:
+          return node instanceof BorderNode && ["split", "overlay"].includes(leaf.data.borderType);
+        case Actions.ADD_TAB_TO_NEW_GROUP:
+          return (
+            node instanceof TabNode &&
+            !node.isPinned() &&
+            (!(tabContainer(node) instanceof TabSetNode) ||
+              (tabContainer(node) as TabSetNode).isEnableTabGroups())
+          );
+        case Actions.REMOVE_TAB_FROM_GROUP:
+          return node instanceof TabNode && node.getParent() instanceof TabGroupNode;
+        case Actions.UNGROUP:
+          return node instanceof TabGroupNode;
+        default:
+          return false;
       }
-      const ids = new Set(removed.map((tab) => tab.getId()));
-      for (const session of sessions)
-        if (ids.has(session.id)) {
-          this.state.documents.delete(session.id);
-          ++session.operation;
-        }
-      const contentCleanup = this.closeContents(removed);
-      try {
-        for (let i = this.mru.length - 1; i >= 0; --i)
-          if (ids.has(this.mru[i]!)) this.mru.splice(i, 1);
-        this.clearRemovedFocus(ids);
-        const activeNow = this.state.store.get().activeDocumentId;
-        if (activeNow !== null && ids.has(activeNow)) {
-          const remaining = [...this.state.documents.values()];
-          const successor =
-            this.preferred(
-              remaining.filter(
-                (s) => tabContainer(this.state.model.getNodeById(s.id))?.getId() === group,
-              ),
-            ) ?? this.preferred(remaining);
-          this.state.store.setState((s) => ({ ...s, activeDocumentId: null }));
-          this.cancelContentFocus();
-          if (successor) this.activate(successor.id, { history });
-          else if (history) this.browser?.publish(this.options.home ?? "/", undefined, true);
-        }
-        this.changed();
-      } catch (error) {
-        errors.push(error);
-      }
-      const cleanupErrors = (
-        await Promise.all([
-          contentCleanup,
-          ...sessions.filter((s) => ids.has(s.id)).map((s) => this.releaseSession(s)),
-          ...tools
-            .filter((tab) => ids.has(tab.getId()))
-            .map((tab) => this.releaseTool(tab.getId())),
-        ])
-      ).flat();
-      cleanupErrors.push(...errors);
-      if (removed.length !== tabs.length)
-        return {
-          status: "failed",
-          error: new AggregateError(
-            cleanupErrors,
-            `Native close partially applied; removed ${[...ids].join(", ")}`,
-          ),
-        };
-      return removed.length > 0
-        ? { status: "closed", id: removed[0]!.getId(), cleanupErrors }
-        : { status: "applied" };
-    } catch (error) {
-      return { status: "failed", error };
+    } catch {
+      return false;
     }
   }
-  private readonly toolOwners = new Map<string, EditorOwner>();
-
-  private content(id: string, expectedNode?: Node): WorkbenchContent {
-    const node = this.state.model.getNodeById(id);
-    const assertCurrent = () => {
-      if (
-        this.disposed ||
-        !(node instanceof TabNode) ||
-        this.state.model.getNodeById(id) !== node ||
-        (expectedNode !== undefined && node !== expectedNode) ||
-        (!this.state.documents.has(id) && !this.state.tools.has(id))
-      )
-        throw new Error(`Cannot use closed content ${id}`);
-    };
-    assertCurrent();
-    const tab = node as TabNode;
-    const existing = this.contents.get(tab);
-    if (existing) return existing.handle;
-    const effects = new ContentEffects(assertCurrent, (error) =>
-      this.issue("operation-failed", error, id),
-    );
-    const handle: WorkbenchContent = {
-      id,
-      effect: (setup) => effects.effect(setup),
-      executeCommand: async (command) => {
-        assertCurrent();
-        await this.executeCommand(command, { contentId: id });
-      },
-    };
-    this.contents.set(tab, { handle, effects });
-    return handle;
-  }
-
-  /** Invalidate every closing instance and freeze all tasks before running application code. */
-  private closeContents(nodes: readonly TabNode[]): Promise<unknown[]> {
-    const owner = {};
-    const plans = nodes.flatMap((node) => {
-      const record = this.contents.get(node);
-      if (!record) return [];
-      const plan = record.effects.prepareClose(owner);
-      void plan.result.then(() => this.contents.delete(node));
-      return [plan];
-    });
-    plans.forEach((plan) => plan.stop());
-    return Promise.all(plans.map((plan) => plan.result)).then((results) => results.flat());
-  }
-
-  private registerOwner(id: string, lifecycle: WorkbenchContentLifecycle, expectedNode?: Node) {
-    // The handle check also rejects a suspended old tree after the same id was reopened.
-    this.content(id, expectedNode);
-    const node = this.state.model.getNodeById(id)!;
-    const session = this.state.documents.get(id);
-    if (session?.owner || this.toolOwners.has(id))
-      throw new Error(`Content ${id} already has a lifecycle owner`);
-    // Registration identity is distinct from the callback object. Withdrawing and registering
-    // the same object must invalidate an approval already waiting for an application decision.
-    const owner = { lifecycle };
-    if (session) session.owner = owner;
-    else this.toolOwners.set(id, owner);
-    this.restoreContentFocus(id);
-    return () => {
-      if (this.state.model.getNodeById(id) !== node) return;
-      if (session?.owner === owner) session.owner = undefined;
-      if (this.toolOwners.get(id) === owner) this.toolOwners.delete(id);
-    };
-  }
-
-  private releaseTool(id: string): unknown[] {
-    this.toolOwners.delete(id);
-    if (!this.options.tools?.some((tool) => tool.id === id)) this.state.tools.delete(id);
-    return [];
-  }
-
-  private releaseSession(session: DocumentSession): unknown[] {
-    const errors: unknown[] = [];
-    const router = session.router;
-    session.router = undefined;
-    session.owner = undefined;
-    session.release.splice(0).forEach((release) => {
-      try {
-        release();
-      } catch (error) {
-        errors.push(error);
-      }
-    });
-    if (router) errors.push(...this.releaseRouter(router));
-    return errors;
-  }
-
-  private reportNative(promise: Promise<DispatchResult>): void {
-    if (this.nativeOperations.has(promise)) return;
-    this.nativeOperations.add(promise);
-    void promise.then(
-      (result) => {
-        if (result.status === "failed") this.issue("operation-failed", result.error);
-        if (result.status === "closed")
-          result.cleanupErrors.forEach((error) => this.issue("operation-failed", error, result.id));
-        return undefined;
-      },
-      (error: unknown) => this.issue("operation-failed", error),
-    );
-  }
-  private releaseRouter(router: AnyRouter): unknown[] {
-    const errors: unknown[] = [];
-    try {
-      for (const match of router.state.matches) {
-        try {
-          match.abortController.abort();
-        } catch (error) {
-          errors.push(error);
-        }
-      }
-    } catch (error) {
-      errors.push(error);
+  async dispatch(action: Action): Promise<OperationResult<void>> {
+    if (this.phase !== "running") return denied("not-ready");
+    const leaves = actionsIn(action);
+    if (!this.canDispatch(action)) return denied("unsupported-action");
+    if (leaves.every((leaf) => leaf.type === Actions.DELETE_TAB)) {
+      const result = await this.close(leaves.map((leaf) => leaf.data.node as string));
+      return result.status === "applied" ? applied(undefined, result.cleanupErrors) : result;
     }
-    try {
-      router.clearCache();
-    } catch (error) {
-      errors.push(error);
-    }
-    try {
-      router.history.destroy();
-    } catch (error) {
-      errors.push(error);
-    }
-    return errors;
-  }
-  private cancelContentFocus() {
-    ++this.focusEpoch;
-    this.pendingFocus?.cancel?.();
-    this.pendingFocus = undefined;
-  }
-  private restoreContentFocus(id: string) {
-    const request = this.pendingFocus;
-    const session = this.state.documents.get(id);
-    const lifecycle = () => (session?.owner ?? this.toolOwners.get(id))?.lifecycle;
-    if (!request || request.id !== id || !lifecycle()?.focus) return;
-    // Native Layout applies panel visibility during its render. Mounted content
-    // must wait for the next frame before a browser can accept DOM focus.
-    const win = request.node.getWindow();
-    request.cancel?.();
-    const restore = () => {
-      delete request.cancel;
-      if (
-        this.disposed ||
-        this.pendingFocus !== request ||
-        request.epoch !== this.focusEpoch ||
-        this.state.model.getNodeById(id) !== request.node ||
-        (session &&
-          (this.state.store.get().activeDocumentId !== id ||
-            this.state.documents.get(id) !== session))
-      )
-        return;
-      const focus = lifecycle()?.focus;
-      // A route can unmount between scheduling and commit. Keep the request available
-      // for the next owner, provided no user interaction has superseded it.
-      if (!focus) return;
-      this.pendingFocus = undefined;
-      this.restoringFocus = true;
-      try {
-        focus();
-      } catch (error) {
-        this.issue("operation-failed", error, id);
-      } finally {
-        this.restoringFocus = false;
-      }
-    };
-    if (win) {
-      const frame = win.requestAnimationFrame(restore);
-      request.cancel = () => win.cancelAnimationFrame(frame);
-    } else queueMicrotask(restore);
-  }
-  private observeFocus(id: string | null, area: WorkbenchState["focusedArea"]) {
-    if (id && this.state.documents.has(id) && !this.restoringFocus)
-      this.activate(id, { focus: false });
-    else if (!this.restoringFocus) this.cancelContentFocus();
-    this.state.store.setState((s) => ({
-      ...s,
-      focusedTabId: id,
-      focusedArea: area,
-      windowFocused: area === null ? s.windowFocused : true,
-    }));
-  }
-  private changed() {
-    this.state.store.setState((s) => ({ ...s, revision: s.revision + 1 }));
-  }
-  private clearRemovedFocus(ids: ReadonlySet<string>) {
-    if (this.pendingFocus && ids.has(this.pendingFocus.id)) this.cancelContentFocus();
-    this.state.store.setState((s) =>
-      s.focusedTabId && ids.has(s.focusedTabId)
-        ? { ...s, focusedTabId: null, focusedArea: null }
-        : s,
-    );
-  }
-  private remember(id: string) {
-    const index = this.mru.indexOf(id);
-    if (index !== -1) this.mru.splice(index, 1);
-    this.mru.unshift(id);
-  }
-  private preferred(sessions: DocumentSession[]) {
-    const active = this.state.store.get().activeDocumentId;
-    const current = sessions.find((s) => s.id === active);
-    if (current) return current;
-    const candidates = new Map(sessions.map((s) => [s.id, s]));
-    for (const id of this.mru) {
-      const candidate = candidates.get(id);
-      if (candidate) return candidate;
-    }
-    // Restored documents are lazy: no active session or MRU exists until startup accepts
-    // a URL. Preserve the native selected comparison when several instances match it.
-    const selected = this.state.model.getActiveTabset()?.getSelectedNode();
-    if (selected) {
-      const candidate = candidates.get(selected.getId());
-      if (candidate) return candidate;
-    }
-    return sessions[0];
-  }
-  private freshId() {
-    let id: string;
-    do {
-      id = `document-${this.instancePrefix}-${++this.nextId}`;
-    } while (this.state.model.getNodeById(id) || this.state.tools.has(id));
-    return id;
-  }
-  private routeMetadata(router: AnyRouter): WorkbenchRouteMetadata | undefined {
-    return [...router.state.matches].toReversed().find((m) => m.staticData?.worksplit)?.staticData
-      .worksplit;
-  }
-  private sessionIdentity(session: DocumentSession): string | undefined {
-    if (session.identity) return session.identity;
-    // Lazy restored documents have no Router yet. Match their saved location with the same
-    // real route definition, without starting loaders or retaining a second Router per tab.
-    const history = createMemoryHistory({ initialEntries: [session.href] });
-    const location = this.resolver.parseLocation(history.location);
-    return this.identity(this.resolver, this.resolver.matchRoutes(location));
-  }
-  private identity(router: AnyRouter, matches = router.state.matches) {
-    const owner = matches.toReversed().find((m) => m.staticData?.worksplit) ?? matches.at(-1);
-    if (!owner) throw new Error(`No Router match for ${router.state.location.publicHref}`);
-    const fields = owner.staticData?.worksplit?.identitySearch ?? [];
-    // Host metadata uses runtime keys; a registered Router may give each match a
-    // closed search schema without a string index signature.
-    const search = owner.search as Record<string, unknown>;
-    return JSON.stringify([
-      owner.routeId,
-      owner.params,
-      fields.map((name) => [name, search[name]]),
-    ]);
-  }
-  private allowMove(drag: Node, target: Node, location: DockLocation) {
-    const policy = this.options.allowDrop;
-    if (!policy) return true;
-    const tabs = tabsIn(drag);
-    if (!policy(tabs, target, location)) return false;
-    // Keep the actual native drop target, and also check the containing space. A TabGroup
-    // nested in a Border must not bypass a central-only docking policy.
-    const container = tabContainer(target);
-    return !container || container === target || policy(tabs, container, location);
-  }
-  private checkHref(href: string) {
-    if (!href.startsWith("/") || href.startsWith("//"))
-      throw new Error(`Expected an in-workspace path, received ${href}`);
-  }
-  private issue(
-    code: "operation-failed" | "native-identity-conflict" | "history" | "history-outside-scope",
-    error: unknown,
-    id?: string,
-  ) {
-    const issue = { code, error, ...(id ? { id } : {}) };
-    if (!this.options.onIssue) {
-      // eslint-disable-next-line no-console -- Unclaimed failures need a default diagnostic sink.
-      console.error("Worksplit issue", issue);
-      return;
-    }
-    try {
-      this.options.onIssue(issue);
-    } catch (reporterError) {
-      // eslint-disable-next-line no-console -- A broken host reporter must not hide the original issue.
-      console.error("Worksplit issue reporter failed", {
-        ...issue,
-        error: new AggregateError([error, reporterError], "Worksplit issue reporter failed"),
-      });
-    }
-  }
-  private validateSnapshot(candidate: unknown): IJsonModel {
-    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
-      throw new Error("Invalid Worksplit snapshot");
-    const snapshot = candidate as Record<string, unknown>;
-    if (
-      snapshot.version !== 1 ||
-      snapshot.workspaceId !== (this.options.workspaceId ?? "default") ||
-      !snapshot.layout ||
-      typeof snapshot.layout !== "object" ||
-      Array.isArray(snapshot.layout)
-    )
-      throw new Error("Incompatible Worksplit snapshot; explicitly reset or convert it");
-    return structuredClone(snapshot.layout) as IJsonModel;
-  }
-  private validateLayout(layout: IJsonModel, serialized: boolean) {
-    const popouts = (layout as IJsonModel & { popouts?: Record<string, unknown> }).popouts;
-    if (
-      (layout.subLayouts && Object.keys(layout.subLayouts).length > 0) ||
-      (popouts && Object.keys(popouts).length > 0)
-    )
-      throw new Error("Snapshot popouts and sublayouts are unsupported");
-    if (layout.global?.tabEnableFloat || layout.global?.tabEnablePopout)
-      throw new Error("Worksplit does not support floating or popout content");
-    const ids = new Set<string>();
-    const validate = (value: unknown, allowed: string[], path: string) => {
-      if (!value || typeof value !== "object" || Array.isArray(value))
-        throw new Error(`Invalid snapshot node at ${path}`);
-      const node = value as Record<string, unknown>;
-      // A saved Model must carry its serialized structure. Only native layout initializers
-      // may use FlexLayout's omitted root/Border/tab types and container children.
-      if (serialized && typeof node.type !== "string")
-        throw new Error(`Snapshot node requires explicit type at ${path}`);
-      let type = node.type;
-      if (type === undefined) {
-        if (allowed.includes("tab")) type = "tab";
-        else if (allowed.length === 1) type = allowed[0];
-      }
-      if (typeof type !== "string" || !allowed.includes(type))
-        throw new Error(`Unsupported snapshot node at ${path}`);
-      if (node.id !== undefined) {
-        if (typeof node.id !== "string" || !node.id || ids.has(node.id))
-          throw new Error(`Invalid or duplicate snapshot id at ${path}`);
-        ids.add(node.id);
-      }
-      if (type === "tab") {
-        if (typeof node.component !== "string")
-          throw new Error(`Snapshot tab requires component at ${path}`);
-        if (node.children !== undefined)
-          throw new Error(`Snapshot tab cannot contain children at ${path}`);
-        if (node.subLayoutId !== undefined)
-          throw new Error(`Snapshot sublayout content is unsupported at ${path}`);
-        return;
-      }
-      if (serialized && !Array.isArray(node.children))
-        throw new Error(`Snapshot container requires children array at ${path}`);
-      if (node.children === undefined) return;
-      if (!Array.isArray(node.children))
-        throw new Error(`Snapshot children must be an array at ${path}`);
-      node.children.forEach((child, index) =>
-        validate(
-          child,
-          type === "row" ? ["row", "tabset"] : type === "tabgroup" ? ["tab"] : ["tab", "tabgroup"],
-          `${path}.children[${index}]`,
-        ),
+    const leaf = leaves[0]!;
+    if (leaf.type === Actions.DELETE_TABSET) {
+      const node = this.model.getNodeById(leaf.data.node) as TabSetNode;
+      const result = await this.closeScope(() =>
+        this.model.getNodeById(node.getId()) === node && node.isEnableClose()
+          ? node
+              .getChildren()
+              .filter((child) => child.isCloseable())
+              .flatMap(tabsIn)
+          : null,
       );
+      if (result.status !== "applied") return result;
+      // Native DELETE_TABSET preserves non-closeable direct children (including a protected
+      // group). Never delete new content admitted while an already removed member cleans up.
+      if (this.model.getNodeById(node.getId()) === node && node.getChildren().length === 0) {
+        try {
+          this.model.doAction(leaf);
+        } catch (error) {
+          return failed(error, "commit", result.value.closedIds, result.cleanupErrors);
+        }
+      }
+      return applied(undefined, result.cleanupErrors);
+    }
+    let admissionId: string | undefined;
+    const admitted: ContentRecord[] = [];
+    const revision = this.store.get().snapshotRevision;
+    try {
+      let native = action;
+      if (leaf.type === Actions.ADD_TAB) {
+        const json: IJsonTabNode = {
+          ...leaf.data.json,
+          id: leaf.data.json.id ?? `tool-${this.prefix}-${++this.sequence}`,
+        };
+        const definition = this.resolveTool(json);
+        if (!definition) return denied("invalid-argument");
+        admissionId = json.id!;
+        this.admissions.set(admissionId, (node) => {
+          admitted.push(this.makeRecord(node, definition));
+        });
+        if (leaf.data.json.id === undefined)
+          native = Actions.addTab(
+            json,
+            leaf.data.toNode,
+            [
+              DockLocation.CENTER,
+              DockLocation.LEFT,
+              DockLocation.RIGHT,
+              DockLocation.TOP,
+              DockLocation.BOTTOM,
+            ].find((location) => location.getName() === leaf.data.location)!,
+            leaf.data.index,
+            leaf.data.select,
+          );
+      }
+      this.model.doAction(native);
+      if (admissionId && !admitted.length) throw new Error("Native tool ADD did not admit content");
+      for (const record of admitted) {
+        if (!this.live(record)) throw new Error("Tool ended during native observers");
+        this.updateTitle(record);
+      }
+      return applied(undefined);
+    } catch (error) {
+      const ids = admitted.length
+        ? admitted.map((record) => record.id)
+        : revision !== this.store.get().snapshotRevision
+          ? [
+              ...new Set(
+                leaves.flatMap((item) =>
+                  [item.data.node, item.data.tabNode, item.data.fromNode, item.data.toNode].filter(
+                    (id): id is string => typeof id === "string",
+                  ),
+                ),
+              ),
+            ]
+          : [];
+      return failed(error, "commit", ids);
+    } finally {
+      if (admissionId) this.admissions.delete(admissionId);
+    }
+  }
+
+  createLink<const TFrom extends string = string, const TTo extends string | undefined = ".">(
+    navigation:
+      | DocumentNavigationOptions<TRouter, TFrom, TTo>
+      | (() =>
+          | DocumentNavigationOptions<TRouter, TFrom, TTo>
+          | Promise<DocumentNavigationOptions<TRouter, TFrom, TTo>>),
+    options: LinkOptions = {},
+  ) {
+    let href: string | undefined;
+    if (typeof navigation !== "function") {
+      const sourceHandle = options.source ?? this.store.get().source;
+      const source = sourceHandle ? this.recordFor(sourceHandle) : undefined;
+      const borrowed = source?.role === "document" ? source.runtime?.router : undefined;
+      const temporary = borrowed
+        ? undefined
+        : this.runtime(
+            source?.role === "document" ? source.href : (this.options.home?.href ?? "/"),
+          );
+      try {
+        href = (borrowed ?? temporary!.runtime.router).buildLocation(
+          navigation as Parameters<AnyRouter["buildLocation"]>[0],
+        ).publicHref;
+      } finally {
+        if (temporary) {
+          this.pendingRouters.delete(temporary.runtime);
+          temporary.runtime.dispose().forEach((error) => this.issue(error));
+        }
+      }
+    }
+    const { onResult, ...captured } = options;
+    return this.links.create(
+      () => href,
+      async (requested, current) => {
+        const capture = this.captureOpen(requested, false);
+        if ("status" in capture) return capture;
+        if (!current()) return superseded;
+        try {
+          const target = typeof navigation === "function" ? await navigation() : navigation;
+          if (!current() || !this.captureCurrent(capture)) return superseded;
+          const result = await this.openDocument(
+            target as unknown as RuntimeNavigation,
+            { ...requested, ...(capture.source ? { source: capture.source.handle } : {}) },
+            false,
+            current,
+          );
+          if (result.status === "applied") href = result.value.document.href;
+          return result;
+        } catch (error) {
+          return failed(error);
+        }
+      },
+      captured as OpenOptions,
+      onResult,
+    );
+  }
+
+  start(options: StartOptions = {}): Promise<StartResult> {
+    if (this.phase === "disposed") return Promise.resolve(denied("not-ready"));
+    const old = this.startInput;
+    if (this.startPromise) {
+      const sameInput =
+        old?.href === options.href &&
+        old?.browser?.window === options.browser?.window &&
+        old?.browser?.onOutsideNavigate === options.browser?.onOutsideNavigate &&
+        !!old?.browser === !!options.browser;
+      return sameInput ? this.startPromise : Promise.resolve(denied("invalid-argument"));
+    }
+    if (options.browser && options.href !== undefined)
+      return Promise.resolve(denied("invalid-argument"));
+    this.startInput = options.browser ? { browser: { ...options.browser } } : { ...options };
+    this.phase = "starting";
+    this.changed();
+    let resolve!: (result: StartResult) => void;
+    this.startPromise = new Promise((done) => {
+      resolve = done;
+    });
+    void this.startSession(options).then(resolve, async (error) => {
+      await this.dispose();
+      resolve(failed(error));
+    });
+    return this.startPromise;
+  }
+  private async startSession(options: StartOptions): Promise<StartResult> {
+    let result: StartResult;
+    if (options.browser) {
+      const browserOptions = options.browser;
+      if (!this.options.home) throw new TypeError("Browser sessions require an explicit home URL");
+      const win = browserOptions.window ?? window;
+      this.browser = new BrowserHistoryCoordinator(
+        win,
+        this.workspaceId,
+        (href, reference, current, signal) => this.visitBrowser(href, reference, current, signal),
+        (error) => this.issue(error),
+        async (href, context) => {
+          const close = await this.beginWorkspaceClose(
+            { destination: href, signal: context.signal },
+            (snapshot, cleanup) => {
+              try {
+                const returned = browserOptions.onOutsideNavigate({
+                  href,
+                  state: context.state,
+                  snapshot,
+                  cleanup,
+                });
+                void Promise.resolve(returned).catch((error) => this.issue(error));
+              } catch (error) {
+                this.issue(error);
+              }
+            },
+          );
+          if (close.status === "failed") this.reportResult(close);
+          return close.status === "applied";
+        },
+      );
+      const accepted = await this.browser.start();
+      if (!accepted || this.phase === "disposed") {
+        await this.dispose();
+        return superseded;
+      }
+      result = applied({ document: this.getActiveDocument(), href: accepted.href });
+    } else {
+      const restored =
+        options.href === undefined
+          ? (this.records.get(this.restoredActive ?? "") ??
+            [...this.records.values()].find(
+              (record) => record.role === "document" && record.node.isSelected(),
+            ))
+          : undefined;
+      if (restored?.role === "document") {
+        await this.initialize(restored);
+        if (this.phase === "disposed") return superseded;
+        const presentation = this.present(restored, "activate");
+        if (presentation.status !== "applied") return presentation;
+        result = applied({ document: this.getDocument(restored.id), href: restored.href });
+      } else {
+        const href = options.href ?? this.options.home?.href ?? "/";
+        checkHref(href);
+        if (
+          (!this.options.home || this.options.home.mode === "empty") &&
+          href === (this.options.home?.href ?? "/")
+        )
+          result = applied({ document: null, href });
+        else {
+          const opened = await this.openDocument({ href }, {}, true);
+          result =
+            opened.status === "applied"
+              ? applied(
+                  { document: opened.value.document, href: opened.value.document.href },
+                  opened.cleanupErrors,
+                )
+              : opened;
+        }
+      }
+    }
+    if (this.phase === "disposed") return superseded;
+    if (result.status === "applied") {
+      this.phase = "running";
+      this.changed();
+    } else await this.dispose();
+    return result;
+  }
+  private reference(record: DocumentRecord): BrowserEntryReference | undefined {
+    const key = record.accepted?.state["__TSR_key"];
+    return key ? { contentId: record.id, lifetime: record.lifetime, entryKey: key } : undefined;
+  }
+  private async visitBrowser(
+    href: string,
+    reference: BrowserEntryReference | undefined,
+    current: () => boolean,
+    signal: AbortSignal,
+  ): Promise<BrowserVisitResult | undefined> {
+    if (!current() || this.phase === "disposed") return;
+    const source: BrowserVisitSource = { current, signal, pending: true };
+    const claim = (navigation: NativeNavigation) => {
+      if (source.pending) this.browserRequests.set(navigation, source);
     };
-    validate(layout.layout, ["row"], "layout");
-    if (layout.borders !== undefined && !Array.isArray(layout.borders))
-      throw new Error("Snapshot borders must be an array");
-    layout.borders?.forEach((border, index) => validate(border, ["border"], `borders[${index}]`));
+    try {
+      if (!reference && this.options.home?.mode === "empty" && href === this.options.home.href) {
+        const active =
+          this.records.get(this.store.get().activeDocumentId ?? this.restoredActive ?? "") ??
+          [...this.records.values()].find(
+            (record) => record.role === "document" && record.node.isSelected(),
+          ) ??
+          [...this.records.values()].find((record) => record.role === "document");
+        if (active?.role === "document") {
+          await this.initialize(active);
+          if (!current() || !this.live(active) || !active.ready) return;
+          const shown = this.present(active, "activate");
+          if (shown.status !== "applied") return;
+          const ref = this.reference(active);
+          return { href: active.href, ...(ref ? { reference: ref } : {}) };
+        }
+        this.store.setState((state) => ({ ...state, activeDocumentId: null }));
+        return { href };
+      }
+      const record = reference ? this.records.get(reference.contentId) : undefined;
+      if (
+        record?.role === "document" &&
+        record.lifetime === reference!.lifetime &&
+        record.runtime?.history.getEntry(reference!.entryKey)
+      ) {
+        const outcome = await record.runtime.goToEntry(reference!.entryKey, {
+          onNavigationStart: claim,
+        });
+        outcome?.cleanupErrors.forEach((error) => this.issue(error, record.id));
+        if (outcome?.status === "failed") this.issue(outcome.error, record.id);
+        if (!current() || outcome?.status !== "accepted" || !this.live(record)) return;
+        const shown = this.present(record, "activate");
+        if (shown.status !== "applied") return;
+        const ref = this.reference(record);
+        return { href: record.href, ...(ref ? { reference: ref } : {}) };
+      }
+      const opened = await this.openDocument(
+        { href, onNavigationStart: claim },
+        { reuse: "new" },
+        this.phase === "starting",
+        current,
+        source,
+      );
+      this.reportResult(opened);
+      if (!current() || opened.status !== "applied") return;
+      const accepted = this.records.get(opened.value.document.id) as DocumentRecord;
+      const ref = this.reference(accepted);
+      return { href: accepted.href, ...(ref ? { reference: ref } : {}) };
+    } finally {
+      source.pending = false;
+    }
   }
 }
 
 export function createWorkbench<TRouter extends AnyRouter>(
   options: WorkbenchOptions<TRouter>,
 ): WorkbenchInstance<TRouter> {
-  return new WorkbenchInstance(options);
+  return new WorkbenchSession(options);
 }

@@ -1,0 +1,99 @@
+diff --git a/dist/cjs/Transitioner.cjs b/dist/cjs/Transitioner.cjs
+index 43ace5eb..aba3bb21 100644
+--- a/dist/cjs/Transitioner.cjs
++++ b/dist/cjs/Transitioner.cjs
+@@ -15,14 +15,21 @@ function Transitioner({ t }) {
+ 	const router = require_useRouter.useRouter();
+ 	const acknowledgement = router._rendered ??= [];
+ 	const mounted = process.env.NODE_ENV !== "production" ? react.useRef(false) : void 0;
+-	router.startTransition = (fn, expected) => new Promise((resolve) => {
++	const startTransition = (fn, expected) => new Promise((resolve) => {
+ 		settleOwner(acknowledgement, false);
+ 		acknowledgement.push(expected, resolve);
+ 		t(router);
+ 		react.startTransition(fn);
+ 	});
+ 	require_utils.useLayoutEffect(() => {
+-		const unsub = router.history.subscribe(router.load);
++		const previousTransition = router.startTransition;
++    router.startTransition = startTransition;
++    const unsubscribe = router.history.subscribe(router.load);
++    const unsub = () => {
++      unsubscribe();
++      if (router.startTransition === startTransition) router.startTransition = previousTransition;
++      settleOwner(acknowledgement, false);
++    };
+ 		if (mounted?.current) return unsub;
+ 		if (mounted) mounted.current = true;
+ 		router.updateLatestLocation();
+@@ -58,5 +65,3 @@ function Transitioner({ t }) {
+ //#endregion
+ exports.Transitioner = Transitioner;
+ exports.settleOwner = settleOwner;
+-
+-//# sourceMappingURL=Transitioner.cjs.map
+\ No newline at end of file
+diff --git a/dist/esm/Transitioner.js b/dist/esm/Transitioner.js
+index 51d7e69e..3027c665 100644
+--- a/dist/esm/Transitioner.js
++++ b/dist/esm/Transitioner.js
+@@ -13,14 +13,21 @@ function Transitioner({ t }) {
+ 	const router = useRouter();
+ 	const acknowledgement = router._rendered ??= [];
+ 	const mounted = process.env.NODE_ENV !== "production" ? React$1.useRef(false) : void 0;
+-	router.startTransition = (fn, expected) => new Promise((resolve) => {
++	const startTransition = (fn, expected) => new Promise((resolve) => {
+ 		settleOwner(acknowledgement, false);
+ 		acknowledgement.push(expected, resolve);
+ 		t(router);
+ 		React$1.startTransition(fn);
+ 	});
+ 	useLayoutEffect(() => {
+-		const unsub = router.history.subscribe(router.load);
++		const previousTransition = router.startTransition;
++    router.startTransition = startTransition;
++    const unsubscribe = router.history.subscribe(router.load);
++    const unsub = () => {
++      unsubscribe();
++      if (router.startTransition === startTransition) router.startTransition = previousTransition;
++      settleOwner(acknowledgement, false);
++    };
+ 		if (mounted?.current) return unsub;
+ 		if (mounted) mounted.current = true;
+ 		router.updateLatestLocation();
+@@ -55,5 +62,3 @@ function Transitioner({ t }) {
+ }
+ //#endregion
+ export { Transitioner, settleOwner };
+-
+-//# sourceMappingURL=Transitioner.js.map
+\ No newline at end of file
+diff --git a/src/Transitioner.tsx b/src/Transitioner.tsx
+index ddf8afea..ebe40acd 100644
+--- a/src/Transitioner.tsx
++++ b/src/Transitioner.tsx
+@@ -28,7 +28,7 @@ export function Transitioner({
+         React.useRef(false)
+       : undefined
+ 
+-  router.startTransition = (fn, expected) =>
++  const startTransition: AnyRouter['startTransition'] = (fn, expected) =>
+     new Promise((resolve) => {
+       settleOwner(acknowledgement, false)
+       acknowledgement.push(expected, resolve)
+@@ -38,7 +38,14 @@ export function Transitioner({
+ 
+   // Subscribe before canonicalizing so the initial URL has exactly one load.
+   useLayoutEffect(() => {
+-    const unsub = router.history.subscribe(router.load)
++    const previousTransition = router.startTransition
++    router.startTransition = startTransition
++    const unsubscribe = router.history.subscribe(router.load)
++    const unsub = () => {
++      unsubscribe()
++      if (router.startTransition === startTransition) router.startTransition = previousTransition
++      settleOwner(acknowledgement, false)
++    }
+ 
+     if (mounted?.current) {
+       return unsub

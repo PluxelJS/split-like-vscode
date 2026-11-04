@@ -1,5 +1,5 @@
 /** The lifetime of one effect. Register acquired resources immediately with defer. */
-export interface WorkbenchContentEffect {
+export interface ContentEffect {
   readonly signal: AbortSignal;
   defer(cleanup: () => void | Promise<void>): void;
 }
@@ -28,7 +28,7 @@ export class ContentEffects {
     private readonly report: (error: unknown) => void,
   ) {}
 
-  effect(setup: (effect: WorkbenchContentEffect) => void | Promise<void>): () => void {
+  effect(setup: (effect: ContentEffect) => void | Promise<void>): () => void {
     this.assertCurrent();
     if (this.closed) throw new Error("Cannot start an effect on closed content");
     const effect: Effect = { controller: new AbortController(), ended: false, cleanups: [] };

@@ -12,5 +12,6 @@
     "types": ["react", "react-dom", "vite/client"],
     "verbatimModuleSyntax": true
   },
-  "include": ["app.tsx", "types.ts"]
+  "include": ["src", "types.ts"],
+  "exclude": ["src/**/*.test.ts"]
 }

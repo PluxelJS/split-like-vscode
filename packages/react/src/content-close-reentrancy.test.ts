@@ -2,15 +2,20 @@ import { createRootRoute, createRoute, createRouter, type AnyRouter } from "@tan
 import { Actions } from "flexlayout-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createWorkbench, type WorkbenchContentEffect, type WorkbenchInstance } from "./index";
-import { integrationState } from "./integration";
+import {
+  createWorkbench,
+  type ContentEffect,
+  type DisposeResult,
+  type WorkbenchInstance,
+} from "./index";
+import { integrationState } from "./internal";
 
-const instances: WorkbenchInstance<AnyRouter>[] = [];
+const instances: Pick<WorkbenchInstance<AnyRouter>, "dispose">[] = [];
 afterEach(async () => {
   await Promise.all(instances.splice(0).map((instance) => instance.dispose()));
 });
 
-function setup() {
+async function setup() {
   const root = createRootRoute();
   const page = createRoute({ getParentRoute: () => root, path: "/document" });
   const routeTree = root.addChildren([page]);
@@ -23,7 +28,7 @@ function setup() {
       const destroy = history.destroy.bind(history);
       const release = vi.fn<() => void>(() => {
         destroy();
-        if (index === 1) throw failure;
+        if (index === 0) throw failure;
       });
       history.destroy = release;
       destroys.push(release);
@@ -32,6 +37,7 @@ function setup() {
     onIssue,
   });
   instances.push(workbench);
+  await workbench.start();
   return { workbench, failure, destroys, onIssue, internal: integrationState(workbench) };
 }
 
@@ -43,30 +49,32 @@ describe("content close and disposal reentrancy", () => {
       const onIssue = vi.fn<(issue: unknown) => void>();
       const workbench = createWorkbench({
         createRouter: (history) => createRouter({ routeTree: root, history }),
-        tools: ["a", "b"].map((id) => ({ id, render: () => null })),
-        layout: {
+        tools: { a: { render: () => null }, b: { render: () => null } },
+        initial: {
           layout: {
-            type: "row",
-            children: [
-              {
-                type: "tabset",
-                children: ["a", "b"].map((id) => ({ id, component: "worksplit.tool" })),
-              },
-            ],
+            layout: {
+              type: "row",
+              children: [
+                {
+                  type: "tabset",
+                  children: ["a", "b"].map((id) => ({ id, component: id })),
+                },
+              ],
+            },
           },
         },
         onIssue,
       });
       instances.push(workbench);
-      const internal = integrationState(workbench);
-      let context!: WorkbenchContentEffect;
+      await workbench.start();
+      let context!: ContentEffect;
       let finishLate!: () => void;
       const late = new Promise<void>((resolve) => {
         finishLate = resolve;
       });
       const lateFailure = new Error("late cleanup failed");
       const knownCleanup = vi.fn<() => void>();
-      internal.content("a").effect(({ signal }) => {
+      workbench.getContent("a")!.handle.runEffect(({ signal }) => {
         signal.addEventListener("abort", () => {
           context.defer(async () => {
             await late;
@@ -74,7 +82,7 @@ describe("content close and disposal reentrancy", () => {
           });
         });
       });
-      internal.content(scope === "same-content" ? "a" : "b").effect((effect) => {
+      workbench.getContent(scope === "same-content" ? "a" : "b")!.handle.runEffect((effect) => {
         context = effect;
         effect.defer(knownCleanup);
       });
@@ -89,7 +97,7 @@ describe("content close and disposal reentrancy", () => {
           }),
         ]);
         expect(knownCleanup).toHaveBeenCalledOnce();
-        expect(outcome).toEqual({ status: "closed", id: "a", cleanupErrors: [] });
+        expect(outcome).toEqual({ status: "applied", value: undefined, cleanupErrors: [] });
         expect(onIssue).not.toHaveBeenCalled();
       } finally {
         finishLate();
@@ -106,46 +114,50 @@ describe("content close and disposal reentrancy", () => {
   );
 
   it("gives close sole ownership of document teardown when an effect cleanup starts disposal", async () => {
-    const { workbench, failure, destroys, onIssue, internal } = setup();
+    const { workbench, failure, destroys, onIssue } = await setup();
     const opened = await workbench.open({ to: "/document" });
-    if (opened.status !== "committed") throw new Error(opened.status);
-    let shutdown: Promise<readonly unknown[]> | undefined;
+    if (opened.status !== "applied") throw new Error(opened.status);
+    let shutdown: Promise<DisposeResult> | undefined;
     const cleanup = vi.fn<() => void>(() => {
       // Start shutdown without waiting on the close operation that contains this cleanup.
       shutdown = workbench.dispose();
     });
-    internal.content(opened.document.id).effect(({ defer }) => defer(cleanup));
+    opened.value.document.handle.runEffect(({ defer }) => defer(cleanup));
 
-    expect(await workbench.close(opened.document.id)).toEqual({
-      status: "closed",
-      id: opened.document.id,
+    expect(await workbench.close(opened.value.document.id)).toEqual({
+      status: "applied",
+      value: { closedIds: [opened.value.document.id] },
       cleanupErrors: [failure],
     });
     expect(shutdown).toBeDefined();
-    expect(await shutdown).toEqual([]);
+    expect(await shutdown).toEqual({ status: "applied", value: undefined, cleanupErrors: [] });
     expect(cleanup).toHaveBeenCalledOnce();
-    expect(destroys).toHaveLength(2);
+    expect(destroys).toHaveLength(1);
     for (const destroy of destroys) expect(destroy).toHaveBeenCalledOnce();
     expect(onIssue).not.toHaveBeenCalled();
   });
 
   it("gives disposal sole ownership when a native removal observer starts it before close releases sessions", async () => {
-    const { workbench, failure, destroys, onIssue, internal } = setup();
+    const { workbench, failure, destroys, onIssue } = await setup();
     const opened = await workbench.open({ to: "/document" });
-    if (opened.status !== "committed") throw new Error(opened.status);
-    let shutdown: Promise<readonly unknown[]> | undefined;
-    internal.model.addChangeListener((action) => {
+    if (opened.status !== "applied") throw new Error(opened.status);
+    let shutdown: Promise<DisposeResult> | undefined;
+    workbench.model.addChangeListener((action) => {
       if (action.type === Actions.DELETE_TAB) shutdown = workbench.dispose();
     });
 
-    expect(await workbench.close(opened.document.id)).toEqual({
-      status: "closed",
-      id: opened.document.id,
+    expect(await workbench.close(opened.value.document.id)).toEqual({
+      status: "applied",
+      value: { closedIds: [opened.value.document.id] },
       cleanupErrors: [],
     });
     expect(shutdown).toBeDefined();
-    expect(await shutdown).toEqual([failure]);
-    expect(destroys).toHaveLength(2);
+    expect(await shutdown).toEqual({
+      status: "applied",
+      value: undefined,
+      cleanupErrors: [failure],
+    });
+    expect(destroys).toHaveLength(1);
     for (const destroy of destroys) expect(destroy).toHaveBeenCalledOnce();
     expect(onIssue).not.toHaveBeenCalled();
   });

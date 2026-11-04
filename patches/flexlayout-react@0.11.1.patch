@@ -16,17 +16,37 @@ diff --git a/dist/index.js b/dist/index.js
  		}
  	}
  	/** @internal */
-@@ -9433,6 +9435,10 @@
+@@ -3045,6 +3047,10 @@
+ 			layout: this.mainLayout.getRootRow().toJson(),
+ 			subLayouts
+ 		};
++	}
++	/** Return detached native global attributes without firing node save events. */
++	getGlobalAttributes() {
++		return structuredClone(this.attributes);
+ 	}
+ 	getSplitterSize() {
+ 		return this.splitterSize;
+@@ -8210,7 +8216,7 @@
+ 		this.updateActive(event);
+ 	};
+ 	onDragLeaveRaw = (event) => {
+-		this._dragEnterCount--;
++		this._dragEnterCount = Math.max(0, this._dragEnterCount - 1);
+ 		this.updateActive(event);
+ 	};
+ 	clearDragMain() {
+@@ -9432,6 +9438,10 @@
+ 		},
  		addTabWithDragAndDrop: (event, json, onDrop) => {
  			controllerRef.current?.addTabWithDragAndDrop(event, json, onDrop);
- 		},
++		},
 +		endDrag: () => {
 +			const controller = controllerRef.current;
 +			if (controller && DragDropManager.dragState?.mainLayoutController === controller.getMainController()) controller.getDragDropManager().onDragEnded();
-+		},
+ 		},
  		moveTabWithDragAndDrop: (event, node) => {
  			controllerRef.current?.moveTabWithDragAndDrop(event, node);
- 		},
 diff --git a/types/view/Layout.d.ts b/types/view/Layout.d.ts
 --- a/types/view/Layout.d.ts
 +++ b/types/view/Layout.d.ts
@@ -39,3 +59,24 @@ diff --git a/types/view/Layout.d.ts b/types/view/Layout.d.ts
      /**
       * Move a tab/tabset using drag and drop, must be called from within an HTML
       * drag start handler
+diff --git a/types/model/Model.d.ts b/types/model/Model.d.ts
+--- a/types/model/Model.d.ts
++++ b/types/model/Model.d.ts
+@@ -1,7 +1,7 @@
+ import { DropInfo } from "./DropInfo";
+ import { Action } from "./Actions";
+ import { BorderSet } from "./BorderSet";
+-import { IBorderTabDirection, IJsonModel, ITabGroupType, ITabSetAttributes } from "./IJsonModel";
++import { IBorderTabDirection, IGlobalAttributes, IJsonModel, ITabGroupType, ITabSetAttributes } from "./IJsonModel";
+ import { Node } from "./Node";
+ import { RowNode } from "./RowNode";
+ import { TabNode } from "./TabNode";
+@@ -86,6 +86,8 @@
+      * @returns {IJsonModel} json object that represents this model
+      */
+     toJson(): IJsonModel;
++    /** Return detached native global attributes without firing node save events. */
++    getGlobalAttributes(): IGlobalAttributes;
+     getSplitterSize(): number | undefined;
+     isEnableEdgeDock(): boolean;
+     isEnableEdgeDockIndicators(): boolean;

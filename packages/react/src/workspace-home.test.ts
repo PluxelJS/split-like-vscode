@@ -6,325 +6,231 @@ import {
   type AnyRouter,
 } from "@tanstack/react-router";
 import { Actions, DockLocation, TabGroupNode } from "flexlayout-react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createWorkbench,
-  type WorkbenchInstance,
-  type WorkbenchOptions,
-  type WorkbenchSnapshot,
-} from "./index";
-import { integrationState } from "./integration";
+import { createWorkbench } from "./integration";
+import { integrationState } from "./internal";
+import type { WorkbenchInstance, WorkbenchOptions, WorkbenchSnapshot } from "./types";
 
 const instances: WorkbenchInstance<AnyRouter>[] = [];
-const releaseGates: (() => void)[] = [];
-beforeEach(() => window.history.replaceState(null, "", "/"));
+const releases: (() => void)[] = [];
 afterEach(async () => {
-  releaseGates.splice(0).forEach((release) => release());
-  await Promise.all(instances.splice(0).map((w) => w.dispose()));
-  window.history.replaceState(null, "", "/");
+  releases.splice(0).forEach((release) => release());
+  // eslint-disable-next-line no-await-in-loop -- Finish each owned session before tearing down the next.
+  for (const instance of instances.splice(0)) await instance.dispose();
 });
 function deferred() {
   let resolve!: () => void;
-  const promise = new Promise<void>((finish) => {
-    resolve = finish;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
   });
-  releaseGates.push(resolve);
+  releases.push(() => resolve());
   return { promise, resolve };
 }
 const nav = (id: string) => ({ to: "/documents/$id" as const, params: { id } });
 function setup(
-  options: Pick<WorkbenchOptions<AnyRouter>, "homeMode" | "home" | "workspaceId"> = {
-    homeMode: "empty",
-  },
-  load: (id: string) => void | Promise<void> = () => {},
-  snapshot?: WorkbenchSnapshot,
+  options: {
+    home?: WorkbenchOptions<AnyRouter>["home"];
+    snapshot?: WorkbenchSnapshot;
+    load?: (id: string) => unknown;
+    redirectHome?: boolean;
+  } = {},
 ) {
   const root = createRootRoute();
-  const homeLoads = vi.fn<() => void>();
+  const homeLoads = vi.fn<() => void>(() => {});
   const home = createRoute({
     getParentRoute: () => root,
     path: "/",
     beforeLoad: () => {
       homeLoads();
-      throw redirect(nav("welcome"));
+      if (options.redirectHome !== false) throw redirect(nav("welcome"));
     },
   });
   const page = createRoute({
     getParentRoute: () => root,
     path: "/documents/$id",
-    loader: ({ params }) => load(params.id),
+    loader: ({ params }) => options.load?.(params.id),
   });
   const routeTree = root.addChildren([home, page]);
-  const onIssue = vi.fn<(issue: unknown) => void>();
+  const routers: AnyRouter[] = [];
   const workbench = createWorkbench({
-    ...options,
-    ...(snapshot ? { snapshot } : {}),
-    createRouter: (history) => createRouter({ routeTree, history, defaultPendingMinMs: 0 }),
-    onIssue,
+    workspaceId: "home",
+    home: options.home ?? { mode: "empty", href: "/" },
+    ...(options.snapshot ? { initial: { snapshot: options.snapshot } } : {}),
+    createRouter: (history) => {
+      const router = createRouter({
+        routeTree,
+        history,
+        defaultPendingMs: 10000,
+        defaultPendingMinMs: 0,
+        defaultStaleTime: Infinity,
+      });
+      routers.push(router);
+      return router;
+    },
   });
   instances.push(workbench);
   const open = async (id: string) => {
     const result = await workbench.open(nav(id));
-    if (result.status !== "committed") throw new Error(result.status);
-    return result.document;
+    if (result.status !== "applied") throw new Error(result.status);
+    return result.value.document;
   };
-  return { workbench, open, homeLoads, onIssue, internal: integrationState(workbench) };
+  return { workbench, open, homeLoads, routers };
 }
-async function traverse(delta: number) {
-  const popped = new Promise<void>((resolve) =>
-    window.addEventListener("popstate", () => resolve(), { once: true }),
-  );
-  window.history.go(delta);
-  await popped;
-}
+const browser = () => ({ browser: { window, onOutsideNavigate: () => {} } });
 
-describe("document-free workspace home", () => {
-  it("accepts empty home without routing and leaves ordinary open routing unchanged", async () => {
-    const { workbench, homeLoads } = setup();
-    workbench.connectBrowser();
-    expect(await workbench.start("/")).toEqual({ status: "empty", href: "/" });
-    expect(workbench.getDocuments()).toEqual([]);
+describe("explicit home and restored document startup", () => {
+  it("accepts empty home without constructing a Router and routes ordinary opens", async () => {
+    const { workbench, routers, homeLoads, open } = setup();
+    expect(await workbench.start()).toMatchObject({
+      status: "applied",
+      value: { document: null, href: "/" },
+    });
+    expect(routers).toHaveLength(0);
+    const document = await open("A");
+    expect(document.href).toBe("/documents/A");
     expect(homeLoads).not.toHaveBeenCalled();
-    const result = await workbench.open({ to: "/" });
-    expect(result).toMatchObject({ status: "committed", document: { href: "/documents/welcome" } });
-    expect(homeLoads).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the default homepage route and redirect semantics", async () => {
-    const { workbench, homeLoads } = setup({});
-    expect(await workbench.start("/")).toMatchObject({
-      status: "committed",
-      document: { href: "/documents/welcome" },
+  it("runs the configured route home and its native redirect", async () => {
+    const { workbench, homeLoads } = setup({ home: { mode: "route", href: "/" } });
+    expect(await workbench.start()).toMatchObject({
+      status: "applied",
+      value: { document: { href: "/documents/welcome" } },
     });
     expect(homeLoads).toHaveBeenCalledTimes(1);
   });
 
-  it("matches the configured home exactly and routes other addresses normally", async () => {
-    const { workbench } = setup({ homeMode: "empty", home: "/workspace" });
-    expect(await workbench.start("/workspace")).toEqual({ status: "empty", href: "/workspace" });
-    expect((await workbench.start("/")).status).toBe("committed");
+  it("treats only the complete configured home href as empty", async () => {
+    const empty = setup({ home: { mode: "empty", href: "/documents/A" } });
+    expect(await empty.workbench.start()).toMatchObject({
+      status: "applied",
+      value: { document: null },
+    });
+    const query = setup({ home: { mode: "empty", href: "/documents/A" } });
+    expect(await query.workbench.start({ href: "/documents/A?view=detail#section" })).toMatchObject(
+      { status: "applied", value: { document: { href: "/documents/A?view=detail#section" } } },
+    );
   });
 
-  it("normalizes an old empty home history anchor to the active retained document", async () => {
-    const { workbench, open, homeLoads } = setup();
-    workbench.connectBrowser();
-    await workbench.start("/");
-    const a = await open("A");
-    await traverse(-1);
-    await vi.waitFor(() => expect(window.location.pathname).toBe("/documents/A"));
-    expect(workbench.getDocuments()).toMatchObject([{ id: a.id }]);
-    expect(workbench.getActiveDocument()?.id).toBe(a.id);
-    expect(homeLoads).not.toHaveBeenCalled();
-    await traverse(1);
-    await vi.waitFor(() => expect(window.location.pathname).toBe("/documents/A"));
-    expect(workbench.getDocuments()).toHaveLength(1);
-  });
-
-  it("preserves true emptiness through closing the final tab and Back/Forward", async () => {
-    const { workbench, open, homeLoads } = setup();
-    workbench.connectBrowser();
-    await workbench.start("/");
-    const a = await open("A");
-    await workbench.close(a.id);
-    expect(window.location.pathname).toBe("/");
-    await traverse(-1);
-    await vi.waitFor(() => expect(workbench.getDocuments()).toHaveLength(0));
-    await traverse(1);
-    await vi.waitFor(() => expect(workbench.getActiveDocument()).toBeNull());
-    expect(workbench.getDocuments()).toHaveLength(0);
-    expect(homeLoads).not.toHaveBeenCalled();
-    expect(await workbench.start("/")).toEqual({ status: "empty", href: "/" });
-  });
-
-  it("restores the native selected document at home without manufacturing another tab", async () => {
+  it("restores the active native selection with one lazy Router and no new tab", async () => {
     const first = setup();
+    await first.workbench.start();
     const a = await first.open("A");
     const b = await first.open("B");
-    await first.workbench.dispatch(Actions.moveNode(b.id, a.containerId, DockLocation.RIGHT, -1));
-    first.workbench.activate(b.id);
-    const second = setup(undefined, undefined, first.workbench.snapshot());
-    second.workbench.connectBrowser();
-    expect(await second.workbench.start("/")).toMatchObject({
-      status: "committed",
-      reused: true,
-      document: { id: b.id },
+    expect(
+      (
+        await first.workbench.dispatch(
+          Actions.moveNode(b.id, a.containerId!, DockLocation.RIGHT, -1),
+        )
+      ).status,
+    ).toBe("applied");
+    await first.workbench.activate(b.id);
+    const second = setup({ snapshot: first.workbench.createSnapshot() });
+    expect(second.routers).toHaveLength(0);
+    expect(await second.workbench.start()).toMatchObject({
+      status: "applied",
+      value: { document: { id: b.id } },
     });
-    expect(window.location.pathname).toBe("/documents/B");
     expect(second.workbench.getDocuments()).toHaveLength(2);
+    expect(second.routers).toHaveLength(1);
+  });
+
+  it("restores the selected comparison without expanding another copy's collapsed group", async () => {
+    const first = setup();
+    await first.workbench.start();
+    const original = await first.open("A");
+    expect(
+      (await first.workbench.dispatch(Actions.addTabToNewGroup(original.id, "Original"))).status,
+    ).toBe("applied");
+    const group = first.workbench.model.getNodeById(original.id)!.getParent()!;
+    expect(group).toBeInstanceOf(TabGroupNode);
+    const duplicate = await first.workbench.duplicate(original.id);
+    if (duplicate.status !== "applied") throw new Error(duplicate.status);
+    await first.workbench.dispatch(Actions.updateNodeAttributes(group.getId(), { opened: false }));
+    const second = setup({ snapshot: first.workbench.createSnapshot() });
+    expect(await second.workbench.start()).toMatchObject({
+      status: "applied",
+      value: { document: { id: duplicate.value.document.id } },
+    });
+    expect((second.workbench.model.getNodeById(group.getId()) as TabGroupNode).isOpened()).toBe(
+      false,
+    );
+    expect(second.routers).toHaveLength(1);
+    expect(second.workbench.getDocuments()).toHaveLength(2);
+  });
+
+  it("gives an explicit deep link priority over the restored selection", async () => {
+    const first = setup();
+    await first.workbench.start();
+    await first.open("A");
+    const second = setup({ snapshot: first.workbench.createSnapshot() });
+    expect(await second.workbench.start({ href: "/documents/B" })).toMatchObject({
+      status: "applied",
+      value: { document: { href: "/documents/B" } },
+    });
+    expect(second.workbench.getDocuments()).toHaveLength(2);
+  });
+
+  it("normalizes empty browser home to a retained restored document", async () => {
+    const first = setup();
+    await first.workbench.start();
+    const a = await first.open("A");
+    const second = setup({ snapshot: first.workbench.createSnapshot() });
+    window.history.replaceState({ __TSR_index: 0 }, "", "/");
+    expect(await second.workbench.start(browser())).toMatchObject({
+      status: "applied",
+      value: { document: { id: a.id } },
+    });
+    expect(window.location.pathname).toBe("/documents/A");
+    expect(second.workbench.getDocuments()).toHaveLength(1);
     expect(second.homeLoads).not.toHaveBeenCalled();
   });
 
-  it("restores the selected comparison instance at its URL without expanding another copy's group", async () => {
-    const first = setup();
-    const original = await first.open("A");
-    await first.workbench.dispatch(Actions.addTabToNewGroup(original.id, "Original"));
-    const group = first.internal.model.getNodeById(original.id)!.getParent()!;
-    expect(group).toBeInstanceOf(TabGroupNode);
-    const duplicate = await first.workbench.duplicate(original.id, {
-      target: original.containerId,
-    });
-    if (duplicate.status !== "committed") throw new Error(duplicate.status);
-    await first.workbench.dispatch(Actions.updateNodeAttributes(group.getId(), { opened: false }));
-    expect(first.workbench.getActiveDocument()?.id).toBe(duplicate.document.id);
-    const load = vi.fn<() => void>();
-    const second = setup(undefined, load, first.workbench.snapshot());
-    second.workbench.connectBrowser();
-
-    expect(await second.workbench.start(original.href)).toMatchObject({
-      status: "committed",
-      reused: true,
-      document: { id: duplicate.document.id },
-    });
-    expect(second.workbench.getActiveDocument()?.id).toBe(duplicate.document.id);
-    expect((second.internal.model.getNodeById(group.getId()) as TabGroupNode).isOpened()).toBe(
-      false,
-    );
-    expect(second.internal.documents.get(original.id)?.router).toBeUndefined();
-    expect(load).toHaveBeenCalledTimes(1);
-    expect(window.history.state["worksplit:default"].id).toBe(duplicate.document.id);
-    expect(second.workbench.getDocuments()).toHaveLength(2);
-  });
-
-  it("honors a different startup URL instead of the restored selected comparison", async () => {
-    const first = setup();
-    const original = await first.open("A");
-    const duplicate = await first.workbench.duplicate(original.id);
-    if (duplicate.status !== "committed") throw new Error(duplicate.status);
-    const second = setup(undefined, undefined, first.workbench.snapshot());
-    second.workbench.connectBrowser();
-
-    expect(await second.workbench.start("/documents/B")).toMatchObject({
-      status: "committed",
-      reused: false,
-      document: { href: "/documents/B" },
-    });
-    expect(second.internal.documents.get(original.id)?.router).toBeUndefined();
-    expect(second.internal.documents.get(duplicate.document.id)?.router).toBeUndefined();
-    expect(second.workbench.getDocuments()).toHaveLength(3);
-    expect(window.location.pathname).toBe("/documents/B");
-  });
-
-  it("revokes an older foreground admission but allows an explicitly background admission to settle", async () => {
-    const gate = deferred();
-    const { workbench } = setup(undefined, () => gate.promise);
-    const foreground = workbench.open(nav("A"));
-    const background = workbench.open(nav("B"), { background: true });
-    expect(await workbench.start("/")).toEqual({ status: "empty", href: "/" });
-    gate.resolve();
-    expect(await foreground).toEqual({ status: "superseded" });
-    expect(await background).toMatchObject({
-      status: "committed",
-      document: { href: "/documents/B" },
-    });
-    expect(workbench.getActiveDocument()).toBeNull();
-    expect(workbench.getDocuments()).toHaveLength(1);
-  });
-
-  it("does not steal tool or shell focus after a restored home target finishes loading", async () => {
-    const first = setup();
-    const a = await first.open("A");
-    const gate = deferred();
-    const second = setup(undefined, () => gate.promise, first.workbench.snapshot());
-    const starting = second.workbench.start("/");
-    second.internal.focus(null, "shell");
-    gate.resolve();
-    expect(await starting).toEqual({ status: "superseded" });
-    expect(second.workbench.getEditingContext()).toMatchObject({
-      activeTabId: null,
-      focusedArea: "shell",
-    });
-    expect(second.workbench.getDocuments()).toMatchObject([{ id: a.id }]);
-  });
-
-  it("does not overwrite a newer foreground navigation while restored home is loading", async () => {
-    const first = setup();
-    await first.open("A");
-    const gate = deferred();
-    const second = setup(
-      undefined,
-      (id) => (id === "A" ? gate.promise : undefined),
-      first.workbench.snapshot(),
-    );
-    second.workbench.connectBrowser();
-    const starting = second.workbench.start("/");
-    const b = await second.open("B");
-    gate.resolve();
-    expect(await starting).toEqual({ status: "superseded" });
-    expect(second.workbench.getActiveDocument()?.id).toBe(b.id);
-    expect(window.location.pathname).toBe("/documents/B");
-  });
-
-  it("refuses startup while history traversal owns an outstanding target", async () => {
-    const gate = deferred();
-    let slow = false;
-    const { workbench, open } = setup(undefined, (id) =>
-      slow && id === "A" ? gate.promise : undefined,
-    );
-    workbench.connectBrowser();
-    await workbench.start("/");
+  it("reuses a retained document when traversing an older empty-home anchor", async () => {
+    window.history.replaceState({ __TSR_index: 0 }, "", "/");
+    const { workbench, open, homeLoads } = setup();
+    await workbench.start(browser());
     const a = await open("A");
-    await open("B");
-    await workbench.close(a.id);
-    slow = true;
-    await traverse(-1);
-    expect(await workbench.start("/")).toEqual({ status: "rejected", reason: "history-busy" });
-    gate.resolve();
-    await vi.waitFor(() => expect(workbench.getActiveDocument()?.href).toBe("/documents/A"));
-  });
-
-  it("honors a live document hint even when its routed address equals the configured home", async () => {
-    const { workbench, open } = setup({ homeMode: "empty", home: "/documents/A" });
-    workbench.connectBrowser();
-    expect(await workbench.start("/documents/A")).toEqual({
-      status: "empty",
-      href: "/documents/A",
-    });
-    const a = await open("A");
-    await open("B");
-    await traverse(-1);
-    await vi.waitFor(() => expect(workbench.getActiveDocument()?.id).toBe(a.id));
-    expect(window.location.pathname).toBe("/documents/A");
-    expect(workbench.getDocuments()).toHaveLength(2);
-  });
-
-  it("awaits a restored Router already loading through its visible content binding", async () => {
-    const first = setup();
-    const a = await first.open("A");
-    const gate = deferred();
-    const second = setup(undefined, () => gate.promise, first.workbench.snapshot());
-    const loading = second.internal.loadDocument(a.id);
-    let settled = false;
-    const starting = second.workbench.start("/").then((result) => {
-      settled = true;
-      return result;
-    });
-    await Promise.resolve();
-    expect(settled).toBe(false);
-    gate.resolve();
-    await loading;
-    expect(await starting).toMatchObject({
-      status: "committed",
-      reused: true,
-      document: { id: a.id },
-    });
-  });
-
-  it("does not handle home entries outside its owned history scope", async () => {
-    const { workbench, open, onIssue, homeLoads } = setup();
-    workbench.connectBrowser();
-    await workbench.start("/");
-    const a = await open("A");
-    window.history.pushState(
-      { "worksplit:default": { scope: "another-workspace", index: 0 } },
-      "",
-      "/",
-    );
-    window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
-    expect(onIssue).toHaveBeenCalledWith(
-      expect.objectContaining({ code: "history-outside-scope" }),
-    );
+    window.history.back();
+    await vi.waitFor(() => expect(window.history.state["worksplit:home"].index).toBe(0));
+    await vi.waitFor(() => expect(window.location.pathname).toBe("/documents/A"));
     expect(workbench.getActiveDocument()?.id).toBe(a.id);
+    expect(workbench.getDocuments()).toHaveLength(1);
     expect(homeLoads).not.toHaveBeenCalled();
+  });
+
+  it("keeps a truly empty workspace empty after final close and browser Back/Forward", async () => {
+    window.history.replaceState({ __TSR_index: 0 }, "", "/");
+    const { workbench, open, homeLoads } = setup();
+    await workbench.start(browser());
+    const a = await open("A");
+    expect((await workbench.close(a.id)).status).toBe("applied");
+    expect(window.location.pathname).toBe("/");
+    window.history.back();
+    await vi.waitFor(() => expect(window.history.state["worksplit:home"].index).toBe(0));
+    window.history.forward();
+    await vi.waitFor(() => expect(window.history.state["worksplit:home"].index).toBe(1));
+    expect(workbench.getDocuments()).toHaveLength(0);
+    expect(workbench.getActiveDocument()).toBeNull();
+    expect(homeLoads).not.toHaveBeenCalled();
+  });
+
+  it("shares a pending restored initialization between identical start calls", async () => {
+    const first = setup();
+    await first.workbench.start();
+    const a = await first.open("A");
+    const gate = deferred();
+    const load = vi.fn<() => Promise<void>>(() => gate.promise);
+    const second = setup({ snapshot: first.workbench.createSnapshot(), load });
+    const pending = second.workbench.start();
+    expect(second.workbench.start()).toBe(pending);
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+    await integrationState(second.workbench).loadDocument(
+      second.workbench.getDocument(a.id)!.handle,
+    );
+    expect(load).toHaveBeenCalledTimes(1);
+    gate.resolve();
+    expect((await pending).status).toBe("applied");
   });
 });

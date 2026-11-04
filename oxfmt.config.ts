@@ -7,5 +7,12 @@ export default {
   sortImports: true,
   sortPackageJson: true,
   trailingComma: "all",
-  ignorePatterns: ["node_modules", "dist", "coverage", "packages/*/dist", "**/*.tsbuildinfo"],
+  ignorePatterns: [
+    "node_modules",
+    "dist",
+    "coverage",
+    "packages/*/dist",
+    "**/.turbo/**",
+    "**/*.tsbuildinfo",
+  ],
 } satisfies OxfmtConfig;

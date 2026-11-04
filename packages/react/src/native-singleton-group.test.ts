@@ -16,8 +16,8 @@ import {
 } from "flexlayout-react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createWorkbench, type NavigationResult } from "./index";
-import { integrationState } from "./integration";
+import { createWorkbench, type OpenResult } from "./index";
+import { integrationState } from "./internal";
 import { actionsIn } from "./native-layout";
 
 const disposals: (() => Promise<unknown>)[] = [];
@@ -26,11 +26,11 @@ afterEach(async () => {
   window.history.replaceState(null, "", "/");
 });
 
-function committed(result: NavigationResult) {
+function committed(result: OpenResult) {
   if (result.status === "failed") throw result.error;
-  expect(result.status).toBe("committed");
-  if (result.status !== "committed") throw new Error(`Document was ${result.status}`);
-  return result.document;
+  expect(result.status).toBe("applied");
+  if (result.status !== "applied") throw new Error(`Document was ${result.status}`);
+  return result.value.document;
 }
 
 async function setup() {
@@ -46,12 +46,13 @@ async function setup() {
     createRouter: (history: RouterHistory) =>
       createRouter({ routeTree, history, defaultPendingMinMs: 0 }),
   });
+  await workbench.start();
   disposals.push(() => workbench.dispose());
   const a = committed(await workbench.open({ href: "/documents/A" }));
   const b = committed(
     await workbench.open(
       { href: "/documents/B" },
-      { target: a.containerId, location: DockLocation.RIGHT },
+      { destination: { target: a.containerId!, location: DockLocation.RIGHT } },
     ),
   );
   const internal = integrationState(workbench);
@@ -62,18 +63,21 @@ async function setup() {
     options: { roleIds: ["staff"], closesAt: "2026-12-31T00:00:00Z" },
   };
   const lifetime = { decisions: 0, saves: 0, disposals: 0 };
-  internal.registerOwner(b.id, {
-    isDirty: () => true,
-    getCloseRevision: () => draft.revision,
-    beforeLeave: () => {
-      lifetime.decisions += 1;
-      return false;
-    },
-    save: () => {
-      lifetime.saves += 1;
+  internal.registerController(b.handle, {
+    controller: {
+      leave: {
+        getState: () => ({ hasUnsavedChanges: true, token: draft.revision }),
+        decide: () => {
+          lifetime.decisions += 1;
+          return { decision: "deny" };
+        },
+      },
+      save: () => {
+        lifetime.saves += 1;
+      },
     },
   });
-  internal.content(b.id).effect(({ defer }) => {
+  b.handle.runEffect(({ defer }) => {
     defer(() => {
       lifetime.disposals += 1;
     });
@@ -85,6 +89,8 @@ type Fixture = Awaited<ReturnType<typeof setup>>;
 async function group({ workbench, model, b }: Fixture) {
   expect(await workbench.dispatch(Actions.addTabToNewGroup(b.id, "Research", "#3366cc"))).toEqual({
     status: "applied",
+    value: undefined,
+    cleanupErrors: [],
   });
   const parent = model.getNodeById(b.id)?.getParent();
   if (!(parent instanceof TabGroupNode)) throw new Error("Expected native group");
@@ -121,34 +127,47 @@ describe("native singleton group removal", () => {
       const fixture = await setup();
       const { workbench, model, internal, a, b, draft, lifetime } = fixture;
       const originalTab = model.getNodeById(b.id);
-      const originalRouter = internal.documents.get(b.id)?.router;
+      const originalRouter =
+        internal.getRecord(b.id)?.role === "document"
+          ? (internal.getRecord(b.id) as import("./content-record").DocumentRecord).runtime?.router
+          : undefined;
       const originalDraft = structuredClone(draft);
-      expect(await workbench.dispatch(Actions.moveNode(b.id, a.containerId, location, -1))).toEqual(
-        {
-          status: "applied",
-        },
-      );
+      expect(
+        await workbench.dispatch(Actions.moveNode(b.id, a.containerId!, location, -1)),
+      ).toEqual({
+        status: "applied",
+        value: undefined,
+        cleanupErrors: [],
+      });
       const containerId = workbench.getDocument(b.id)!.containerId;
       const nativeGroup = await group(fixture);
 
       expect(await workbench.dispatch(Actions.removeTabFromGroup(b.id))).toEqual({
         status: "applied",
+        value: undefined,
+        cleanupErrors: [],
       });
       expect(internal.model).toBe(model);
       expect(model.getNodeById(b.id)).toBe(originalTab);
-      expect(model.getNodeById(b.id)?.getParent()).toBe(model.getNodeById(containerId));
-      expect(model.getNodeById(containerId)).toBeInstanceOf(TabSetNode);
+      expect(model.getNodeById(b.id)?.getParent()).toBe(model.getNodeById(containerId!));
+      expect(model.getNodeById(containerId!)).toBeInstanceOf(TabSetNode);
       expect(model.getNodeById(nativeGroup.getId())).toBeUndefined();
-      expect(Model.fromJson(workbench.getLayout()).getNodeById(b.id)).toBeInstanceOf(TabNode);
+      expect(Model.fromJson(workbench.createSnapshot().layout).getNodeById(b.id)).toBeInstanceOf(
+        TabNode,
+      );
       expect(workbench.getDocuments()).toHaveLength(2);
       expect(workbench.getActiveDocument()?.id).toBe(b.id);
-      expect(internal.documents.get(b.id)?.router).toBe(originalRouter);
+      expect(
+        internal.getRecord(b.id)?.role === "document"
+          ? (internal.getRecord(b.id) as import("./content-record").DocumentRecord).runtime?.router
+          : undefined,
+      ).toBe(originalRouter);
       expect(draft).toEqual(originalDraft);
       expect(lifetime).toEqual({ decisions: 0, saves: 0, disposals: 0 });
 
       await workbench.save(b.id);
       expect(lifetime.saves).toBe(1);
-      expect(await workbench.close(b.id)).toEqual({ status: "rejected", reason: "decision" });
+      expect(await workbench.close(b.id)).toEqual({ status: "denied", reason: "decision" });
       expect(lifetime.decisions).toBe(1);
       expect(lifetime.disposals).toBe(0);
       expect(workbench.getDocument(b.id)?.containerId).toBe(containerId);
@@ -163,13 +182,15 @@ describe("native singleton group removal", () => {
       await workbench.dispatch(
         Actions.updateNodeAttributes(nativeGroup.getId(), { opened: false }),
       ),
-    ).toEqual({ status: "applied" });
-    expect((model.getNodeById(b.containerId) as TabSetNode).getSelectedNode()).toBeUndefined();
+    ).toEqual({ status: "applied", value: undefined, cleanupErrors: [] });
+    expect((model.getNodeById(b.containerId!) as TabSetNode).getSelectedNode()).toBeUndefined();
 
     expect(await workbench.dispatch(Actions.removeTabFromGroup(b.id))).toEqual({
       status: "applied",
+      value: undefined,
+      cleanupErrors: [],
     });
-    expect((model.getNodeById(b.containerId) as TabSetNode).getSelectedNode()?.getId()).toBe(b.id);
+    expect((model.getNodeById(b.containerId!) as TabSetNode).getSelectedNode()?.getId()).toBe(b.id);
     expect(workbench.getActiveDocument()?.id).toBe(b.id);
   });
 
@@ -177,13 +198,20 @@ describe("native singleton group removal", () => {
     const fixture = await setup();
     const { workbench, model, b } = fixture;
     await group(fixture);
-    const c = committed(await workbench.open({ href: "/documents/C" }, { target: b.containerId }));
+    const c = committed(
+      await workbench.open(
+        { href: "/documents/C" },
+        { destination: { target: b.containerId!, location: DockLocation.CENTER } },
+      ),
+    );
     expect(workbench.getActiveDocument()?.id).toBe(c.id);
 
     expect(await workbench.dispatch(Actions.removeTabFromGroup(b.id))).toEqual({
       status: "applied",
+      value: undefined,
+      cleanupErrors: [],
     });
-    const tabset = model.getNodeById(b.containerId) as TabSetNode;
+    const tabset = model.getNodeById(b.containerId!) as TabSetNode;
     expect(tabset.getChildren().map((child) => child.getId())).toEqual([b.id, c.id]);
     expect(tabset.getSelectedNode()?.getId()).toBe(b.id);
     expect(workbench.getActiveDocument()?.id).toBe(b.id);
@@ -201,7 +229,11 @@ describe("native singleton group removal", () => {
     const observed: Action[] = [];
     model.addChangeListener((action) => observed.push(action));
 
-    expect(await workbench.dispatch(nested)).toEqual({ status: "applied" });
+    expect(await workbench.dispatch(nested)).toEqual({
+      status: "applied",
+      value: undefined,
+      cleanupErrors: [],
+    });
     expect(observed).toHaveLength(1);
     expect(observed[0]).toBeInstanceOf(GroupAction);
     expect(observed[0]).toBe(nested);
@@ -211,7 +243,7 @@ describe("native singleton group removal", () => {
     expect(leaves).toContain(remove);
     expect((model.getNodeById(a.id) as TabNode).getName()).toBe("Retained A");
     expect((model.getNodeById(a.id) as TabNode).isPinned()).toBe(true);
-    expect(model.getNodeById(b.id)?.getParent()).toBe(model.getNodeById(b.containerId));
+    expect(model.getNodeById(b.id)?.getParent()).toBe(model.getNodeById(b.containerId!));
     expect(lifetime).toEqual({ decisions: 0, saves: 0, disposals: 0 });
   });
 
@@ -219,17 +251,26 @@ describe("native singleton group removal", () => {
     const fixture = await setup();
     const { workbench, model, b } = fixture;
     const nativeGroup = await group(fixture);
-    const c = committed(await workbench.open({ href: "/documents/C" }, { target: b.containerId }));
+    const c = committed(
+      await workbench.open(
+        { href: "/documents/C" },
+        { destination: { target: b.containerId!, location: DockLocation.CENTER } },
+      ),
+    );
     expect(
       await workbench.dispatch(
         Actions.moveNode(c.id, nativeGroup.getId(), DockLocation.CENTER, -1),
       ),
-    ).toEqual({ status: "applied" });
+    ).toEqual({ status: "applied", value: undefined, cleanupErrors: [] });
     const original = Actions.group([Actions.group([Actions.removeTabFromGroup(b.id)])]);
     const observed: Action[] = [];
     model.addChangeListener((action) => observed.push(action));
 
-    expect(await workbench.dispatch(original)).toEqual({ status: "applied" });
+    expect(await workbench.dispatch(original)).toEqual({
+      status: "applied",
+      value: undefined,
+      cleanupErrors: [],
+    });
     expect(observed).toEqual([original]);
     expect(observed[0]).toBe(original);
     expect(
@@ -238,7 +279,7 @@ describe("native singleton group removal", () => {
         ?.getChildren()
         .map((child) => child.getId()),
     ).toEqual([c.id]);
-    expect(model.getNodeById(b.id)?.getParent()).toBe(model.getNodeById(b.containerId));
+    expect(model.getNodeById(b.id)?.getParent()).toBe(model.getNodeById(b.containerId!));
     expect(workbench.getActiveDocument()?.id).toBe(b.id);
   });
 
@@ -246,26 +287,31 @@ describe("native singleton group removal", () => {
     const fixture = await setup();
     const { workbench, model, a, b, draft, lifetime } = fixture;
     const nativeGroup = await group(fixture);
-    const c = committed(await workbench.open({ href: "/documents/C" }, { target: b.containerId }));
+    const c = committed(
+      await workbench.open(
+        { href: "/documents/C" },
+        { destination: { target: b.containerId!, location: DockLocation.CENTER } },
+      ),
+    );
     expect(
       await workbench.dispatch(
         Actions.moveNode(c.id, nativeGroup.getId(), DockLocation.CENTER, -1),
       ),
-    ).toEqual({ status: "applied" });
+    ).toEqual({ status: "applied", value: undefined, cleanupErrors: [] });
     const originalTab = model.getNodeById(b.id);
     const originalDraft = structuredClone(draft);
 
     expect(
       await workbench.dispatch(
         Actions.group([
-          Actions.moveNode(c.id, a.containerId, DockLocation.CENTER, -1),
+          Actions.moveNode(c.id, a.containerId!, DockLocation.CENTER, -1),
           Actions.group([Actions.removeTabFromGroup(b.id)]),
         ]),
       ),
-    ).toEqual({ status: "applied" });
+    ).toEqual({ status: "applied", value: undefined, cleanupErrors: [] });
     expect(model.getNodeById(b.id)).toBeDefined();
     expect(model.getNodeById(b.id)).toBe(originalTab);
-    expect(model.getNodeById(b.id)?.getParent()).toBe(model.getNodeById(b.containerId));
+    expect(model.getNodeById(b.id)?.getParent()).toBe(model.getNodeById(b.containerId!));
     expect(workbench.getDocuments()).toHaveLength(3);
     expect(workbench.getActiveDocument()?.id).toBe(b.id);
     expect(draft).toEqual(originalDraft);

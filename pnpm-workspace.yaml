@@ -6,6 +6,9 @@ allowBuilds:
 overrides:
   vite@*: npm:@voidzero-dev/vite-plus-core@1.2.0
 patchedDependencies:
+  "@tanstack/history@1.162.5": patches/@tanstack+history@1.162.5.patch
+  "@tanstack/router-core@1.171.39": patches/@tanstack+router-core@1.171.39.patch
+  "@tanstack/react-router@1.170.46": patches/@tanstack+react-router@1.170.46.patch
   flexlayout-react@0.11.1: patches/flexlayout-react@0.11.1.patch
 
 # Vite+ Core exposes Vite 8 APIs under the Vite+ version.
@@ -15,8 +18,8 @@ peerDependencyRules:
 
 minimumReleaseAgeExclude:
   - "@tanstack/history@1.162.5"
-  - "@tanstack/react-router@1.170.42"
-  - "@tanstack/router-core@1.171.35"
+  - "@tanstack/react-router@1.170.46"
+  - "@tanstack/router-core@1.171.39"
   - "@voidzero-dev/vite-plus-core@1.2.0"
   - "@voidzero-dev/vite-plus-darwin-arm64@1.2.0"
   - "@voidzero-dev/vite-plus-darwin-x64@1.2.0"
@@ -34,10 +37,10 @@ catalogs:
     capnweb: 0.12.0
     jsdom: ^30.1.2
   frontend:
-    flexlayout-react: ^0.11.1
-    "@tanstack/react-router": ^1.170.42
+    "@tanstack/react-hotkeys": ^0.16.0
+    flexlayout-react: 0.11.1
+    "@tanstack/react-router": 1.170.46
     "@tanstack/react-store": ^0.11.2
-    "@tanstack/react-hotkeys": ^0.13.0
     "@types/react": ^19.3.0
     "@types/react-dom": ^19.3.0
     react: ^19.3.0
@@ -52,3 +55,8 @@ catalogs:
     pncat: ^0.13.4
     typescript: ^7.0.2
     vite: npm:@voidzero-dev/vite-plus-core@1.2.0
+  internal:
+    "@worksplit/split-view": workspace:*
+  peer:
+    "@tanstack/react-router": 1.170.46
+    flexlayout-react: 0.11.1

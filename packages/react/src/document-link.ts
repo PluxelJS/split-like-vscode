@@ -1,6 +1,8 @@
 import {
   Actions,
+  BorderNode,
   DockLocation,
+  TabGroupNode,
   TabSetNode,
   type Action,
   type IJsonTabNode,
@@ -10,26 +12,15 @@ import {
 } from "flexlayout-react";
 import type { DragEvent } from "react";
 
-import type { NavigationResult, OpenDocumentOptions, WorkbenchDocument } from "./integration";
 import type { WorkbenchLayoutPolicy } from "./layout-policy";
+import { tabContainer } from "./native-layout";
+import type { Destination, DocumentLink, OpenOptions, OpenResult } from "./types";
 
-/** The same routed destination for a normal activation and an explicit drag handle. */
-export interface DocumentLink {
-  /** Deferred destinations have no URL until their resolver has completed. */
-  readonly href: string | undefined;
-  readonly options: Readonly<OpenDocumentOptions>;
-  open(overrides?: OpenDocumentOptions): Promise<NavigationResult>;
-  /** Bind only to an explicit draggable handle; keep the readable text selectable. */
-  dragStart(event: DragEvent<HTMLElement>): void;
-  dragEnd(): void;
-}
-
-export type DocumentLinkResultHandler = (result: NavigationResult) => void;
+type ResultHandler = (result: OpenResult) => void;
 export type DocumentLinkNavigator = (
-  options: OpenDocumentOptions,
+  options: OpenOptions,
   current: () => boolean,
-) => Promise<NavigationResult>;
-
+) => Promise<OpenResult>;
 const locations = [
   DockLocation.CENTER,
   DockLocation.LEFT,
@@ -37,25 +28,62 @@ const locations = [
   DockLocation.TOP,
   DockLocation.BOTTOM,
 ];
-type PendingDrag = {
+interface LayoutBinding {
+  getApi(): ILayoutApi | null;
+}
+interface PendingDrag {
   owner: object;
   json: IJsonTabNode;
   api: ILayoutApi;
-  open: (options: OpenDocumentOptions) => Promise<NavigationResult>;
-  notify: DocumentLinkResultHandler;
-};
+  binding: LayoutBinding;
+  drag: Node | undefined;
+  drop(destination: Destination, current: () => boolean): Promise<OpenResult>;
+  notify: ResultHandler;
+}
 
-/** Per-workbench bridge: native hit testing, followed by ordinary routed admission. */
+/** A short-lived insertion proof, including collapsed groups. It never determines insertion
+ * semantics: the destination keeps FlexLayout's original target, DockLocation and index. */
+function captureTarget(target: Node): () => boolean {
+  const entries: {
+    node: Node;
+    parent: Node | undefined;
+    children: Node[];
+    opened: boolean | undefined;
+  }[] = [];
+  const visit = (node: Node) => {
+    const children = [...node.getChildren()];
+    entries.push({
+      node,
+      parent: node.getParent(),
+      children,
+      opened: node instanceof TabGroupNode ? node.isOpened() : undefined,
+    });
+    children.forEach(visit);
+  };
+  visit(target);
+  return () =>
+    entries.every(({ node, parent, children, opened }) => {
+      const current = node.getChildren();
+      return (
+        node.getParent() === parent &&
+        current.length === children.length &&
+        current.every((child, index) => child === children[index]) &&
+        (!(node instanceof TabGroupNode) || node.isOpened() === opened)
+      );
+    });
+}
+
+/** Native hit testing and drag imagery feed the same routed admission as a real click. */
 export class DocumentLinkController {
-  private binding: { getApi: () => ILayoutApi | null } | undefined;
+  private binding: LayoutBinding | undefined;
   private pending: PendingDrag | undefined;
+  private readonly drops = new Map<object, object>();
   private disposed = false;
 
   constructor(
     private readonly model: Model,
     private readonly allowMove: (drag: Node, target: Node, location: DockLocation) => boolean,
     private readonly layoutPolicy: WorkbenchLayoutPolicy | undefined,
-    private readonly keep: (id: string) => WorkbenchDocument | null,
     private readonly report: (error: unknown) => void,
   ) {}
 
@@ -67,6 +95,7 @@ export class DocumentLinkController {
     return () => {
       if (this.binding !== binding) return;
       this.end();
+      this.drops.clear();
       this.binding = undefined;
     };
   }
@@ -74,48 +103,40 @@ export class DocumentLinkController {
   create(
     getHref: () => string | undefined,
     navigate: DocumentLinkNavigator,
-    options: OpenDocumentOptions,
-    onResult?: DocumentLinkResultHandler,
+    options: OpenOptions,
+    onResult?: ResultHandler,
   ): DocumentLink {
     const owner = {};
-    const captured = Object.freeze({
+    const captured: OpenOptions = Object.freeze({
       ...options,
-      ...(options.placement ? { placement: Object.freeze({ ...options.placement }) } : {}),
+      ...(options.destination && typeof options.destination !== "function"
+        ? { destination: Object.freeze({ ...options.destination }) }
+        : {}),
     });
-    const notify = (result: NavigationResult) => {
+    const notify: ResultHandler = (result) => {
       try {
         onResult?.(result);
       } catch (error) {
         this.report(error);
       }
     };
-    const execute = async (
-      overrides: OpenDocumentOptions = {},
-      dropped = false,
-      binding = this.binding,
-    ): Promise<NavigationResult> => {
-      let result: NavigationResult;
+    const execute = async (requested: OpenOptions, current: () => boolean): Promise<OpenResult> => {
+      let result: OpenResult;
       try {
-        if (this.disposed) result = { status: "rejected", reason: "closed" };
-        else {
-          const requested = { ...captured, ...overrides };
-          if (dropped) {
-            delete requested.placement;
-            requested.preview = false;
-            requested.preserveFocus = false;
-            requested.background = false;
-          }
-          result = await navigate(
-            requested,
-            () => !this.disposed && (!dropped || this.binding === binding),
-          );
-          if (dropped && result.status === "committed") {
-            const document = this.keep(result.document.id);
-            if (document) result = { ...result, document };
-          }
-        }
+        result = this.disposed
+          ? { status: "denied", reason: "not-ready" }
+          : !current()
+            ? { status: "superseded" }
+            : await navigate(requested, () => !this.disposed && current());
       } catch (error) {
-        result = { status: "failed", stage: "load", error };
+        result = {
+          status: "failed",
+          phase: "prepare",
+          error,
+          changes: "none",
+          affectedIds: [],
+          cleanupErrors: [],
+        };
       }
       notify(result);
       return result;
@@ -124,31 +145,29 @@ export class DocumentLinkController {
       get href() {
         return getHref();
       },
-      options: captured,
-      open: (overrides?: OpenDocumentOptions) => execute(overrides),
+      open: (overrides?: OpenOptions) =>
+        execute({ ...captured, ...overrides } as OpenOptions, () => true),
       dragStart: (event: DragEvent<HTMLElement>) => {
         if (event.defaultPrevented) return;
+        this.drops.delete(owner);
         const binding = this.binding;
         const api = binding?.getApi();
-        if (this.disposed || !api) {
+        if (this.disposed || !binding || !api) {
           event.preventDefault();
-          notify({ status: "rejected", reason: "closed" });
           return;
         }
         this.end();
         const label =
-          event.currentTarget.closest("[aria-label]")?.getAttribute("aria-label") ||
+          event.currentTarget.getAttribute("aria-label") ||
           event.currentTarget.title ||
-          event.currentTarget.parentElement?.textContent?.trim() ||
+          event.currentTarget.textContent?.trim() ||
           getHref() ||
           "Open document";
-        // Native add-drag uses a detached TabNode for hit testing. This JSON is never
-        // admitted by dispatch; only the exact active descriptor can request open().
+        // The detached native TabNode exists only for hit testing. Public dispatch never admits it.
         const json: IJsonTabNode = {
           id: `worksplit-drag:${crypto.randomUUID()}`,
           name: label,
-          component: "worksplit.document",
-          config: getHref() ? { href: getHref() } : {},
+          component: "worksplit:document",
           enableFloat: false,
           enablePopout: false,
         };
@@ -156,8 +175,19 @@ export class DocumentLinkController {
           owner,
           json,
           api,
-          open: (placement) => execute(placement, true, binding),
+          binding,
+          drag: undefined,
           notify,
+          drop: (destination, current) =>
+            execute(
+              {
+                presentation: "activate",
+                preview: false,
+                ...captured,
+                destination,
+              } as OpenOptions,
+              current,
+            ),
         };
         this.pending = pending;
         try {
@@ -170,25 +200,30 @@ export class DocumentLinkController {
         } catch (error) {
           this.end(owner);
           event.preventDefault();
-          notify({ status: "failed", stage: "load", error });
+          this.report(error);
         }
       },
-      dragEnd: () => this.end(owner),
+      // The browser emits dragend after an accepted drop too. Only a still-pending drag is canceled.
+      dragEnd: (_event: DragEvent<HTMLElement>) => this.end(owner),
     });
   }
 
-  /** Undefined means this is an ordinary native move, owned by the existing policy. */
-  allowsDrop(drag: Node, target: Node, location: DockLocation): boolean | undefined {
+  /** Undefined leaves an ordinary native move with the workspace's normal drop policy. */
+  allowsDrop(drag: Node, target: Node, location: DockLocation, index = -1): boolean | undefined {
     const pending = this.pending;
     if (!pending || drag.getId() !== pending.json.id) return undefined;
+    if (pending.drag && pending.drag !== drag) return false;
+    pending.drag = drag;
     return (
+      this.binding === pending.binding &&
+      pending.binding.getApi() === pending.api &&
       this.isTarget(target, location) &&
       this.allowMove(drag, target, location) &&
-      this.allowsAdmission(pending.json, target, location)
+      this.allowsAdmission(pending.json, target, location, index)
     );
   }
 
-  /** Called only by Layout's private onAction bridge, never by public dispatch. */
+  /** Called exclusively from Layout's intercepted onAction, never from public dispatch. */
   consume(action: Action): boolean {
     const pending = this.pending;
     if (!pending || action.type !== Actions.ADD_TAB || action.data.json !== pending.json)
@@ -197,39 +232,71 @@ export class DocumentLinkController {
     try {
       const target = this.model.getNodeById(action.data.toNode as string);
       const location = locations.find((value) => value.getName() === action.data.location);
+      const index = action.data.index as number;
+      if (!Number.isInteger(index) || index < -1) {
+        pending.notify({ status: "denied", reason: "invalid-argument" });
+        return true;
+      }
       if (
         !target ||
         !location ||
+        !pending.drag ||
         !this.isTarget(target, location) ||
-        !this.allowsAdmission(pending.json, target, location)
+        !this.allowMove(pending.drag, target, location) ||
+        !this.allowsAdmission(pending.json, target, location, index)
       ) {
-        pending.notify({ status: "rejected", reason: "layout-policy" });
+        pending.notify({ status: "denied", reason: "layout-policy" });
         return true;
       }
-      void pending.open({ target: target.getId(), location });
+      const unchanged = captureTarget(target);
+      const attempt = {};
+      this.drops.set(pending.owner, attempt);
+      const current = () =>
+        this.drops.get(pending.owner) === attempt &&
+        this.binding === pending.binding &&
+        pending.binding.getApi() === pending.api &&
+        this.isTarget(target, location) &&
+        unchanged() &&
+        this.allowMove(pending.drag!, target, location) &&
+        this.allowsAdmission(pending.json, target, location, index);
+      void pending.drop({ target: target.getId(), location, index }, current).finally(() => {
+        if (this.drops.get(pending.owner) === attempt) this.drops.delete(pending.owner);
+      });
     } catch (error) {
-      pending.notify({ status: "failed", stage: "load", error });
+      pending.notify({
+        status: "failed",
+        phase: "prepare",
+        error,
+        changes: "none",
+        affectedIds: [],
+        cleanupErrors: [],
+      });
     }
     return true;
   }
 
-  private isTarget(target: Node, location: DockLocation): target is TabSetNode {
-    if (
-      !(target instanceof TabSetNode) ||
-      this.model.getNodeById(target.getId()) !== target ||
-      !locations.includes(location)
-    )
+  private isTarget(target: Node, location: DockLocation): boolean {
+    if (this.model.getNodeById(target.getId()) !== target || !locations.includes(location))
       return false;
+    if (target instanceof TabGroupNode) {
+      if (location !== DockLocation.CENTER) return false;
+      const container = tabContainer(target);
+      return !!container && this.isTarget(container, DockLocation.CENTER);
+    }
+    if (target instanceof BorderNode) {
+      return location === DockLocation.CENTER;
+    }
+    if (!(target instanceof TabSetNode)) return false;
     let root: Node = target;
     while (root.getParent()) root = root.getParent()!;
     return root === this.model.getRootRow();
   }
 
-  private allowsAdmission(json: IJsonTabNode, target: Node, location: DockLocation) {
+  private allowsAdmission(json: IJsonTabNode, target: Node, location: DockLocation, index: number) {
     return (
       this.layoutPolicy?.allowsAction(
         this.model,
-        Actions.addTab(json, target.getId(), location, -1, false),
+        Actions.addTab(json, target.getId(), location, index, false),
       ) ?? true
     );
   }
@@ -245,9 +312,10 @@ export class DocumentLinkController {
     }
   }
 
-  dispose() {
+  dispose(): void {
     this.disposed = true;
     this.end();
+    this.drops.clear();
     this.binding = undefined;
   }
 }

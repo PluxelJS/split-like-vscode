@@ -1,25 +1,24 @@
 # Content resources and Cap’n Web
 
-Use `useWorkbenchContent(lifecycle?)` for editing decisions and `content.effect(setup)` for
+Use `useContentController({ leave, save, focus })` for editing decisions and `content.runEffect(setup)` for
 resources that must stop when their React effect or content ends. React owns dependencies;
 Worksplit tracks cleanup through content close and host disposal. Shared services, drafts,
 protocol rules and resource creation remain application owned. Worksplit has no runtime Cap’n Web
 dependency.
 
-Start with [content decisions](../README.md#content-decisions-commands-and-resources) for dirty
+Start with [content decisions](../README.md#editing-and-resources) for dirty
 guards, save commands and shutdown.
 
 ## Choose the owner
 
-| Resource                                               | Owner and release boundary                                               |
-| ------------------------------------------------------ | ------------------------------------------------------------------------ |
-| Application connection, shared draft or shared service | The host; a page releases only its own reference or subscription         |
-| Page capability and its subscriptions                  | One `content.effect`; end on React cleanup, manual stop or content close |
-| Component-local request or visual effect               | Ordinary React effect when it need not join Worksplit close settlement   |
-| Job intended to continue after closing a tab           | Application owner with its own completion and cancellation policy        |
+| Resource                                               | Owner and release boundary                                                  |
+| ------------------------------------------------------ | --------------------------------------------------------------------------- |
+| Application connection, shared draft or shared service | The host; a page releases only its own reference or subscription            |
+| Page capability and its subscriptions                  | One `content.runEffect`; end on React cleanup, manual stop or content close |
+| Component-local request or visual effect               | Ordinary React effect when it need not join Worksplit close settlement      |
+| Job intended to continue after closing a tab           | Application owner with its own completion and cancellation policy           |
 
-A content can have one editing owner and several independent resource effects. Calling the hook
-without a lifecycle does not claim editing ownership. Put the editing owner in the persistent
+A content can have one editing owner and several independent resource effects. Calling `useContent()` does not claim editing ownership. Put the editing owner in the persistent
 document root that decides whether the user may leave. A child route or hidden region manages
 its own resources. With Activity or Suspense, React may clean effects while keeping component
 state; those resources are reacquired when React runs setup again. The persistent root keeps dirty
@@ -36,9 +35,9 @@ only a reference. Snapshots contain locations and layout, never live capabilitie
 A subscription needs only the native React dependency list and a registered cleanup:
 
 ```tsx
-const content = useWorkbenchContent();
+const content = useContent();
 useEffect(
-  () => content.effect(({ defer }) => defer(service.subscribe(onChange))),
+  () => content.runEffect(({ defer }) => defer(service.subscribe(onChange))),
   [content, service, onChange],
 );
 ```
@@ -54,7 +53,7 @@ The interfaces describe the application's RPC contract; server implementations e
 Mount this component inside a Worksplit document or tool:
 
 ```tsx
-import { useWorkbenchContent } from "@worksplit/react";
+import { useContent } from "@worksplit/react";
 import type { RpcStub, RpcTarget } from "capnweb";
 import { useEffect, useState } from "react";
 
@@ -72,12 +71,12 @@ export function DocumentPage({
   api: RpcStub<DocumentApi>;
   documentId: string;
 }) {
-  const content = useWorkbenchContent();
+  const content = useContent();
   const [title, setTitle] = useState("Opening document…");
 
   useEffect(
     () =>
-      content.effect(async ({ signal, defer }) => {
+      content.runEffect(async ({ signal, defer }) => {
         setTitle("Opening document…");
         const session = await api.openDocument(documentId);
         defer(() => session[Symbol.dispose]());
@@ -104,7 +103,7 @@ to present them inline. It does not need a general cleanup `finally` or a second
 
 ## Stop, close and error ownership
 
-`effect` runs setup at the call and returns an idempotent synchronous stop function, directly usable
+`runEffect` runs setup at the call and returns an idempotent synchronous stop function, directly usable
 as React cleanup. Start it inside an effect or an event handler, never during render. An event
 handler's effect remains owned by the content until stop or content close; component unmount alone
 does not call an event handler's stop.
@@ -113,7 +112,7 @@ Each deferred cleanup runs once. Resources already registered in the same effect
 acquisition order; failure does not skip the rest. Different effects have no ordering relationship.
 Place resources with a required release order in the same effect. A late `defer` starts independent
 cleanup immediately and cannot recreate a finished effect. An old content handle cannot start work
-or commands after close, including when a new tab reuses the same id.
+after close, including when a new tab reuses the same id.
 
 Refused, canceled or invalidated closing leaves effects and resources running. After approved
 native removal, close fixes its waiting set before calling abort listeners or cleanup: all cleanup

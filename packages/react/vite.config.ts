@@ -32,11 +32,12 @@ export default defineConfig({
       minify: true,
     },
     deps: {
-      neverBundle: ["react", "react/jsx-runtime", "react-dom", "@worksplit/core"],
+      neverBundle: ["react", "react/jsx-runtime", "react-dom"],
     },
     exports: {
       customExports(exports, { isPublish }) {
         exports["./style.css"] = isPublish ? "./dist/style.css" : "./src/style.css";
+        exports["./native-dependencies/install.mjs"] = "./native-dependencies/install.mjs";
         return exports;
       },
       devExports: "development",
@@ -45,26 +46,29 @@ export default defineConfig({
   run: {
     tasks: {
       compile: {
-        command: "vp pack",
-        dependsOn: ["@worksplit/core#compile"],
+        command: "vp pack && node ../../scripts/native-dependency-artifact.mjs native-dependencies",
         cache: {
           input: [
             { auto: true },
             { pattern: "../../tsconfig.base.json", base: "package" },
+            { pattern: "../../patches/**", base: "package" },
+            { pattern: "../../scripts/native-dependency-*.mjs", base: "package" },
             { pattern: "../../mise.toml", base: "package" },
             { pattern: "mise.toml", base: "workspace" },
           ],
           env: ["CI", "NODE_ENV"],
-          output: ["dist/**"],
+          output: ["dist/**", "native-dependencies/**"],
         },
       },
       "check-tests": {
-        command: "vp test run --maxWorkers=2",
-        dependsOn: ["@worksplit/core#compile"],
+        command: "vp test run --maxWorkers=1 --no-file-parallelism",
         cache: {
           input: [
             { auto: true },
+            { pattern: "../demo/src/examples/**", base: "package" },
             { pattern: "../../tsconfig.base.json", base: "package" },
+            { pattern: "../../patches/**", base: "package" },
+            { pattern: "../../scripts/native-dependency-*.mjs", base: "package" },
             { pattern: "../../mise.toml", base: "package" },
             { pattern: "mise.toml", base: "workspace" },
           ],
@@ -74,12 +78,14 @@ export default defineConfig({
       },
       "check-types": {
         command:
-          "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.registered-consumer.json --noEmit",
-        dependsOn: ["@worksplit/core#compile"],
+          "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.registered-consumer.json --noEmit",
         cache: {
           input: [
             { auto: true },
+            { pattern: "../demo/src/examples/**", base: "package" },
             { pattern: "../../tsconfig.base.json", base: "package" },
+            { pattern: "../../patches/**", base: "package" },
+            { pattern: "../../scripts/native-dependency-*.mjs", base: "package" },
             { pattern: "../../mise.toml", base: "package" },
             { pattern: "mise.toml", base: "workspace" },
           ],

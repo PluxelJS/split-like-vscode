@@ -2,6 +2,7 @@ node_modules
 dist
 coverage
 .vite
+.turbo
 .DS_Store
 *.local
 pitchfork.local.toml
@@ -9,3 +10,5 @@ pitchfork.local.toml
 
 test-results
 playwright-report
+
+packages/react/native-dependencies

@@ -38,7 +38,8 @@ it("shares one route definition across independent routers, including redirects 
     history: createMemoryHistory({ initialEntries: ["/alias"] }),
     defaultPendingMinMs: 0,
   });
-  await Promise.all([a.load(), b.load()]);
+  await a.load();
+  await b.load();
   await waitFor(() => expect(b.state.location.pathname).toBe("/docs/B"));
   expect(a.state.matches.at(-1)?.loaderData).toBe("A");
   expect(b.state.matches.at(-1)?.loaderData).toBe("B");
@@ -52,4 +53,6 @@ it("shares one route definition across independent routers, including redirects 
   });
   expect(screen.getByText("A")).toBeTruthy();
   expect(screen.getByText("B")).toBeTruthy();
+  a.history.destroy();
+  b.history.destroy();
 });

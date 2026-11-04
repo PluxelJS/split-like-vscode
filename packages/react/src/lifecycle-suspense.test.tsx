@@ -3,7 +3,13 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { Activity, createContext, StrictMode, Suspense, useContext, useLayoutEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createWorkbench, useWorkbenchContent, Workbench, type WorkbenchInstance } from "./index";
+import {
+  createWorkbench,
+  useContent,
+  useContentController,
+  Workbench,
+  type WorkbenchInstance,
+} from "./index";
 
 const instances: WorkbenchInstance<AnyRouter>[] = [];
 interface Scope {
@@ -32,17 +38,18 @@ beforeEach(() => {
 });
 afterEach(async () => {
   cleanup();
-  await Promise.all(instances.splice(0).map((instance) => instance.dispose()));
+  // eslint-disable-next-line no-await-in-loop -- Finish each owned session before tearing down the next.
+  for (const instance of instances.splice(0)) await instance.dispose();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 function Resources() {
   const scope = useContext(ScopeContext)!;
-  const content = useWorkbenchContent();
+  const content = useContent();
   const acquire = scope.acquire;
   useLayoutEffect(
-    () => content.effect(({ signal, defer }) => defer(acquire(signal))),
+    () => content.runEffect(({ signal, defer }) => defer(acquire(signal))),
     [content, acquire],
   );
   if (scope.pending) throw scope.pending;
@@ -50,10 +57,11 @@ function Resources() {
 }
 function DocumentRoot() {
   const scope = useContext(ScopeContext)!;
-  useWorkbenchContent({
-    isDirty: () => true,
-    getCloseRevision: () => 0,
-    beforeLeave: scope.decide,
+  useContentController({
+    leave: {
+      getState: () => ({ hasUnsavedChanges: true, token: 0 }),
+      decide: () => (scope.decide() ? { decision: "allow", token: 0 } : { decision: "deny" }),
+    },
   });
   return (
     <>
@@ -66,7 +74,7 @@ function DocumentRoot() {
     </>
   );
 }
-function setup(strict: boolean) {
+async function setup(strict: boolean) {
   const signals: AbortSignal[] = [];
   const released = vi.fn<(index: number) => void>();
   const decide = vi.fn<() => boolean>(() => false);
@@ -80,18 +88,24 @@ function setup(strict: boolean) {
   const workbench = createWorkbench({
     createRouter: (history) => createRouter({ routeTree: root, history }),
     onIssue,
-    tools: [{ id: "editor", render: () => <DocumentRoot /> }],
-    layout: {
+    tools: { editor: { render: () => <DocumentRoot /> } },
+    initial: {
       layout: {
-        children: [{ type: "tabset", children: [{ id: "editor", component: "worksplit.tool" }] }],
+        layout: {
+          type: "row",
+          children: [
+            { type: "tabset", children: [{ type: "tab", id: "editor", component: "editor" }] },
+          ],
+        },
       },
     },
   });
   instances.push(workbench);
+  await workbench.start();
   const element = (value: Scope) => {
     const child = (
       <ScopeContext.Provider value={value}>
-        <Workbench workbench={workbench} />
+        <Workbench instance={workbench} />
       </ScopeContext.Provider>
     );
     return strict ? <StrictMode>{child}</StrictMode> : child;
@@ -108,7 +122,7 @@ describe("persistent editing owner with hidden resource children", () => {
   it.each([false, true])(
     "keeps dirty close protection during Activity hiding and reacquires on reveal (StrictMode: %s)",
     async (strict) => {
-      const { workbench, update, signals, released, decide, onIssue } = setup(strict);
+      const { workbench, update, signals, released, decide, onIssue } = await setup(strict);
       await screen.findByRole("textbox", { name: "Resource editor" });
       const initial = signals.length;
       const replayReleases = released.mock.calls.length;
@@ -116,13 +130,13 @@ describe("persistent editing owner with hidden resource children", () => {
       expect(signals.at(-1)?.aborted).toBe(true);
       expect(released).toHaveBeenCalledTimes(replayReleases + 1);
       expect(screen.getByText("Persistent editing owner")).toBeDefined();
-      expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
+      expect(await workbench.close("editor")).toEqual({ status: "denied", reason: "decision" });
       expect(decide).toHaveBeenCalledTimes(1);
       await update({ mode: "visible" });
       await screen.findByRole("textbox", { name: "Resource editor" });
       expect(signals.length).toBeGreaterThan(initial);
       expect(signals.at(-1)?.aborted).toBe(false);
-      expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
+      expect(await workbench.close("editor")).toEqual({ status: "denied", reason: "decision" });
       expect(onIssue).not.toHaveBeenCalled();
       await act(async () => {
         await workbench.dispose();
@@ -134,7 +148,7 @@ describe("persistent editing owner with hidden resource children", () => {
   it.each([false, true])(
     "keeps dirty close protection while Suspense cleans and restores child layout effects (StrictMode: %s)",
     async (strict) => {
-      const { workbench, update, signals, released, decide, onIssue } = setup(strict);
+      const { workbench, update, signals, released, decide, onIssue } = await setup(strict);
       await screen.findByRole("textbox", { name: "Resource editor" });
       const initial = signals.length;
       const replayReleases = released.mock.calls.length;
@@ -146,14 +160,14 @@ describe("persistent editing owner with hidden resource children", () => {
       expect(screen.getByText("Resource area suspended")).toBeDefined();
       expect(signals.at(-1)?.aborted).toBe(true);
       expect(released).toHaveBeenCalledTimes(replayReleases + 1);
-      expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
+      expect(await workbench.close("editor")).toEqual({ status: "denied", reason: "decision" });
       expect(decide).toHaveBeenCalledTimes(1);
       resolve();
       await update({ pending: undefined });
       await screen.findByRole("textbox", { name: "Resource editor" });
       expect(signals.length).toBeGreaterThan(initial);
       expect(signals.at(-1)?.aborted).toBe(false);
-      expect(await workbench.close("editor")).toEqual({ status: "rejected", reason: "decision" });
+      expect(await workbench.close("editor")).toEqual({ status: "denied", reason: "decision" });
       expect(onIssue).not.toHaveBeenCalled();
       await act(async () => {
         await workbench.dispose();

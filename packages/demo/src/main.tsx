@@ -1,816 +1,304 @@
 import {
-  createRootRouteWithContext,
+  Outlet,
+  createRootRoute,
   createRoute,
   createRouter,
-  Link,
-  Outlet,
-  redirect,
-  useBlocker,
-  type RouterHistory,
+  useRouter,
+  useRouterState,
+  type AnyRouter,
 } from "@tanstack/react-router";
-import { createStore, useStore } from "@tanstack/react-store";
-import {
-  createWorkbench,
-  Workbench,
-  useWorkbenchContent,
-  useWorkbenchState,
-  type NavigationResult,
-  type DispatchResult,
-  type WorkbenchInstance,
-} from "@worksplit/react";
-import {
-  Actions,
-  ContextMenuBuilder,
-  DockLocation,
-  PopupMenu,
-  type IPopupMenuProps,
-  type IJsonModel,
-  type IJsonRowNode,
-  type IJsonTabSetNode,
-} from "flexlayout-react";
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { createWorkbench, Workbench, useWorkbenchState, useContent } from "@worksplit/react";
+import { Actions, DockLocation } from "flexlayout-react";
+import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import "flexlayout-react/style/dark.css";
+import {
+  BrowserExample,
+  createBrowserWorkbench,
+  clearBrowserSnapshot,
+  type BrowserInstance,
+} from "./examples/browser";
+import {
+  createLifecycleWorkbench,
+  LifecycleExample,
+  type LifecycleSession,
+} from "./examples/browser-regressions";
+import { Editor, EditorDocument } from "./examples/editor";
+import { createReadOnlyWorkbench, ReadOnlyExample } from "./examples/read-only";
+import { SplitViewExample } from "./examples/split-view";
+import { createToolsWorkbench, ToolsExample } from "./examples/tools";
+
+import "flexlayout-react/style/light.css";
 import "@worksplit/react/style.css";
-import "./styles.css";
+import "./public-api.css";
 
-const metrics = {
-  requests: 0,
-  renders: 0,
-  mounts: 0,
-  unmounts: 0,
-  subscriptions: 0,
-  routersCreated: 0,
-  liveRouters: 0,
-  disposed: 0,
-};
-const subscribers = new Set<() => void>();
-const histories = new Set<RouterHistory>();
-function readMetrics() {
-  return {
-    ...metrics,
-    historySubscriptions: [...histories].reduce(
-      (total, history) => total + history.subscribers.size,
-      0,
-    ),
-  };
-}
-const service = {
-  subscribe(listener: () => void) {
-    subscribers.add(listener);
-    ++metrics.subscriptions;
+const editorRouters = new Map<string, AnyRouter>();
+function EditorRoot() {
+  const content = useContent();
+  const router = useRouter();
+  useEffect(() => {
+    editorRouters.set(content.id, router);
     return () => {
-      subscribers.delete(listener);
-      --metrics.subscriptions;
+      editorRouters.delete(content.id);
     };
-  },
-};
-type Decision = {
-  requestId: number;
-  id: string;
-  reason: string;
-  resolve: (allow: boolean) => void;
-};
-const decisions = createStore<Decision[]>([]);
-const messages = createStore<{ id: number; text: string }[]>([]);
-let nextMessage = 0;
-let nextDecision = 0;
-function message(text: string) {
-  messages.setState((values) => [...values.slice(-9), { id: ++nextMessage, text }]);
-}
-function confirmLeave(id: string, reason: string) {
-  return new Promise<boolean>((resolve) =>
-    decisions.setState((values) => [...values, { requestId: ++nextDecision, id, reason, resolve }]),
-  );
-}
-
-const rootRoute = createRootRouteWithContext<{ service: typeof service }>()({
-  component: Outlet,
-  errorComponent: ({ error }) => <div role="alert">Route failed: {String(error)}</div>,
-});
-const homeRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/",
-  component: () => (
-    <div className="document-page">
-      <h1>Welcome to Worksplit</h1>
-      <p>Open two documents from the workspace navigation.</p>
-    </div>
-  ),
-  staticData: { worksplit: { title: "Welcome", navigationKey: "home" } },
-});
-const documentRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/documents/$id",
-  validateSearch: (search: Record<string, unknown>) => ({
-    view: typeof search.view === "string" ? search.view : "edit",
-    delay: typeof search.delay === "number" ? search.delay : 0,
-  }),
-  loaderDeps: ({ search }) => ({ delay: search.delay }),
-  loader: async ({ params, deps, abortController }) => {
-    ++metrics.requests;
-    if (params.id === "error") throw new Error("Deliberate loader failure");
-    const response = await fetch(
-      `/api/documents/${encodeURIComponent(params.id)}?delay=${deps.delay}`,
-      { signal: abortController.signal },
-    );
-    if (!response.ok) throw new Error(`Document request failed: ${response.status}`);
-    return (await response.json()) as { id: string; text: string };
-  },
-  remountDeps: ({ params }) => params.id,
-  component: DocumentPage,
-  staticData: { worksplit: { title: "Document", navigationKey: "documents" } },
-});
-const detailsRoute = createRoute({
-  getParentRoute: () => documentRoute,
-  path: "/details",
-  component: () => (
-    <p data-testid="nested-route">Nested Outlet for {documentRoute.useParams().id}</p>
-  ),
-});
-const aliasRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/alias-b",
-  beforeLoad: () => {
-    throw redirect({
-      to: "/documents/$id",
-      params: { id: "B" },
-      search: { view: "edit", delay: 0 },
-    });
-  },
-});
-const brokenRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/broken",
-  component: () => {
-    throw new Error("Deliberate renderer failure");
-  },
-  staticData: { worksplit: { title: "Broken", navigationKey: "errors" } },
-});
-const routeTree = rootRoute.addChildren([
-  homeRoute,
-  documentRoute.addChildren([detailsRoute]),
-  aliasRoute,
-  brokenRoute,
-]);
-function makeRouter(history: RouterHistory) {
-  histories.add(history);
-  ++metrics.routersCreated;
-  ++metrics.liveRouters;
-  const destroy = history.destroy.bind(history);
-  let live = true;
-  history.destroy = () => {
-    if (live) {
-      live = false;
-      --metrics.liveRouters;
-      histories.delete(history);
-    }
-    destroy();
-  };
-  return createRouter({
-    routeTree,
-    history,
-    context: { service },
-    defaultStaleTime: Infinity,
-    defaultPendingMinMs: 0,
-    defaultPendingMs: 50,
-    scrollRestoration: false,
-  });
-}
-type DemoRouter = ReturnType<typeof makeRouter>;
-declare module "@tanstack/react-router" {
-  interface Register {
-    router: DemoRouter;
-  }
-}
-
-function DocumentPage() {
-  useEffect(() => {
-    ++metrics.renders;
-  });
-  const { id } = documentRoute.useParams();
-  const search = documentRoute.useSearch();
-  const data = documentRoute.useLoaderData();
-  const { service: shared } = documentRoute.useRouteContext();
-  const [draft, setDraft] = useState("");
-  const [guard, setGuard] = useState(false);
-  const input = useRef<HTMLTextAreaElement>(null);
-  const editing = useRef({ version: 0, saved: "", draft: "" });
-  useBlocker({ shouldBlockFn: () => guard, enableBeforeUnload: false });
-  const content = useWorkbenchContent({
-    isDirty: () => editing.current.draft !== editing.current.saved,
-    getCloseRevision: () => editing.current.version,
-    beforeLeave: async (reason) => {
-      const version = editing.current.version;
-      const allowed = await confirmLeave(id, reason);
-      return allowed && version === editing.current.version;
-    },
-    focus: () => input.current?.focus({ preventScroll: true }),
-    save: async () => {
-      const version = editing.current.version;
-      const text = editing.current.draft;
-      await new Promise((resolve) => setTimeout(resolve, 60));
-      if (id === "save-error") throw new Error("Deliberate save failure");
-      if (version === editing.current.version) {
-        editing.current.saved = text;
-        message(`Saved ${id}`);
-      }
+  }, [content, router]);
+  const resource = useRouterState({
+    router,
+    select: (state) => {
+      const match = state.resolvedLocation
+        ? router
+            .matchRoutes(state.resolvedLocation)
+            .find((value) => value.routeId === editorRoute.id)
+        : undefined;
+      return match ? String(match.params.name) : null;
     },
   });
-  useEffect(
-    () =>
-      content.effect(({ defer }) => {
-        ++metrics.mounts;
-        defer(shared.subscribe(() => {}));
-        defer(() => {
-          ++metrics.unmounts;
-          ++metrics.disposed;
-        });
-      }),
-    [content, shared],
-  );
-  if (id === "long")
-    return (
-      <article data-testid="native-long-content">
-        <h1>Long document</h1>
-        {Array.from({ length: 80 }, (_, index) => (
-          <p key={index}>
-            Paragraph {index + 1}: {data.text} This routed document uses FlexLayout's native tab
-            scrolling without an application scroll container.
-          </p>
-        ))}
-      </article>
-    );
   return (
-    <section className="document-page" data-testid={`document-${id}`}>
-      <header>
-        <span className="eyebrow">ROUTED DOCUMENT</span>
-        <h1>Document {id}</h1>
-        <p>
-          {data.text} View: <strong>{search.view}</strong>
-        </p>
-      </header>
-      <div className="document-actions">
-        <Link
-          from={documentRoute.fullPath}
-          to="."
-          search={(previous) => ({
-            ...previous,
-            view: previous.view === "edit" ? "preview" : "edit",
-          })}
-        >
-          Change view
-        </Link>
-        <Link from={documentRoute.fullPath} to="./details" search={(previous) => previous}>
-          Details
-        </Link>
-        <Link to="/alias-b">Native redirect to B</Link>
-        <button
-          onClick={() =>
-            void workbench.save(content.id).catch((error: unknown) => message(String(error)))
-          }
-        >
-          Save
-        </button>
-        <button
-          onClick={() =>
-            void workbench.close(content.id).then((result) => {
-              reportAction(result);
-              message(`Close ${id}: ${result.status}`);
-              return undefined;
-            })
-          }
-        >
-          Close document
-        </button>
-      </div>
-      <label className="draft-label">
-        Draft {id}
-        <textarea
-          ref={input}
-          aria-label={`Draft ${id}`}
-          value={draft}
-          onChange={(event) => {
-            const value = event.target.value;
-            editing.current.draft = value;
-            ++editing.current.version;
-            setDraft(value);
-          }}
-          placeholder="Type here; state survives docking and hiding."
-        />
-      </label>
-      <label>
-        <input
-          type="checkbox"
-          checked={guard}
-          onChange={(event) => setGuard(event.target.checked)}
-        />{" "}
-        Native Router blocker
-      </label>
-      <div className="document-scroll" data-testid={`scroll-${id}`}>
-        {Array.from({ length: 65 }, (_, index) => (
-          <p key={index}>
-            Line {index + 1}: {id} keeps its own input, scroll position, subscriptions and route
-            context.
-          </p>
-        ))}
-      </div>
-      <div className="document-actions">
-        <Link from={documentRoute.fullPath} to="." search={{ view: "slow", delay: 900 }}>
-          Slow view
-        </Link>
-        <Link from={documentRoute.fullPath} to="." search={{ view: "fast", delay: 0 }}>
-          Fast view
-        </Link>
-      </div>
+    <EditorDocument resource={resource}>
       <Outlet />
-    </section>
+    </EditorDocument>
   );
 }
-function Inspector() {
-  const content = useWorkbenchContent();
-  const [menu, setMenu] = useState(false);
-  const active = useWorkbenchState(workbench, (state) =>
-    state.activeDocumentId ? workbench.getDocument(state.activeDocumentId)?.href : null,
-  );
-  const [sample, setSample] = useState(readMetrics);
-  useEffect(() => {
-    const timer = setInterval(() => setSample(readMetrics()), 500);
-    return () => clearInterval(timer);
-  }, []);
+const rootRoute = createRootRoute({ component: EditorRoot });
+const editorRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/edit/$name",
+  component: Editor,
+});
+const routeTree = rootRoute.addChildren([editorRoute]);
+const editor = createWorkbench({
+  createRouter: (history) => createRouter({ routeTree, history }),
+  home: { mode: "empty", href: "/" },
+});
+const readOnly = createReadOnlyWorkbench();
+const tools = createToolsWorkbench();
+const root = createRoot(document.getElementById("root")!);
+let nextDraft = 2;
+let browserInstance: BrowserInstance | undefined;
+let lifecycleSession: LifecycleSession | undefined;
+function EditorExample() {
+  const activeId = useWorkbenchState(editor, (state) => state.activeDocumentId);
   return (
-    <section className="inspector">
-      <div>
-        <span className="eyebrow">GLOBAL TOOL</span>
-        <h2>Inspector</h2>
-        <p data-testid="inspector-active">Active document: {active ?? "none"}</p>
-        <input aria-label="Inspector note" placeholder="Tool input survives hiding and moving" />
-        <button onClick={() => setMenu(true)}>Tool menu</button>
-        {menu &&
-          createPortal(
-            <div role="menu" className="tool-menu">
-              <button
-                role="menuitem"
-                onClick={() => {
-                  void content.executeCommand("tool-context");
-                  setMenu(false);
-                }}
-              >
-                Run tool command
-              </button>
-            </div>,
-            document.body,
-          )}
-      </div>
-      <pre data-testid="metrics">{JSON.stringify(sample, null, 2)}</pre>
+    <section className="example-body">
+      <nav aria-label="Editor example" className="example-toolbar">
+        <button
+          type="button"
+          onClick={() => {
+            void editor.open({ to: "/edit/$name", params: { name: `Draft ${nextDraft++}` } });
+          }}
+        >
+          New draft
+        </button>
+        <button
+          type="button"
+          disabled={!activeId}
+          onClick={() => {
+            if (activeId) void editor.duplicate(activeId);
+          }}
+        >
+          Duplicate editor
+        </button>
+        <button
+          type="button"
+          disabled={!activeId}
+          onClick={() => {
+            if (activeId) void editor.save(activeId);
+          }}
+        >
+          Save active
+        </button>
+        <button
+          type="button"
+          disabled={!activeId}
+          onClick={() => {
+            if (activeId) void editor.close(activeId);
+          }}
+        >
+          Close active
+        </button>
+      </nav>
+      <Workbench instance={editor} />
     </section>
   );
 }
-function Details() {
-  const active = useWorkbenchState(workbench, (state) =>
-    state.activeDocumentId ? workbench.getDocument(state.activeDocumentId)?.href : null,
+function resetBrowserLocation() {
+  const state = window.history.state;
+  window.history.replaceState(
+    { ...(state && typeof state === "object" ? state : {}), __TSR_index: 0 },
+    "",
+    "/",
   );
+}
+async function startBrowserExample(onOutside: (href: string) => void) {
+  await browserInstance?.dispose();
+  if (lifecycleSession) {
+    await lifecycleSession.dispose();
+    lifecycleSession = undefined;
+    delete window.worksplitPublic.lifecycle;
+    resetBrowserLocation();
+  }
+  const session = createBrowserWorkbench(onOutside);
+  browserInstance = session.instance;
+  window.worksplitPublic.browser = browserInstance;
+  const result = await session.start();
+  if (result.status !== "applied") throw new Error(JSON.stringify(result));
+  return session.instance;
+}
+async function startLifecycleExample() {
+  await browserInstance?.dispose();
+  browserInstance = undefined;
+  delete window.worksplitPublic.browser;
+  await lifecycleSession?.dispose();
+  resetBrowserLocation();
+  const session = createLifecycleWorkbench();
+  lifecycleSession = session;
+  window.worksplitPublic.lifecycle = session;
+  const result = await session.start({
+    browser: {
+      onOutsideNavigate: ({ href }) => {
+        session.outside.push(href);
+      },
+    },
+  });
+  if (result.status !== "applied") throw new Error(JSON.stringify(result));
+  return session;
+}
+function App() {
+  const [example, setExample] = useState("Read-only");
+  const [browserStatus, setBrowserStatus] = useState("");
+  const [browserReady, setBrowserReady] = useState(false);
+  const [browserView, setBrowserView] = useState<BrowserInstance | null>(null);
+  const [lifecycleView, setLifecycleView] = useState<LifecycleSession | null>(null);
+  const [starting, setStarting] = useState(false);
+  async function choose(name: string) {
+    if (name === "Browser history" && !browserReady) {
+      setStarting(true);
+      setLifecycleView(null);
+      try {
+        const instance = await startBrowserExample((href) => {
+          setBrowserReady(false);
+          setBrowserStatus(`Host received ${href}`);
+          setExample("Read-only");
+        });
+        setBrowserView(instance);
+        setBrowserReady(true);
+      } catch (error) {
+        setBrowserStatus(String(error));
+      } finally {
+        setStarting(false);
+      }
+    } else if (name === "Lifecycles" && !lifecycleView) {
+      setStarting(true);
+      setBrowserReady(false);
+      setBrowserView(null);
+      try {
+        setLifecycleView(await startLifecycleExample());
+      } catch (error) {
+        setBrowserStatus(String(error));
+      } finally {
+        setStarting(false);
+      }
+    }
+    setExample(name);
+  }
   return (
-    <section className="details-tool">
-      <span className="eyebrow">GLOBAL TOOL</span>
-      <h2>Document details</h2>
-      <p data-testid="details-active">Active document: {active ?? "none"}</p>
-      <label>
-        Workspace note
-        <textarea
-          aria-label="Details note"
-          placeholder="Notes stay with this tool as you dock it"
-        />
-      </label>
-      <p>Choose a document to update these details. This tool keeps its own note.</p>
-    </section>
+    <main>
+      <nav aria-label="Examples" className="example-toolbar">
+        {["Read-only", "Editor", "Tools", "SplitView", "Browser history", "Lifecycles"].map(
+          (name) => (
+            <button
+              type="button"
+              key={name}
+              aria-pressed={example === name}
+              disabled={starting}
+              onClick={() => {
+                void choose(name);
+              }}
+            >
+              {name}
+            </button>
+          ),
+        )}
+      </nav>
+      {example === "Read-only" ? (
+        <ReadOnlyExample instance={readOnly} />
+      ) : example === "Editor" ? (
+        <EditorExample />
+      ) : example === "Tools" ? (
+        <ToolsExample instance={tools} />
+      ) : example === "SplitView" ? (
+        <SplitViewExample />
+      ) : example === "Lifecycles" && lifecycleView ? (
+        <LifecycleExample session={lifecycleView} />
+      ) : example === "Browser history" && browserReady && browserView ? (
+        <BrowserExample instance={browserView} />
+      ) : (
+        <section role="status">
+          <p>{browserStatus || "Starting browser history…"}</p>
+          <button
+            type="button"
+            onClick={() => {
+              clearBrowserSnapshot();
+              void choose(example);
+            }}
+          >
+            Reset saved layout and retry
+          </button>
+        </section>
+      )}
+    </main>
   );
 }
-const layout: IJsonModel = {
-  global: {
-    tabEnablePin: true,
-    tabEnableRename: true,
-    tabEnableFloat: false,
-    tabEnablePopout: false,
-    tabSetEnableClose: true,
-    tabSetEnableCloseButton: true,
-    tabSetEnableTabGroups: true,
-    borderEnableAutoHide: true,
-    tabSetMinWidth: 120,
-    tabSetMinHeight: 140,
-  },
-  borders: [
-    {
-      type: "border",
-      location: "bottom",
-      size: 195,
-      selected: 0,
-      children: [
-        {
-          type: "tab",
-          id: "inspector",
-          name: "Inspector",
-          component: "worksplit.tool",
-          enableClose: false,
-          enableFloat: false,
-          enablePopout: false,
-        },
-      ],
-    },
-    {
-      type: "border",
-      location: "right",
-      size: 260,
-      children: [
-        {
-          type: "tab",
-          id: "details",
-          name: "Details",
-          component: "worksplit.tool",
-          enableClose: false,
-        },
-      ],
-    },
-  ],
-  layout: {
-    type: "row",
-    children: [],
-  },
-};
-let initialSnapshot: unknown;
-let startupError: unknown;
-if (localStorage.getItem("worksplit.demo.restore") === "true") {
-  try {
-    const saved = localStorage.getItem("worksplit.demo.layout");
-    if (saved) initialSnapshot = JSON.parse(saved);
-  } catch (error) {
-    startupError = error;
+async function dispose() {
+  root.unmount();
+  const browserResult = await browserInstance?.dispose();
+  const lifecycleResult = await lifecycleSession?.dispose();
+  const first = await readOnly.dispose();
+  const second = await editor.dispose();
+  const third = await tools.dispose();
+  if (
+    [browserResult, lifecycleResult, first, second, third].some(
+      (result) => result && result.status !== "applied",
+    )
+  )
+    throw new Error("Example disposal failed");
+}
+declare global {
+  interface Window {
+    worksplitPublic: {
+      browser?: BrowserInstance;
+      lifecycle?: LifecycleSession;
+      native: { Actions: typeof Actions; DockLocation: typeof DockLocation };
+      readOnly: typeof readOnly;
+      editor: typeof editor;
+      tools: typeof tools;
+      dispose: typeof dispose;
+      editorRouters: typeof editorRouters;
+    };
   }
 }
-function buildWorkbench(): WorkbenchInstance<DemoRouter> {
-  return createWorkbench({
-    createRouter: makeRouter,
-    layout,
-    tools: [
-      { id: "inspector", render: () => <Inspector /> },
-      { id: "details", render: () => <Details /> },
-    ],
-    workspaceId: "demo",
-    ...(initialSnapshot === undefined ? {} : { snapshot: initialSnapshot }),
-    commands: [
-      {
-        id: "tool-context",
-        target: "focused",
-        execute: ({ id }) => message(`Tool command: ${id}`),
-      },
-      {
-        id: "save",
-        target: "document",
-        hotkey: "Mod+S",
-        ignoreInputs: false,
-        execute: ({ id }) => workbench.save(id),
-      },
-      {
-        id: "close",
-        target: "document",
-        hotkey: "Alt+W",
-        execute: async ({ id }) => {
-          const result = await workbench.close(id);
-          reportAction(result);
-          message(`Close: ${result.status}`);
-        },
-      },
-    ],
-    onIssue: ({ code, error }) => message(`${code}: ${String(error)}`),
-  });
-}
-let workbench!: WorkbenchInstance<DemoRouter>;
-try {
-  workbench = buildWorkbench();
-} catch (error) {
-  startupError = error;
-}
-function report(result: NavigationResult) {
-  if (result.status === "failed") message(`Navigation failed: ${String(result.error)}`);
-  message(
-    `Navigation: ${result.status}${result.status === "rejected" ? ` (${result.reason})` : ""}`,
-  );
-}
-function reportAction(result: DispatchResult) {
-  if (result.status === "failed") message(`Operation failed: ${String(result.error)}`);
-  if (result.status === "closed")
-    result.cleanupErrors.forEach((error) => message(`Cleanup failed: ${String(error)}`));
-}
-function open(id: string, target?: string, delay = 0) {
-  return workbench
-    .open(
-      { to: "/documents/$id", params: { id }, search: { view: "edit", delay } },
-      target ? { target } : {},
-    )
-    .then((result) => {
-      report(result);
-      return result;
-    });
-}
-// Read current native containers for a toolbar action; never retain region ids or a layout copy.
-function centralTabsets(row: IJsonRowNode): IJsonTabSetNode[] {
-  return (row.children ?? []).flatMap((child) =>
-    child.type === "tabset" ? [child as IJsonTabSetNode] : centralTabsets(child as IJsonRowNode),
-  );
-}
-async function openBeside(id: string, delay = 0) {
-  const result = await workbench.open(
-    { to: "/documents/$id", params: { id }, search: { view: "edit", delay } },
-    { location: DockLocation.RIGHT },
-  );
-  report(result);
-  return result;
-}
-function moveActive(location: DockLocation) {
-  const active = workbench.getActiveDocument();
-  if (!active) return;
-  const tabsets = centralTabsets(workbench.getLayout().layout);
-  const current = workbench.getEditingContext().activeGroupId;
-  const target =
-    (location === DockLocation.RIGHT && tabsets.find((tabset) => tabset.id === current)) ||
-    tabsets[0];
-  if (target?.id)
-    void workbench
-      .dispatch(Actions.moveNode(active.id, target.id, location, -1))
-      .then((result) => {
-        reportAction(result);
-        message(`Layout: ${result.status}`);
-        return undefined;
-      })
-      .catch((error: unknown) => message(`Layout failed: ${String(error)}`));
-}
-function Navigation() {
-  useWorkbenchState(workbench, (state) => `${state.activeDocumentId}:${state.revision}`);
-  const active = workbench.getActiveDocument();
-  const docs = workbench.getDocuments();
-  return (
-    <>
-      <div className="brand">
-        <span className="brand-mark">W</span>
-        <strong>Worksplit</strong>
-      </div>
-      <span className="eyebrow nav-caption" data-testid="navigation-owner">
-        {active?.navigationKey ?? "workspace"}
-      </span>
-      <button aria-label="A Document A" onClick={() => void open("A")}>
-        <span>A</span>
-        <span>Document A</span>
-      </button>
-      <button aria-label="B Document B" onClick={() => void openBeside("B")}>
-        <span>B</span>
-        <span>Document B</span>
-      </button>
-      <button aria-label="◷ Slow document" onClick={() => void open("slow", undefined, 1200)}>
-        <span>◷</span>
-        <span>Slow document</span>
-      </button>
-      <button
-        aria-label="↪ Redirect to B"
-        onClick={() => void workbench.open({ to: "/alias-b" }).then(report)}
-      >
-        <span>↪</span>
-        <span>Redirect to B</span>
-      </button>
-      <button aria-label="! Loader error" onClick={() => void open("error")}>
-        <span>!</span>
-        <span>Loader error</span>
-      </button>
-      <button
-        aria-label="× Renderer error"
-        onClick={() => void workbench.open({ to: "/broken" }).then(report)}
-      >
-        <span>×</span>
-        <span>Renderer error</span>
-      </button>
-      <div className="nav-documents">
-        <span className="eyebrow nav-caption">OPEN DOCUMENTS</span>
-        {docs.map((doc) => (
-          <button
-            key={doc.id}
-            data-active={doc.id === active?.id}
-            onClick={() => workbench.activate(doc.id)}
-            title={doc.href}
-          >
-            <span>▤</span>
-            <span>{doc.href.split("?")[0]}</span>
-          </button>
-        ))}
-      </div>
-    </>
-  );
-}
-const nativePresentation: NonNullable<import("@worksplit/react").WorkbenchProps["native"]> = {
-  onRenderTab(node, values) {
-    const doc = workbench.getDocument(node.getId());
-    if (doc)
-      values.content = (
-        <span data-testid={`tab-${doc.id}`}>
-          {doc.title === "Document"
-            ? doc.href.split("?")[0]?.replace("/documents/", "")
-            : doc.title}
-        </span>
-      );
-  },
+window.worksplitPublic = {
+  readOnly,
+  editor,
+  tools,
+  dispose,
+  editorRouters,
+  native: { Actions, DockLocation },
 };
-function App() {
-  const [contextMenu, setContextMenu] = useState<{ nodeId: string; props: IPopupMenuProps }>();
-  const pending = useStore(decisions, (state) => state);
-  const notices = useStore(messages, (state) => state);
-  const [restore, setRestore] = useState(localStorage.getItem("worksplit.demo.restore") === "true");
-  const active = useWorkbenchState(workbench, (state) => state.activeDocumentId);
-  useEffect(() => {
-    const disconnect = workbench.connectBrowser();
-    void workbench
-      .start(location.pathname + location.search + location.hash)
-      .then(async (result) => {
-        if (result.status === "empty") {
-          message("Workspace ready (empty)");
-          return result;
-        }
-        report(result);
-        if (location.pathname === "/" && initialSnapshot === undefined) {
-          await open("A");
-          await openBeside("B");
-        }
-        return result;
-      });
-    return disconnect;
-  }, []);
-  const decide = (candidate: Decision, allowed: boolean) => {
-    candidate.resolve(allowed);
-    decisions.setState((state) => state.filter((item) => item !== candidate));
-  };
-  return (
-    <div className="app">
-      <header className="topbar">
-        <strong>WORKSPLIT / ROUTE WORKSPACE</strong>
-        <span>FlexLayout + TanStack</span>
-      </header>
-      <div className="toolbar">
-        <span>Right-click a tab or group for native layout actions.</span>
-        <button onClick={() => moveActive(DockLocation.RIGHT)}>Split right</button>
-        <button
-          onClick={() =>
-            active &&
-            void workbench
-              .dispatch(Actions.moveNode(active, "border_bottom", DockLocation.CENTER, -1))
-              .then(reportAction)
-              .catch((error: unknown) => message(String(error)))
-          }
-        >
-          Move to Border
-        </button>
-        <button onClick={() => moveActive(DockLocation.CENTER)}>Move to center</button>
-        <button
-          onClick={() =>
-            void workbench
-              .dispatch(Actions.selectTab("inspector"))
-              .then(reportAction)
-              .catch((error: unknown) => message(String(error)))
-          }
-        >
-          Toggle Inspector
-        </button>
-        <button
-          onClick={() => {
-            localStorage.setItem("worksplit.demo.layout", JSON.stringify(workbench.snapshot()));
-            message("Layout saved");
-          }}
-        >
-          Save layout
-        </button>
-        <label>
-          <input
-            type="checkbox"
-            checked={restore}
-            onChange={(event) => {
-              setRestore(event.target.checked);
-              localStorage.setItem("worksplit.demo.restore", String(event.target.checked));
-            }}
-          />{" "}
-          Restore on refresh
-        </label>
-      </div>
-      <main>
-        <Workbench
-          workbench={workbench}
-          native={{
-            ...nativePresentation,
-            onModelChange(model) {
-              if (contextMenu && !model.getNodeById(contextMenu.nodeId)) setContextMenu(undefined);
-            },
-            onContextMenu(node, event) {
-              event.preventDefault();
-              event.stopPropagation();
-              const closeMenu = () => setContextMenu(undefined);
-              const items = new ContextMenuBuilder(node, {
-                onAction: (action) => {
-                  void workbench
-                    .dispatch(action)
-                    .then((result) => {
-                      reportAction(result);
-                      message(`Layout: ${result.status}`);
-                      return undefined;
-                    })
-                    .catch((error: unknown) => message(`Layout failed: ${String(error)}`));
-                },
-                closeMenu,
-              })
-                .addStandard()
-                .addDivider()
-                .add("closeAll")
-                .add("closeRight")
-                .add("closeOthers")
-                .build();
-              setContextMenu({
-                nodeId: node.getId(),
-                props: {
-                  anchor: { x: event.clientX, y: event.clientY },
-                  container: node.getLayoutRef()!,
-                  returnFocusTo: event.currentTarget,
-                  items,
-                  title: "Layout actions",
-                  onClose: closeMenu,
-                },
-              });
-            },
-          }}
-          navigation={<Navigation />}
-          empty={
-            <div>
-              <h2>Your workspace</h2>
-              <p>Open a routed document from the navigation.</p>
-            </div>
-          }
-        />
-      </main>
-      {/* A portal keeps application providers and unmounts with the shell, unlike a new root. */}
-      {contextMenu && <PopupMenu key={contextMenu.nodeId} {...contextMenu.props} />}
-      <footer>
-        <span data-testid="active-location">
-          {workbench.getActiveDocument()?.href ?? "No active document"}
-        </span>
-        <output data-testid="last-result">{notices.at(-1)?.text ?? "Ready"}</output>
-      </footer>
-      {pending.length > 0 && (
-        <div role="dialog" aria-label="Unsaved changes" className="decision">
-          {pending.map((candidate) => (
-            <section key={candidate.requestId} data-decision={candidate.reason}>
-              <strong>Unsaved {candidate.id}</strong>
-              <p>
-                Allow {candidate.reason}? Editing while this decision is pending invalidates
-                approval.
-              </p>
-              <button onClick={() => decide(candidate, true)}>Discard and continue</button>
-              <button onClick={() => decide(candidate, false)}>Keep editing</button>
-            </section>
-          ))}
-        </div>
-      )}
-      <details className="diagnostics">
-        <summary>Operation log</summary>
-        {notices.map((notice) => (
-          <p key={notice.id}>{notice.text}</p>
-        ))}
-      </details>
-    </div>
+async function start() {
+  const first = await readOnly.start();
+  const second = await editor.start({ href: "/edit/Draft" });
+  const third = await tools.start();
+  for (const result of [first, second, third]) {
+    if (result.status !== "applied") throw new Error(`Example startup: ${result.status}`);
+  }
+  root.render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
   );
 }
-if (startupError) {
-  createRoot(document.getElementById("root")!).render(
-    <div role="alert">
-      <h1>Saved layout is unavailable</h1>
-      <pre>{String(startupError)}</pre>
-      <button
-        onClick={() => {
-          localStorage.removeItem("worksplit.demo.layout");
-          localStorage.removeItem("worksplit.demo.restore");
-          location.reload();
-        }}
-      >
-        Reset saved layout
-      </button>
-    </div>,
-  );
-} else createRoot(document.getElementById("root")!).render(<App />);
-// Browser acceptance uses this observable demo fixture; all operations are public package calls.
-Object.assign(window, {
-  worksplitDemo: {
-    workbench,
-    metrics,
-    getMetrics: readMetrics,
-    open,
-    openBeside,
-    decisions,
-    messages,
-    Actions,
-    DockLocation,
-  },
+void start().catch((error: unknown) => {
+  root.render(<p role="alert">{String(error)}</p>);
+  throw error;
 });

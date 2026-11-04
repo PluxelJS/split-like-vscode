@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": false,
+    "noEmit": true,
+    "types": ["react", "react-dom"],
+    "verbatimModuleSyntax": true
+  },
+  "include": ["types.ts"]
+}
