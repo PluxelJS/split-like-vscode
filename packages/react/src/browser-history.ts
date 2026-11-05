@@ -59,6 +59,8 @@ export class BrowserHistoryCoordinator {
     private readonly report: (error: unknown) => void,
     /** true means the host has synchronously committed termination and handoff. */
     private readonly outside: (href: string, context: OutsideNavigation) => Promise<boolean>,
+    /** Reconcile the active document when a browser visit ends without acceptance. */
+    private readonly onResumeActive: () => void = () => {},
   ) {
     if (connections.has(win))
       throw new Error("This Window already has a Worksplit browser connection");
@@ -83,6 +85,11 @@ export class BrowserHistoryCoordinator {
     return this.accepted?.href;
   }
 
+  /** A pending browser decision owns publication until it accepts or returns control. */
+  canPublishActive(): boolean {
+    return !this.disposed && !this.visitAbort && !this.outsideAbort;
+  }
+
   start(): Promise<BrowserVisitResult | undefined> {
     if (this.initialization) return this.initialization;
     this.initialization = new Promise((resolve) => {
@@ -96,13 +103,18 @@ export class BrowserHistoryCoordinator {
   /** Explicit work supersedes a pending traversal or outside leave decision. */
   cancelPending(): void {
     if (this.disposed) return;
-    ++this.generation;
-    this.outsideAbort?.abort();
+    const generation = ++this.generation;
+    const outside = this.outsideAbort;
+    const visit = this.visitAbort;
     this.outsideAbort = undefined;
-    this.visitAbort?.abort();
     this.visitAbort = undefined;
     this.pendingWrite = undefined;
-    this.restore();
+    outside?.abort();
+    visit?.abort();
+    const current = () => !this.disposed && generation === this.generation;
+    if (!current()) return;
+    if (outside || visit) this.rejectVisit(current);
+    else this.restore();
   }
 
   publish(href: string, reference: BrowserEntryReference | undefined, replace: boolean): void {
@@ -205,8 +217,9 @@ export class BrowserHistoryCoordinator {
     this.accepted = { index, position, href, ...(reference ? { reference } : {}) };
   }
 
-  private restore(): void {
-    if (this.disposed || this.restoring || !this.accepted) return;
+  private restore(): boolean {
+    if (this.disposed || !this.accepted) return false;
+    if (this.restoring) return true;
     if (this.physicalPosition === undefined) {
       this.pendingWrite = undefined;
       this.report(
@@ -214,16 +227,29 @@ export class BrowserHistoryCoordinator {
           "Cannot restore an outside entry without a native history index or Navigation API position",
         ),
       );
-      return;
+      return false;
     }
     if (this.physicalPosition === this.accepted.position) {
       const pending = this.pendingWrite;
       this.pendingWrite = undefined;
       pending?.();
-      return;
+      return true;
     }
     this.restoring = true;
     this.win.history.go(this.accepted.position - this.physicalPosition);
+    return true;
+  }
+
+  private rejectVisit(current: () => boolean): void {
+    const restoring = this.restore();
+    if (!current()) return;
+    this.finishInitialization(undefined);
+    if (!restoring) return;
+    try {
+      this.onResumeActive();
+    } catch (error) {
+      this.report(error);
+    }
   }
 
   private visitEntry(state: OwnedEntry): void {
@@ -242,8 +268,7 @@ export class BrowserHistoryCoordinator {
           if (!current()) return;
           this.visitAbort = undefined;
           if (!result) {
-            this.restore();
-            this.finishInitialization(undefined);
+            this.rejectVisit(current);
             return;
           }
           this.accepted = {
@@ -260,8 +285,7 @@ export class BrowserHistoryCoordinator {
           if (!current()) return;
           this.visitAbort = undefined;
           this.report(error);
-          this.restore();
-          this.finishInitialization(undefined);
+          if (current()) this.rejectVisit(current);
         },
       );
   }
@@ -305,18 +329,14 @@ export class BrowserHistoryCoordinator {
           if (!current()) return;
           this.outsideAbort = undefined;
           if (allowed) this.dispose();
-          else {
-            this.restore();
-            this.finishInitialization(undefined);
-          }
+          else this.rejectVisit(current);
           return;
         },
         (error: unknown) => {
           if (!current()) return;
           this.outsideAbort = undefined;
           this.report(error);
-          this.restore();
-          this.finishInitialization(undefined);
+          if (current()) this.rejectVisit(current);
         },
       );
   };

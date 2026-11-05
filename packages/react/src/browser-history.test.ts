@@ -235,6 +235,7 @@ describe("browser coordination uses real entries and explicit request ownership"
     window.history.replaceState({ host: "legacy" }, "", "/unindexed");
     window.history.pushState({ __TSR_index: 1 }, "", "/a");
     const issues: unknown[] = [];
+    const onRejected = vi.fn<() => void>();
     const coordinator = new BrowserHistoryCoordinator(
       window,
       "unindexed",
@@ -243,6 +244,7 @@ describe("browser coordination uses real entries and explicit request ownership"
         issues.push(error);
       },
       async () => false,
+      onRejected,
     );
     coordinators.push(coordinator);
     await coordinator.start();
@@ -251,6 +253,7 @@ describe("browser coordination uses real entries and explicit request ownership"
     await vi.waitFor(() => expect(issues).toHaveLength(1));
     expect(String(issues[0])).toContain("without a native history index");
     expect(go).not.toHaveBeenCalled();
+    expect(onRejected).not.toHaveBeenCalled();
     expect(href()).toBe("/unindexed");
     expect(window.history.state).toEqual({ host: "legacy" });
   });

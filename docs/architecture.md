@@ -67,6 +67,12 @@ its own receipt and terminal outcome, including push, replace, back, forward and
 inherit only the receipt of the transaction that produced them. Reload/retry may start a new
 transaction even without a new history entry. There is no approved-href table or URL heuristic.
 
+The history write precedes loader completion and Router acceptance. A token check at that write
+does not prevent later edits to the still-visible old resource. An editor that can accept such
+edits must acquire a business-owned pause before allowing departure and register its release
+with the request's `defer`. The native receipt keeps that protection through loading and actual
+acceptance; it does not add a final asynchronous veto or roll back an already-written entry.
+
 The native correction also settles rejected, superseded, destroyed and background operations.
 Its `onNavigationStart` binds library-owned calls before blockers run; `onNavigationResult`
 reports the terminal snapshot. This makes cleanup-error ownership exact without guessing

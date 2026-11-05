@@ -2,8 +2,10 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  redirect,
   type RouterHistory,
 } from "@tanstack/react-router";
+import { Actions, DockLocation } from "flexlayout-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DocumentRecord } from "./content-record";
@@ -65,6 +67,7 @@ function fixture(
     createRouter: (history) => factory(history, options.loader),
     home: { mode: "empty", href: "/home" },
     captureSnapshotOnClose: true,
+    tools: { tool: { render: () => null } },
     initial: options.snapshot
       ? { snapshot: options.snapshot }
       : {
@@ -93,6 +96,24 @@ function fixture(
       }),
   };
 }
+async function restoreTwoDocuments(loader?: (id: string, signal: AbortSignal) => unknown) {
+  const first = fixture();
+  await first.start();
+  const a = first.instance.getActiveDocument()!;
+  const opened = await first.instance.open({ to: "/$id", params: { id: "b" } });
+  if (opened.status !== "applied") throw new Error(opened.status);
+  await first.instance.activate(a.id);
+  const snapshot = first.instance.createSnapshot();
+  await first.instance.dispose();
+  const restored = fixture({ prepared: true, snapshot, ...(loader ? { loader } : {}) });
+  await restored.start();
+  return {
+    ...restored,
+    a: documentRecord(restored.instance, a.id),
+    b: documentRecord(restored.instance, opened.value.document.id),
+  };
+}
+
 afterEach(async () => {
   deferredReleases.splice(0).forEach((release) => release());
   // eslint-disable-next-line no-await-in-loop -- Finish each owned session before tearing down the next.
@@ -101,6 +122,341 @@ afterEach(async () => {
 });
 
 describe("Worksplit browser visits use live document entry identities", () => {
+  it("keeps loading-pane input from canceling a restored startup before it is ready", async () => {
+    const first = fixture();
+    await first.start();
+    const a = first.instance.getActiveDocument()!;
+    const snapshot = first.instance.createSnapshot();
+    await first.instance.dispose();
+    const waiting = deferred();
+    let entered = false;
+    const restored = fixture({
+      prepared: true,
+      snapshot,
+      loader: (id) => {
+        if (id !== "a") return;
+        entered = true;
+        return waiting.promise;
+      },
+    });
+    const startup = restored.start();
+    await vi.waitFor(() => expect(entered).toBe(true));
+    integrationState(restored.instance).focus(a.id, "content", true);
+    waiting.resolve();
+    expect((await startup).status).toBe("applied");
+    expect(restored.instance.getActiveDocument()?.id).toBe(a.id);
+    expect(restored.issues).toEqual([]);
+  });
+
+  it.each(["activate", "native-selection"] as const)(
+    "binds a lazy restored copy before publishing its %s browser visit",
+    async (entrance) => {
+      const { instance, b, issues } = await restoreTwoDocuments();
+      expect(b.ready).toBe(false);
+      if (entrance === "activate") await instance.activate(b.id);
+      else await instance.dispatch(Actions.selectTab(b.id));
+      await integrationState(instance).loadDocument(b.handle);
+      await vi.waitFor(() =>
+        expect(window.history.state["worksplit:browser-instance"].reference).toEqual({
+          contentId: b.id,
+          lifetime: b.lifetime,
+          entryKey: b.runtime!.history.location.state["__TSR_key"],
+        }),
+      );
+      await instance.open({ to: "/$id", params: { id: "c" } });
+      window.history.back();
+      await vi.waitFor(() => expect(instance.getActiveDocument()?.id).toBe(b.id));
+      expect(instance.getDocuments()).toHaveLength(3);
+      expect(issues).toEqual([]);
+    },
+  );
+
+  it.each(["accepted", "other-document", "outside-focus", "dispose"] as const)(
+    "publishes lazy initialization redirects only for the current active copy after %s",
+    async (interruption) => {
+      const waiting = deferred();
+      const load = vi.fn<(id: string) => Promise<void> | undefined>((id) => {
+        if (id !== "b") return;
+        return waiting.promise.then(() => {
+          throw redirect({ to: "/$id", params: { id: "normalized" } });
+        });
+      });
+      const { instance, a, b, issues } = await restoreTwoDocuments(load);
+      await instance.activate(b.id);
+      await vi.waitFor(() => expect(load).toHaveBeenCalledWith("b", expect.any(AbortSignal)));
+      const loading = integrationState(instance).loadDocument(b.handle);
+      if (interruption === "other-document") await instance.activate(a.id);
+      else if (interruption === "outside-focus")
+        integrationState(instance).focus(null, "outside", true);
+      else if (interruption === "dispose") await instance.dispose();
+      waiting.resolve();
+      await loading;
+      const accepted = interruption === "accepted" || interruption === "outside-focus";
+      await vi.waitFor(() => expect(href()).toBe(accepted ? "/normalized" : "/a"));
+      expect(instance.getActiveDocument()?.id).toBe(
+        interruption === "dispose" ? undefined : accepted ? b.id : a.id,
+      );
+      expect(issues).toEqual([]);
+    },
+  );
+
+  it.each(["allow", "deny", "failure", "superseded"] as const)(
+    "keeps lazy activation coherent after a newer browser traversal resolves %s",
+    async (decisionResult) => {
+      const loadingB = deferred();
+      const { instance, a, b, issues } = await restoreTwoDocuments((id) =>
+        id === "b" ? loadingB.promise : undefined,
+      );
+      await a.runtime!.history.push("/a2").finished;
+      const decision = deferred();
+      const failure = new Error("Browser navigation decision failed");
+      const requests: LeaveRequest[] = [];
+      integrationState(instance).registerController(a.handle, {
+        controller: {
+          leave: {
+            getState: () => ({ hasUnsavedChanges: false, token: 1 }),
+            decide: async (request) => {
+              requests.push(request);
+              await decision.promise;
+              if (decisionResult === "failure") throw failure;
+              return decisionResult === "deny"
+                ? { decision: "deny" }
+                : { decision: "allow", token: 1 };
+            },
+          },
+        },
+      });
+      await instance.activate(b.id);
+      const loading = integrationState(instance).loadDocument(b.handle);
+      window.history.back();
+      await vi.waitFor(() => expect(requests).toHaveLength(1));
+      loadingB.resolve();
+      await loading;
+      expect(requests[0]!.signal.aborted).toBe(false);
+      expect(instance.getActiveDocument()?.id).toBe(b.id);
+      expect(href()).toBe("/a");
+      if (decisionResult === "superseded") await instance.activate(a.id);
+      decision.resolve();
+      const expected =
+        decisionResult === "allow"
+          ? { id: a.id, href: "/a" }
+          : decisionResult === "superseded"
+            ? { id: a.id, href: "/a2" }
+            : { id: b.id, href: "/b" };
+      await vi.waitFor(() =>
+        expect({ id: instance.getActiveDocument()?.id, href: href() }).toEqual(expected),
+      );
+      expect(issues).toEqual(decisionResult === "failure" ? [failure] : []);
+    },
+  );
+
+  it("publishes the still-active lazy copy after an outside workspace leave is refused", async () => {
+    const loadingB = deferred();
+    const { instance, a, b, issues, handoffs } = await restoreTwoDocuments((id) =>
+      id === "b" ? loadingB.promise : undefined,
+    );
+    const decision = deferred();
+    const requests: LeaveRequest[] = [];
+    integrationState(instance).registerController(a.handle, {
+      controller: {
+        leave: {
+          getState: () => ({ hasUnsavedChanges: false, token: 1 }),
+          decide: async (request) => {
+            requests.push(request);
+            await decision.promise;
+            return { decision: "deny" };
+          },
+        },
+      },
+    });
+    await instance.activate(b.id);
+    const loading = integrationState(instance).loadDocument(b.handle);
+    window.history.go(-2);
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]!.reason).toBe("leave-workspace");
+    loadingB.resolve();
+    await loading;
+    expect(requests[0]!.signal.aborted).toBe(false);
+    decision.resolve();
+    await vi.waitFor(() => expect(href()).toBe("/b"));
+    expect(instance.getActiveDocument()?.id).toBe(b.id);
+    expect(window.history.state["worksplit:browser-instance"].reference.contentId).toBe(b.id);
+    expect(handoffs).toEqual([]);
+    expect(issues).toEqual([]);
+  });
+
+  it.each(["tool-activation", "tool-focus", "denied-open", "same-document"] as const)(
+    "keeps the lazy active document publication after %s",
+    async (intent) => {
+      const waiting = deferred();
+      const { instance, a, b, issues } = await restoreTwoDocuments((id) =>
+        id === "b" ? waiting.promise : undefined,
+      );
+      await instance.dispatch(
+        Actions.addTab(
+          { id: "tool", component: "tool" },
+          a.node.getParent()!.getId(),
+          DockLocation.CENTER,
+          -1,
+          false,
+        ),
+      );
+      await instance.activate(b.id);
+      const internal = integrationState(instance);
+      const loading = internal.loadDocument(b.handle);
+      let deniedStatus: string | undefined;
+      if (intent === "tool-activation") await instance.activate("tool");
+      else if (intent === "tool-focus") internal.focus("tool", "content", true);
+      else if (intent === "same-document") await instance.activate(b.id);
+      else {
+        const opened = await instance.open(
+          { to: "/$id", params: { id: "denied" } },
+          { destination: () => null },
+        );
+        deniedStatus = opened.status;
+      }
+      expect(deniedStatus).toBe(intent === "denied-open" ? "denied" : undefined);
+      waiting.resolve();
+      await loading;
+      await vi.waitFor(() => expect(href()).toBe("/b"));
+      expect(instance.getActiveDocument()?.id).toBe(b.id);
+      expect(window.history.state["worksplit:browser-instance"].reference.contentId).toBe(b.id);
+      expect(issues).toEqual([]);
+    },
+  );
+
+  it.each(["tool-activation", "tool-focus", "denied-open", "same-document"] as const)(
+    "resumes an initialized active document when %s cancels a browser decision",
+    async (intent) => {
+      const waiting = deferred();
+      const { instance, a, b, issues } = await restoreTwoDocuments((id) =>
+        id === "b" ? waiting.promise : undefined,
+      );
+      await instance.dispatch(
+        Actions.addTab(
+          { id: "tool", component: "tool" },
+          a.node.getParent()!.getId(),
+          DockLocation.CENTER,
+          -1,
+          false,
+        ),
+      );
+      await a.runtime!.history.push("/a2").finished;
+      const decision = deferred();
+      const requests: LeaveRequest[] = [];
+      const internal = integrationState(instance);
+      internal.registerController(a.handle, {
+        controller: {
+          leave: {
+            getState: () => ({ hasUnsavedChanges: false, token: 1 }),
+            decide: async (request) => {
+              requests.push(request);
+              await decision.promise;
+              return { decision: "deny" };
+            },
+          },
+        },
+      });
+      await instance.activate(b.id);
+      const loading = internal.loadDocument(b.handle);
+      window.history.back();
+      await vi.waitFor(() => expect(requests).toHaveLength(1));
+      waiting.resolve();
+      await loading;
+      expect(href()).toBe("/a");
+      const length = window.history.length;
+      let deniedStatus: string | undefined;
+      if (intent === "tool-activation") await instance.activate("tool");
+      else if (intent === "tool-focus") internal.focus("tool", "content", true);
+      else if (intent === "same-document") await instance.activate(b.id);
+      else {
+        const opened = await instance.open(
+          { to: "/$id", params: { id: "denied" } },
+          { destination: () => null },
+        );
+        deniedStatus = opened.status;
+      }
+      expect(deniedStatus).toBe(intent === "denied-open" ? "denied" : undefined);
+      await vi.waitFor(() => expect(requests[0]!.signal.aborted).toBe(true));
+      decision.resolve();
+      await vi.waitFor(() => expect(href()).toBe("/b"));
+      expect(instance.getActiveDocument()?.id).toBe(b.id);
+      expect(window.history.length).toBe(length);
+      expect(window.history.state["worksplit:browser-instance"].reference.contentId).toBe(b.id);
+      expect(issues).toEqual([]);
+    },
+  );
+
+  it.each(["missing-target", "expired-source"] as const)(
+    "rejects activation with %s before canceling a browser decision",
+    async (invalid) => {
+      const { instance, start, issues } = fixture();
+      await start();
+      const a = documentRecord(instance, instance.getActiveDocument()!.id);
+      const temporary = await instance.open({ to: "/$id", params: { id: "temporary" } });
+      if (temporary.status !== "applied") throw new Error(temporary.status);
+      const expired = temporary.value.document.handle;
+      await instance.close(expired.id);
+      await a.runtime!.history.push("/b").finished;
+      await a.runtime!.history.push("/c").finished;
+      const waiting = deferred();
+      const requests: LeaveRequest[] = [];
+      integrationState(instance).registerController(a.handle, {
+        controller: {
+          leave: {
+            getState: () => ({ hasUnsavedChanges: false, token: 1 }),
+            decide: async (request) => {
+              requests.push(request);
+              await waiting.promise;
+              return { decision: "allow", token: 1 };
+            },
+          },
+        },
+      });
+      window.history.back();
+      await vi.waitFor(() => expect(requests).toHaveLength(1));
+      const result =
+        invalid === "missing-target"
+          ? await instance.activate("missing")
+          : await instance.activate(a.id, { source: expired });
+      expect(result).toEqual({ status: "denied", reason: "missing-content" });
+      expect(requests[0]!.signal.aborted).toBe(false);
+      waiting.resolve();
+      await vi.waitFor(() => expect(instance.getActiveDocument()?.href).toBe("/b"));
+      expect(href()).toBe("/b");
+      expect(issues).toEqual([]);
+    },
+  );
+
+  it("reports failed lazy initialization once across activation and view observers", async () => {
+    const first = await restoreTwoDocuments();
+    const snapshot = first.instance.createSnapshot();
+    await first.instance.dispose();
+    const failure = new Error("Router factory unavailable");
+    const issues: unknown[] = [];
+    const instance = createWorkbench({
+      workspaceId: "browser-instance",
+      home: { mode: "empty", href: "/home" },
+      initial: { snapshot },
+      createRouter: (history) => {
+        if (history.location.href === "/b") throw failure;
+        return factory(history);
+      },
+      onIssue: (issue) => issues.push(issue.error),
+    });
+    workbenches.push(instance);
+    await instance.start({ browser: { window, onOutsideNavigate: () => {} } });
+    const b = instance.getDocument(first.b.id)!;
+    await instance.activate(b.id);
+    await Promise.all([
+      integrationState(instance).loadDocument(b.handle),
+      integrationState(instance).loadDocument(b.handle),
+    ]);
+    expect(issues).toEqual([failure]);
+    expect(href()).toBe("/a");
+    expect(documentRecord(instance, b.id).ready).toBe(false);
+  });
+
   it("rebinds the exact restored copy without adding tabs on repeated browser startup", async () => {
     let current = fixture();
     await current.start();

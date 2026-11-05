@@ -9,7 +9,7 @@ independent package consumer; target API sketches must not be treated as install
 
 The financial migration retained local commit `6557cf8` as its library baseline and integrated
 the complete native corrections into the parent's single installation. The current source passed
-363 React, 25 SplitView and 13 editor-store tests, plus source, test and registered-consumer
+386 React, 25 SplitView and 13 editor-store tests, plus source, test and registered-consumer
 types. The parent runs the library's own build and test tasks rather than recreating the former
 core/react packages or retaining a second installation.
 
@@ -20,6 +20,17 @@ compile cache explicitly tracks source inputs in every compound-command segment 
 cache hit cannot restore an older build. Both ordinary compile and repeated cache-hit output
 were checked against the exact current integration source. Worksplit's public API did not gain
 a coordinator, registry or compatibility path.
+
+The post-migration review also covered first activation of a still-lazy restored tab. Browser
+publication now waits for its actual native acceptance and entry reference, including redirects;
+late initialization waits while a browser visit owns publication. Refused, failed and explicitly
+cancelled visits restore history and reconcile the still-active content through the existing
+pending-write path. Tool focus does not discard this publication, and content focus before startup
+finishes cannot cancel startup. The financial host reproduced the former 3-to-4 duplicate and
+now returns to the same instance with three
+documents. Its current-report shortcut also uses a normal lazy Worksplit link: the application
+selects the existing report's full location, while the library owns source lifetime, reuse,
+presentation and results. No public API or native patch changed for these fixes.
 
 Native panel selection or maximization can blur the old editor to body before the activated
 content receives focus. This passive observation now preserves the pending focus request and
@@ -49,7 +60,9 @@ behavior without Model serialization. The supported native versions remain exact
 upgrade still requires the unpatched/patched boundary checks described in native support.
 Current logs, browser screenshots and exact artifact/source evidence are retained in the financial
 workspace's ignored `.artifacts/worksplit-migration/`; baseline stabilization evidence remains in
-`.artifacts/worksplit-stabilization/`. Library examples are not a financial-host acceptance.
+`.artifacts/worksplit-stabilization/`. The current review, exact packed-source checks, user
+WebSocket browser run and financial-host counterexamples are in `.artifacts/worksplit-post-migration/`.
+Library examples are not a financial-host acceptance.
 
 - [Scenarios and counterexamples](worksplit-redesign-scenarios.md): the consumer problems and boundaries to preserve.
 - [Redesign requirements](worksplit-redesign.md): the migration acceptance matrix, design rationale and pending external scope.

@@ -188,11 +188,14 @@ protected owner must not silently make a dirty document closeable.
 
 A guard supplies synchronous `{ hasUnsavedChanges, token }` and decides a request against its
 captured state. Approval returns the exact current token; after the full native blocker chain,
-the library checks the token, owner, content lifetime and navigation receipt again at the real
-commit. Never infer approval from an href. Saving remains a business operation: only a confirmed
-write of the current basis may mark a draft saved. `request.defer` releases a pause acquired by
-that request on every completion path. Overlapping requests each acquire/release their own
-pause; see the complete editor source.
+the library checks the token, owner, content lifetime and navigation receipt again immediately
+before the native history write. This is earlier than loader completion and Router acceptance:
+the token check does not freeze an editor that remains available while a destination loads.
+If edits could continue in that interval, the business owner must pause them before approving
+and register its release with `request.defer`. The pause lasts until this request ends, including
+redirects, denial and supersession. Overlapping requests each acquire/release their own pause;
+see the complete editor source. Never infer approval from an href. Saving remains a business
+operation: only a confirmed write of the current basis may mark a draft saved.
 
 Use `content.runEffect` inside a React effect for content-owned requests/subscriptions. It
 provides one AbortSignal and `defer` cleanup; late-acquired resources are still released. Content

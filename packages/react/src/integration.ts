@@ -318,7 +318,8 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       getRecord: (id) => this.records.get(id),
       loadDocument: async (content) => {
         const record = this.recordFor(content);
-        if (this.phase === "running" && record?.role === "document") await this.initialize(record);
+        if (this.phase === "running" && record?.role === "document")
+          await this.observeInitialization(record);
       },
       registerController: (content, owner) => this.registerController(content, owner),
       updateController: (content, owner, controller) =>
@@ -831,6 +832,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     origin: "content" | "chrome" | "outside" | "blur",
     intent = false,
   ): void {
+    if (this.phase !== "running") return;
     const record = id ? this.records.get(id) : undefined;
     const changedSource = !!record && this.store.get().source !== record.handle;
     if (!this.focusing && origin !== "chrome" && (origin === "outside" || intent || changedSource))
@@ -1045,16 +1047,43 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     }
   }
   private publishActive(reason: "open" | "activate" | "close"): void {
-    if (!this.browser) return;
+    const browser = this.browser;
+    if (!browser) return;
     const active = this.store.get().activeDocumentId;
     const record = active ? this.records.get(active) : undefined;
+    if (record?.role === "document" && !record.ready) {
+      void this.observeInitialization(record)
+        .then(() => {
+          if (
+            this.browser === browser &&
+            browser.canPublishActive() &&
+            this.live(record) &&
+            record.ready &&
+            this.store.get().activeDocumentId === record.id
+          )
+            this.publishActive(reason);
+          return undefined;
+        })
+        .catch((error) => this.issue(error, record.id));
+      return;
+    }
     const href = record?.role === "document" ? record.href : this.options.home?.href;
     if (href === undefined) return;
-    this.browser.publish(
+    browser.publish(
       href,
       record?.role === "document" ? this.reference(record) : undefined,
-      reason !== "open" || this.browser.acceptedHref === href,
+      reason !== "open" || browser.acceptedHref === href,
     );
+  }
+  private async observeInitialization(record: DocumentRecord): Promise<void> {
+    const owner = record.initialization === undefined;
+    try {
+      await this.initialize(record);
+    } catch (error) {
+      // The first passive observer owns reporting; explicit start/open callers
+      // still receive their own operation result from initialize.
+      if (owner) this.issue(error, record.id);
+    }
   }
   private initialize(record: DocumentRecord): Promise<void> {
     if (record.ready) return Promise.resolve();
@@ -1581,7 +1610,6 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
   }
   async activate(id: string, options: ActivateOptions = {}): Promise<OperationResult<ContentInfo>> {
     if (this.phase !== "running") return denied("not-ready");
-    this.browser?.cancelPending();
     const record = this.records.get(id);
     if (!record || !this.live(record)) return denied("missing-content");
     try {
@@ -1591,6 +1619,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
           ? this.recordFor(this.store.get().source!)
           : undefined;
       if (options.source && !source) return denied("missing-content");
+      this.browser?.cancelPending();
       const result = this.present(
         record,
         options.presentation ?? "activate",
@@ -2540,6 +2569,9 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
           );
           if (close.status === "failed") this.reportResult(close);
           return close.status === "applied";
+        },
+        () => {
+          if (this.phase === "running") this.publishActive("activate");
         },
       );
       const accepted = await this.browser.start();
