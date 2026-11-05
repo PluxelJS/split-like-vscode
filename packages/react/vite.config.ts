@@ -50,6 +50,7 @@ export default defineConfig({
         cache: {
           input: [
             { auto: true },
+            { pattern: "src/**", base: "package" },
             { pattern: "../../tsconfig.base.json", base: "package" },
             { pattern: "../../patches/**", base: "package" },
             { pattern: "../../scripts/native-dependency-*.mjs", base: "package" },

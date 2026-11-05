@@ -9,7 +9,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DocumentRecord } from "./content-record";
 import { createWorkbench } from "./integration";
 import { integrationState } from "./internal";
-import type { BrowserHandoff, ContentController, LeaveRequest, WorkbenchInstance } from "./types";
+import type {
+  BrowserHandoff,
+  ContentController,
+  LeaveRequest,
+  WorkbenchInstance,
+  WorkbenchSnapshot,
+} from "./types";
 
 const workbenches: WorkbenchInstance<ReturnType<typeof factory>>[] = [];
 const deferredReleases: (() => void)[] = [];
@@ -42,7 +48,11 @@ function documentRecord(instance: object, id: string): DocumentRecord {
   return record;
 }
 function fixture(
-  options: { loader?: (id: string, signal: AbortSignal) => unknown; prepared?: boolean } = {},
+  options: {
+    loader?: (id: string, signal: AbortSignal) => unknown;
+    prepared?: boolean;
+    snapshot?: WorkbenchSnapshot;
+  } = {},
 ) {
   if (!options.prepared) {
     window.history.replaceState({ __TSR_index: 0, host: "outside" }, "", "/outside");
@@ -55,12 +65,14 @@ function fixture(
     createRouter: (history) => factory(history, options.loader),
     home: { mode: "empty", href: "/home" },
     captureSnapshotOnClose: true,
-    initial: {
-      layout: {
-        global: { tabEnableFloat: false, tabEnablePopout: false },
-        layout: { type: "row", children: [{ type: "tabset", id: "documents", children: [] }] },
-      },
-    },
+    initial: options.snapshot
+      ? { snapshot: options.snapshot }
+      : {
+          layout: {
+            global: { tabEnableFloat: false, tabEnablePopout: false },
+            layout: { type: "row", children: [{ type: "tabset", id: "documents", children: [] }] },
+          },
+        },
     onIssue: (issue) => {
       issues.push(issue.error);
     },
@@ -89,6 +101,76 @@ afterEach(async () => {
 });
 
 describe("Worksplit browser visits use live document entry identities", () => {
+  it("rebinds the exact restored copy without adding tabs on repeated browser startup", async () => {
+    let current = fixture();
+    await current.start();
+    await current.instance.open({ to: "/$id", params: { id: "b" } });
+    const copy = await current.instance.duplicate(current.instance.getActiveDocument()!.id);
+    expect(copy.status).toBe("applied");
+    const activeId = current.instance.getActiveDocument()!.id;
+    const ids = current.instance.getDocuments().map((document) => document.id);
+    for (let reload = 0; reload < 2; reload++) {
+      const oldReference = window.history.state["worksplit:browser-instance"].reference;
+      const snapshot = current.instance.createSnapshot();
+      // eslint-disable-next-line no-await-in-loop -- A reload terminates one session before restoring its snapshot.
+      await current.instance.dispose();
+      current = fixture({ prepared: true, snapshot });
+      // eslint-disable-next-line no-await-in-loop -- Each new browser attachment owns the next native history reference.
+      expect((await current.start()).status).toBe("applied");
+      expect(current.instance.getDocuments().map((document) => document.id)).toEqual(ids);
+      expect(current.instance.getActiveDocument()?.id).toBe(activeId);
+      const record = documentRecord(current.instance, activeId);
+      expect(record.runtime?.history.length).toBe(1);
+      expect(window.history.state["worksplit:browser-instance"].reference).toEqual({
+        contentId: activeId,
+        lifetime: record.lifetime,
+        entryKey: record.runtime!.history.location.state["__TSR_key"],
+      });
+      expect(record.lifetime).not.toBe(oldReference.lifetime);
+      expect(current.issues).toEqual([]);
+    }
+  });
+
+  it("does not rebind a restored reference whose browser href differs from the snapshot", async () => {
+    const first = fixture();
+    await first.start();
+    const original = first.instance.getActiveDocument()!;
+    const snapshot = first.instance.createSnapshot();
+    await first.instance.dispose();
+    window.history.replaceState(window.history.state, "", "/b");
+    const second = fixture({ prepared: true, snapshot });
+    expect((await second.start()).status).toBe("applied");
+    expect(second.instance.getDocument(original.id)?.href).toBe("/a");
+    expect(second.instance.getDocuments()).toHaveLength(2);
+    expect(second.instance.getActiveDocument()?.href).toBe("/b");
+    expect(second.instance.getActiveDocument()?.id).not.toBe(original.id);
+    expect(second.issues).toEqual([]);
+  });
+
+  it("opens a new lifetime for a stale browser reference after restored startup has finished", async () => {
+    const first = fixture();
+    await first.start();
+    const originalId = first.instance.getActiveDocument()!.id;
+    await documentRecord(first.instance, originalId).runtime!.history.push("/a", {
+      reading: "later entry",
+    }).finished;
+    await first.instance.duplicate(originalId);
+    const snapshot = first.instance.createSnapshot();
+    const ids = first.instance.getDocuments().map((document) => document.id);
+    await first.instance.dispose();
+    const second = fixture({ prepared: true, snapshot });
+    await second.start();
+    expect(second.instance.getDocuments()).toHaveLength(2);
+    window.history.back();
+    await vi.waitFor(() => expect(second.instance.getDocuments()).toHaveLength(3));
+    expect(second.instance.getActiveDocument()?.href).toBe("/a");
+    expect(ids).not.toContain(second.instance.getActiveDocument()?.id);
+    expect(window.history.state["worksplit:browser-instance"].reference.contentId).toBe(
+      second.instance.getActiveDocument()?.id,
+    );
+    expect(second.issues).toEqual([]);
+  });
+
   it("does not create browser visits for an unchanged GO or boundary BACK/FORWARD", async () => {
     const { instance, start } = fixture();
     await start();

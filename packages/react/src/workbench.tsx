@@ -196,7 +196,13 @@ export function Workbench<TRouter extends AnyRouter>({
     const intent = (event: Event) => observe(event.target, true);
     const out = () =>
       queueMicrotask(() => {
-        if (active && !element.contains(doc.activeElement)) internal.focus(null, "outside");
+        if (!active || element.contains(doc.activeElement)) return;
+        // Native panel visibility can blur the old editor to body before the
+        // activated content receives focus. That is not a new outside owner;
+        // outside focus/input and window blur have their own cancellation events.
+        const target = doc.activeElement;
+        const passive = !target || target === doc.body || target === doc.documentElement;
+        internal.focus(null, passive ? "blur" : "outside");
       });
     const focused = () => {
       internal.setWindowFocus(true);

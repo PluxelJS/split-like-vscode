@@ -329,6 +329,48 @@ describe("native content focus keyboard routing", () => {
     expect(workbench.getContext().source?.id).toBe(id);
   });
 
+  it.each(["native blur", "outside focus", "window blur"] as const)(
+    "keeps only current activated focus through native visibility blur after %s",
+    async (interruption) => {
+      const outsideFocus = interruption === "outside focus";
+      const windowBlur = interruption === "window blur";
+      const { workbench, open } = await fixture();
+      const a = await open("A");
+      const b = await open("B");
+      render(
+        <>
+          <input aria-label="Outside editor" />
+          <Workbench instance={workbench} />
+        </>,
+      );
+      const previous = await screen.findByRole("textbox", { name: `Editor ${b}` });
+      const outside = screen.getByRole("textbox", { name: "Outside editor" });
+      act(() => previous.focus());
+      const flushFrames = holdAnimationFrames();
+      const deferredFocus = vi.fn<() => void>(() =>
+        screen.getByRole("textbox", { name: `Editor ${a}` }).focus(),
+      );
+      await act(async () => {
+        const activating = workbench.activate(a, { focus: deferredFocus });
+        // Browsers blur an editor to body when native selection/maximization
+        // hides its panel. jsdom needs that browser visibility effect supplied.
+        if (outsideFocus) outside.focus();
+        else previous.blur();
+        if (windowBlur) fireEvent.blur(window);
+        expect(await activating).toMatchObject({ status: "applied" });
+      });
+      const target = await screen.findByRole("textbox", { name: `Editor ${a}` });
+      expect(document.activeElement).toBe(outsideFocus ? outside : document.body);
+      act(flushFrames);
+      expect(deferredFocus).toHaveBeenCalledTimes(outsideFocus || windowBlur ? 0 : 1);
+      expect(document.activeElement).toBe(
+        outsideFocus ? outside : windowBlur ? document.body : target,
+      );
+      expect(workbench.getContext().source?.id).toBe(a);
+      expect(workbench.getContext().windowFocused).toBe(!windowBlur);
+    },
+  );
+
   it("does not adopt a portal owner's document or route its key to the native panel", async () => {
     const { workbench, open } = await fixture();
     const a = await open("A");

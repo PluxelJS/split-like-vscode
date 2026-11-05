@@ -25,7 +25,11 @@ export interface IntegrationState {
   bindLayout(getLayout: () => ILayoutApi | null, root: HTMLElement): () => void;
   bindContentRoot(content: ContentHandle, root: HTMLElement | null): void;
   /** Returning focus to the same source is distinct from a fresh pointer interaction. */
-  focus(id: string | null, origin: "content" | "chrome" | "outside", intent?: boolean): void;
+  focus(
+    id: string | null,
+    origin: "content" | "chrome" | "outside" | "blur",
+    intent?: boolean,
+  ): void;
   setWindowFocus(focused: boolean): void;
   modelAction(action: Action): undefined;
   closeTargets(target: CloseTarget): readonly TabNode[] | null;

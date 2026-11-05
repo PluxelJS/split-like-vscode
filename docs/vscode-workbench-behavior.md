@@ -133,7 +133,9 @@ commit-stage error occurs; there is no after-the-fact reconstruction of a remove
 Active document, active container, focused content and window focus are separate queries.
 Native chrome focus does not arbitrarily cancel a valid content request. Later content pointer
 or keyboard input, or focus in another content or outside the workspace, invalidates an older
-delayed focus request. Automatic focus return to the source is not a new input intent. Focusing a tool preserves the
+delayed focus request. A passive blur to body when native panel visibility changes only clears
+the observed focused content; it preserves a pending activation and does not mark the window
+focused again. Automatic focus return to the source is not a new input intent. Focusing a tool preserves the
 active document. Native keyboard selection keeps tab-strip focus; explicit activate/open can
 focus content after mount. The native optional key map, including F6 when configured, is passed
 through, not replaced by library shortcuts.
@@ -163,6 +165,9 @@ Restore validates unknown JSON before creating Router/content lifetimes. Unsuppo
 malformed configuration, unresolved tools and invalid topology fail explicitly. There is no
 legacy converter. The host decides how to show reset/recovery and where to store shared drafts;
 layout restore does not imply restoration of business data or remote capabilities.
+A snapshot startup rebinds the current browser entry to its exact restored tab when the persisted
+content id and href match. Router/content lifetimes are fresh; later traversal of a stale browser
+reference still opens a new document.
 
 The demo and packed consumer share read-only, real editor and custom tool/menu sources. Desktop
 and narrow-window browser acceptance is separate from native Model/Router tests. External hosts,

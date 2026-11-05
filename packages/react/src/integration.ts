@@ -828,7 +828,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
   }
   private observeFocus(
     id: string | null,
-    origin: "content" | "chrome" | "outside",
+    origin: "content" | "chrome" | "outside" | "blur",
     intent = false,
   ): void {
     const record = id ? this.records.get(id) : undefined;
@@ -847,7 +847,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       ...state,
       focusedContentId: record?.id ?? null,
       source: record?.handle ?? state.source,
-      windowFocused: origin !== "outside" || state.windowFocused,
+      windowFocused: origin === "outside" || origin === "blur" ? state.windowFocused : true,
     }));
   }
   private acceptActivity(record: ContentRecord, focus: boolean, callback?: () => void): void {
@@ -2624,6 +2624,23 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
         return { href };
       }
       const record = reference ? this.records.get(reference.contentId) : undefined;
+      // Restored tabs have new capabilities. Rebind only the initial browser entry
+      // to its exact persisted tab; equal URLs do not identify a particular copy.
+      if (
+        this.phase === "starting" &&
+        this.options.initial &&
+        "snapshot" in this.options.initial &&
+        record?.role === "document" &&
+        record.lifetime !== reference!.lifetime &&
+        record.href === href
+      ) {
+        await this.initialize(record);
+        if (!current() || !this.live(record) || !record.ready) return;
+        const shown = this.present(record, "activate");
+        if (shown.status !== "applied") return;
+        const ref = this.reference(record);
+        return { href: record.href, ...(ref ? { reference: ref } : {}) };
+      }
       if (
         record?.role === "document" &&
         record.lifetime === reference!.lifetime &&
