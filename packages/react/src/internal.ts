@@ -30,6 +30,7 @@ export interface IntegrationState {
     origin: "content" | "chrome" | "outside" | "blur",
     intent?: boolean,
   ): void;
+  returnFocus(): void;
   setWindowFocus(focused: boolean): void;
   modelAction(action: Action): undefined;
   closeTargets(target: CloseTarget): readonly TabNode[] | null;

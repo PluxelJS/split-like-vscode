@@ -107,6 +107,51 @@ export async function checkNativeDependencyBrowser(consumer) {
       report.checks.push(
         `${viewport.width}×${viewport.height}: native mouse drag, cross-Layout isolation, cancellation, keyboard editing and subsequent drop`,
       );
+      await page.locator("#native-group-menu").click();
+      const swatches = page.locator(".flexlayout__group_color_picker_swatch");
+      await page.keyboard.press("Tab");
+      assert.equal(
+        await swatches.nth(0).evaluate((element) => element === document.activeElement),
+        true,
+      );
+      await page.keyboard.press("ArrowRight");
+      assert.equal(
+        await swatches.nth(1).evaluate((element) => element === document.activeElement),
+        true,
+      );
+      await page.keyboard.press("Enter");
+      assert.equal(await page.locator('[role="menu"]').count(), 1);
+      assert.equal(await page.evaluate(() => window.nativeGate.menu.actions.length), 1);
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press("Space");
+      assert.equal(await page.locator('[role="menu"]').count(), 1);
+      assert.equal(await page.evaluate(() => window.nativeGate.menu.actions.length), 2);
+      await page.keyboard.press("Home");
+      assert.equal(
+        await swatches.nth(0).evaluate((element) => element === document.activeElement),
+        true,
+      );
+      await page.keyboard.press("End");
+      assert.equal(
+        await swatches.last().evaluate((element) => element === document.activeElement),
+        true,
+      );
+      await page.keyboard.press("ArrowRight");
+      assert.equal(
+        await swatches.nth(0).evaluate((element) => element === document.activeElement),
+        true,
+      );
+      await page.keyboard.press("Escape");
+      assert.equal(await page.locator('[role="menu"]').count(), 0);
+      assert.equal(
+        await page
+          .locator("#native-group-menu")
+          .evaluate((element) => element === document.activeElement),
+        true,
+      );
+      report.checks.push(
+        `${viewport.width}×${viewport.height}: native group palette Tab entry, arrow roving, Enter/Space activation, Escape and focus return`,
+      );
     }
     assert.deepEqual(report.pageErrors, []);
     report.status = "passed";

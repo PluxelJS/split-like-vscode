@@ -188,7 +188,7 @@ export function Workbench<TRouter extends AnyRouter>({
       }
       const content = target.closest<HTMLElement>("[data-worksplit-content]");
       if (content) internal.focus(content.dataset.worksplitContent!, "content", intent);
-      else internal.focus(null, "chrome");
+      else internal.focus(null, "chrome", intent);
     };
     const focus = (event: Event) => observe(event.target);
     // Capture intent before a host or child handler starts work from the same event.
@@ -228,6 +228,7 @@ export function Workbench<TRouter extends AnyRouter>({
   return (
     <div
       role="presentation"
+      tabIndex={-1}
       {...rootProps}
       ref={root}
       className={`worksplit-workbench${className ? ` ${className}` : ""}`}

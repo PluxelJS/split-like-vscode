@@ -89,6 +89,9 @@ Standard close entries retain native labels and `i18nTranslator`; Worksplit repl
 execution with protected close. `menus.labels` covers the additional Worksplit entries.
 
 Host dialogs may take focus after that completion without a later menu cleanup stealing it.
+The default popup uses its native layout's theme scope. Inline native editors dispatch without
+closing the popup unless they explicitly request closure; selected menu entries retain the
+same `onClosed` handoff before their callbacks execute.
 Custom renderers need no command framework and must keep exactly this close-completion protocol.
 The [runnable custom renderer](../packages/demo/src/examples/menus.tsx) implements it.
 
@@ -131,14 +134,21 @@ commit-stage error occurs; there is no after-the-fact reconstruction of a remove
 ## Focus, visibility and cleanup
 
 Active document, active container, focused content and window focus are separate queries.
-Native chrome focus does not arbitrarily cancel a valid content request. Later content pointer
-or keyboard input, or focus in another content or outside the workspace, invalidates an older
+Passive native chrome focus does not cancel a valid content request. Later chrome or content
+pointer or keyboard input, or focus in another content or outside the workspace, invalidates an older
 delayed focus request. A passive blur to body when native panel visibility changes only clears
 the observed focused content; it preserves a pending activation and does not mark the window
 focused again. Automatic focus return to the source is not a new input intent. Focusing a tool preserves the
 active document. Native keyboard selection keeps tab-strip focus; explicit activate/open can
 focus content after mount. The native optional key map, including F6 when configured, is passed
 through, not replaced by library shortcuts.
+
+When a protected close or invalidated menu removes the focused DOM, or native maximize hides
+its focused sibling, Worksplit returns keyboard
+scope to its own root after native rendering settles. This single handoff runs only if focus
+has fallen to body, the window remains focused and no newer content or outside input has taken
+over. Surviving native chrome, content and external focus are preserved. The root's default
+`tabIndex={-1}` provides this fallback without adding a sequential Tab stop.
 
 Tab movement/grouping, inactive tabs, native Border hiding and resize preserve mounted content,
 input/scroll state and content resources. React effect dependencies still control their own

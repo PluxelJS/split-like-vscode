@@ -433,6 +433,29 @@ describe("the single native Model", () => {
     expect(instance.getActiveDocument()?.id).toBe(a.id);
     expect(saved).not.toHaveBeenCalled();
   });
+  it("persists native Border preferences through dispatch and snapshot restoration", async () => {
+    const { instance } = await setup({ initial: { layout: withBorder } });
+    const config = { sidebarEntries: ["market"], navigationMode: "labels" };
+    expect(
+      (await instance.dispatch(Actions.updateNodeAttributes("border_bottom", { config }))).status,
+    ).toBe("applied");
+    const snapshot = instance.createSnapshot();
+    expect(snapshot).not.toBeNull();
+    const restored = await setup({ initial: { snapshot: snapshot! } });
+    expect(
+      (restored.instance.model.getNodeById("border_bottom") as BorderNode).getConfig(),
+    ).toEqual(config);
+    expect(
+      (
+        await restored.instance.dispatch(
+          Actions.updateNodeAttributes("border_bottom", { config: { worksplit: {} } }),
+        )
+      ).status,
+    ).toBe("denied");
+    expect(
+      (restored.instance.model.getNodeById("border_bottom") as BorderNode).getConfig(),
+    ).toEqual(config);
+  });
   it("refuses policy-dependent multi-step docking without mutating or saving the Model", async () => {
     const { instance, open } = await setup({
       initial: { layout: withBorder },

@@ -17,6 +17,7 @@ for (const name of [
   "HTMLElement",
   "Element",
   "Node",
+  "DOMRect",
   "getComputedStyle",
   "MutationObserver",
 ]) {
@@ -39,7 +40,7 @@ dom.window.HTMLElement.prototype.getBoundingClientRect = () =>
 dom.window.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {} });
 const { act, createElement, createRef } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { Layout, Model } = await import("flexlayout-react");
+const { Actions, ContextMenuBuilder, Layout, Model, PopupMenu } = await import("flexlayout-react");
 const { nativePackages } = await import("./native-dependencies/install.mjs");
 const packages = await nativePackages(process.cwd());
 for (const value of packages.values()) {
@@ -136,6 +137,85 @@ try {
   );
   await act(async () => first.current.endDrag());
   for (const value of seenModels) assert.ok(value === firstModel || value === secondModel);
+  const menuModel = Model.fromJson({
+    global: { tabSetEnableTabGroups: true },
+    layout: {
+      type: "row",
+      children: [
+        {
+          type: "tabset",
+          children: [{ type: "tab", id: "palette", name: "Palette", component: "test" }],
+        },
+      ],
+    },
+  });
+  menuModel.doAction(Actions.addTabToNewGroup("palette", "Palette"));
+  const group = menuModel.getNodeById("palette").getParent();
+  let dismissed = 0;
+  const menuActions = [];
+  const items = new ContextMenuBuilder(group, {
+    onAction: (action) => {
+      menuActions.push(action);
+      menuModel.doAction(action);
+    },
+  })
+    .addStandard()
+    .build();
+  await act(async () =>
+    root.render(
+      createElement(PopupMenu, {
+        anchor: { x: 10, y: 10 },
+        items,
+        onClose: () => {
+          dismissed++;
+        },
+      }),
+    ),
+  );
+  const swatches = [...document.querySelectorAll(".flexlayout__group_color_picker_swatch")];
+  assert.ok(swatches.length > 1);
+  const press = async (target, key) => {
+    const event = new dom.window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+    await act(async () => target.dispatchEvent(event));
+    return event;
+  };
+  await act(async () => swatches[0].focus());
+  await press(swatches[0], "ArrowRight");
+  assert.equal(document.activeElement, swatches[1], "Palette arrows move native button focus");
+  assert.deepEqual(
+    swatches.map((button) => button.tabIndex),
+    swatches.map((_, index) => (index === 1 ? 0 : -1)),
+  );
+  await press(swatches[1], "Home");
+  assert.equal(document.activeElement, swatches[0]);
+  await press(swatches[0], "ArrowLeft");
+  assert.equal(document.activeElement, swatches.at(-1), "Palette arrows wrap");
+  await press(swatches.at(-1), "ArrowDown");
+  assert.equal(document.activeElement, swatches[0]);
+  await press(swatches[0], "End");
+  assert.equal(document.activeElement, swatches.at(-1));
+  for (const [index, key] of [
+    [1, "Enter"],
+    [2, " "],
+  ]) {
+    const button = swatches[index];
+    await act(async () => button.focus());
+    const event = await press(button, key);
+    assert.equal(
+      event.defaultPrevented,
+      false,
+      "PopupMenu must preserve native nested button activation",
+    );
+    assert.equal(dismissed, 0, "Nested buttons must not select the outer menu row");
+    // JSDOM has no keyboard default action. The production browser gate presses these keys directly.
+    await act(async () => button.click());
+    assert.equal(menuActions.at(-1).type, Actions.UPDATE_NODE_ATTRIBUTES);
+    assert.equal(group.getColor(), menuActions.at(-1).data.json.color);
+  }
+  assert.equal(menuActions.length, 2);
+  const escape = await press(document.activeElement, "Escape");
+  assert.equal(escape.defaultPrevented, true);
+  assert.equal(dismissed, 1, "Escape still dismisses from a nested control");
   process.stdout.write(
     JSON.stringify(
       {
@@ -149,6 +229,8 @@ try {
           "independent Layout ownership",
           "idempotent drag release",
           "late dragleave followed by a new drag",
+          "native palette arrow roving and nested Enter/Space activation",
+          "menu dismissal from embedded controls",
         ],
         environment:
           "Node client conditions + JSDOM; browser interaction is a separate acceptance boundary",

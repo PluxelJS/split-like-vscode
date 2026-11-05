@@ -87,7 +87,7 @@ patchedDependencies:
   '@tanstack/history@1.162.5': ffcf90d261a23d540cc01b29d8c6033e3f62135e52979409c0fd626d44a91e44
   '@tanstack/react-router@1.170.46': a06f7fffde2d0daf0c006a0f415da14330df13d063afb0849cf85951b6f93a51
   '@tanstack/router-core@1.171.39': 8c8c284faf7097cb407920dd77b598ceb5b38e295ec464d12b9cd9f8ab06f808
-  flexlayout-react@0.11.1: 372b8a39eed33bb2faf78ef5124437b02c67e543ce1f9aba4852887f83d55ca9
+  flexlayout-react@0.11.1: 035fdfbd510815624b5adbff94c1abe6a50b7a51cd1feb8b280a8e4267516155
 
 importers:
 
@@ -134,7 +134,7 @@ importers:
         version: link:../split-view
       flexlayout-react:
         specifier: catalog:frontend
-        version: 0.11.1(patch_hash=372b8a39eed33bb2faf78ef5124437b02c67e543ce1f9aba4852887f83d55ca9)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: 0.11.1(patch_hash=035fdfbd510815624b5adbff94c1abe6a50b7a51cd1feb8b280a8e4267516155)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react:
         specifier: catalog:frontend
         version: 19.3.1
@@ -168,7 +168,7 @@ importers:
         version: 1.170.46(patch_hash=a06f7fffde2d0daf0c006a0f415da14330df13d063afb0849cf85951b6f93a51)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       flexlayout-react:
         specifier: catalog:peer
-        version: 0.11.1(patch_hash=372b8a39eed33bb2faf78ef5124437b02c67e543ce1f9aba4852887f83d55ca9)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: 0.11.1(patch_hash=035fdfbd510815624b5adbff94c1abe6a50b7a51cd1feb8b280a8e4267516155)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
     devDependencies:
       '@tanstack/react-hotkeys':
         specifier: catalog:frontend
@@ -2313,7 +2313,7 @@ snapshots:
 
   flatted@3.4.4: {}
 
-  flexlayout-react@0.11.1(patch_hash=372b8a39eed33bb2faf78ef5124437b02c67e543ce1f9aba4852887f83d55ca9)(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+  flexlayout-react@0.11.1(patch_hash=035fdfbd510815624b5adbff94c1abe6a50b7a51cd1feb8b280a8e4267516155)(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)

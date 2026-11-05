@@ -187,6 +187,8 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
   private view: { getLayout: () => ILayoutApi | null; root: HTMLElement } | undefined;
   private focusEpoch = 0;
   private focusing = false;
+  private focusInside = false;
+  private focusReturn: (() => void) | undefined;
   private focusRequest:
     | {
         record: ContentRecord;
@@ -218,6 +220,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
   private readonly modelListener: ModelChangeListener;
   private readonly movedPreviews = new WeakMap<Action, Set<ContentRecord>>();
   private readonly priorSelection = new WeakMap<Action, Node | undefined>();
+  private readonly priorFocus = new WeakMap<Action, Element | null>();
 
   constructor(options: WorkbenchOptions<TRouter>) {
     this.options = {
@@ -285,6 +288,8 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     this.modelListener = {
       onBeforeAction: (action) => {
         this.priorSelection.set(action, this.model.getActiveTabset()?.getSelectedNode());
+        if (actionsIn(action).some((leaf) => leaf.type === Actions.MAXIMIZE_TOGGLE))
+          this.priorFocus.set(action, this.view?.root.ownerDocument.activeElement ?? null);
         const moved = new Set<ContentRecord>();
         for (const leaf of actionsIn(action))
           if (leaf.type === Actions.MOVE_NODE) {
@@ -334,6 +339,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
         }
       },
       focus: (id, origin, intent) => this.observeFocus(id, origin, intent),
+      returnFocus: () => this.returnFocus(),
       setWindowFocus: (windowFocused) => {
         if (!windowFocused) this.cancelFocus();
         this.store.setState((state) => ({ ...state, windowFocused }));
@@ -544,6 +550,9 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       }
     }
     this.priorSelection.delete(action);
+    const previousFocus = this.priorFocus.get(action);
+    this.priorFocus.delete(action);
+    if (previousFocus) this.returnFocus(previousFocus);
   }
 
   getContent(id: string): ContentInfo | null {
@@ -793,6 +802,46 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     this.focusEpoch++;
     this.focusRequest?.cancel?.();
     this.focusRequest = undefined;
+    this.focusReturn?.();
+    this.focusReturn = undefined;
+  }
+  /** Native removal can blur to body after commit. Restore keyboard scope only when
+   * the browser has no surviving focus owner and no later input has taken over. */
+  private returnFocus(previous?: Element | null): void {
+    const view = this.view;
+    if (
+      !view ||
+      this.phase !== "running" ||
+      !this.focusInside ||
+      !this.store.get().windowFocused ||
+      this.focusRequest
+    )
+      return;
+    const doc = view.root.ownerDocument;
+    const passive = () =>
+      !doc.activeElement ||
+      doc.activeElement === doc.body ||
+      doc.activeElement === doc.documentElement;
+    if (!passive() && doc.activeElement !== previous) return;
+    const epoch = this.focusEpoch;
+    this.focusReturn?.();
+    const run = () => {
+      this.focusReturn = undefined;
+      if (
+        this.view !== view ||
+        this.phase !== "running" ||
+        this.focusEpoch !== epoch ||
+        !this.store.get().windowFocused ||
+        !passive()
+      )
+        return;
+      view.root.focus();
+    };
+    const win = doc.defaultView;
+    if (win) {
+      const frame = win.requestAnimationFrame(run);
+      this.focusReturn = () => win.cancelAnimationFrame(frame);
+    } else queueMicrotask(run);
   }
   private scheduleFocus(): void {
     const request = this.focusRequest;
@@ -834,9 +883,14 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     intent = false,
   ): void {
     if (this.phase !== "running") return;
+    // A passive blur caused by native removal does not replace an explicit outside owner.
+    if (origin !== "blur") this.focusInside = origin !== "outside";
     const record = id ? this.records.get(id) : undefined;
     const changedSource = !!record && this.store.get().source !== record.handle;
-    if (!this.focusing && origin !== "chrome" && (origin === "outside" || intent || changedSource))
+    if (
+      !this.focusing &&
+      (origin === "outside" || intent || (origin !== "chrome" && changedSource))
+    )
       this.cancelFocus();
     if (record && this.live(record) && origin === "content") {
       // Closing a native dialog restores focus to its opener. Returning to the
@@ -1760,6 +1814,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     const approvals: Approval[] = [];
     const removed: ContentRecord[] = [];
     let phase: Failed["phase"] = "prepare";
+    let previousFocus: Element | null | undefined;
     const containers = records.map((record) => tabContainer(record.node));
     let endAbort!: () => void;
     const cancelled = new Promise<false>((resolve) => {
@@ -1786,6 +1841,8 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       if (!scopeCurrent() || !approvals.every((approval) => approval.validate()))
         return denied("state-changed");
       phase = "commit";
+      previousFocus = this.view?.root.ownerDocument.activeElement;
+      if (previousFocus && !this.view?.root.contains(previousFocus)) previousFocus = undefined;
       for (const [index, record] of records.entries()) {
         for (let remaining = index; remaining < records.length; remaining++) {
           const current = records[remaining]!;
@@ -1812,12 +1869,12 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
         if (!removed.includes(record))
           throw new Error("Native close did not remove the approved content");
       }
-      const cleanup = this.release(removed);
+      const cleanup = this.release(removed, previousFocus);
       errors.push(...LeaveAttempt.end(approvals.map((approval) => approval.attempt)));
       errors.push(...(await cleanup));
       return applied({ closedIds: removed.map((record) => record.id) }, errors);
     } catch (error) {
-      const cleanup = this.release(removed);
+      const cleanup = this.release(removed, previousFocus);
       errors.push(...LeaveAttempt.end(approvals.map((approval) => approval.attempt)));
       errors.push(...(await cleanup));
       return failed(
@@ -1833,7 +1890,10 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       );
     }
   }
-  private release(records: readonly ContentRecord[]): Promise<unknown[]> {
+  private release(
+    records: readonly ContentRecord[],
+    previousFocus?: Element | null,
+  ): Promise<unknown[]> {
     const unique = [...new Set(records)].filter((record) => this.records.get(record.id) === record);
     unique.forEach((record) => {
       record.closed = true;
@@ -1877,6 +1937,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       this.publishActive("close");
     }
     this.changed(true);
+    if (unique.length && previousFocus) this.returnFocus(previousFocus);
     return Promise.all(effects.map((effect) => effect.result)).then((results) => [
       ...errors,
       ...results.flat(),
@@ -2282,7 +2343,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
           return false;
         if (Object.hasOwn(attributes, "config")) {
           const old = this.model.getNodeById(leaf.data.node);
-          if (!(old instanceof TabNode)) return false;
+          if (!old) return false;
           const config = attributes.config;
           if (
             !config ||
@@ -2291,9 +2352,11 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
             Object.hasOwn(config, "worksplit")
           )
             return false;
-          const record = this.records.get(old.getId());
-          if (record?.role === "tool" && !this.resolveTool({ ...old.toJson(), config }))
-            return false;
+          if (old instanceof TabNode) {
+            const record = this.records.get(old.getId());
+            if (record?.role === "tool" && !this.resolveTool({ ...old.toJson(), config }))
+              return false;
+          }
         }
         return (
           leaf.type === Actions.UPDATE_MODEL_ATTRIBUTES || !!this.model.getNodeById(leaf.data.node)

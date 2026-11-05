@@ -164,6 +164,10 @@ all shipped runtime/declaration targets are checked against upstream hashes.
   `dragleave` after owner cancellation clamps the native enter counter at zero, so the next
   actual drag can begin normally. The independent browser fixture reproduces cancellation,
   late events and subsequent drag at desktop and narrow sizes.
+- Native group color swatches support arrow keys, Home/End and wrapping focus. `PopupMenu`
+  preserves embedded input editing and native button Enter/Space activation, while Escape/Tab
+  still dismiss the menu. The independent native fixture covers the actual browser key defaults;
+  Worksplit does not replace the group controls or intercept their keyboard events.
 - Public `Model.getGlobalAttributes(): IGlobalAttributes` returns detached native global
   attributes without a save event or Model change notification. Detached admission candidates
   use these attributes to present the same inherited close/drag/group facts to host `allowDrop`.

@@ -16,18 +16,32 @@ diff --git a/dist/index.js b/dist/index.js
  		}
  	}
  	/** @internal */
-@@ -3045,6 +3047,10 @@
- 			layout: this.mainLayout.getRootRow().toJson(),
+@@ -3046,6 +3048,10 @@
  			subLayouts
  		};
-+	}
+ 	}
 +	/** Return detached native global attributes without firing node save events. */
 +	getGlobalAttributes() {
 +		return structuredClone(this.attributes);
- 	}
++	}
  	getSplitterSize() {
  		return this.splitterSize;
-@@ -8210,7 +8216,7 @@
+ 	}
+@@ -5696,8 +5702,12 @@
+ 		return () => doc.removeEventListener("pointerdown", onDocPointerDown);
+ 	}, [container, onClose]);
+ 	const handleKeyDown = (event) => {
+-		const menuItems = Array.from(menuRef.current?.querySelectorAll("[role=\"menuitem\"]:not([aria-disabled=\"true\"])") ?? []);
++		if (event.defaultPrevented) return;
+ 		const focused = event.target.closest?.("[role=\"menuitem\"]");
++		const control = event.target.closest?.("input, textarea, select, button, [contenteditable]:not([contenteditable=\"false\"])");
++		// Embedded controls keep native editing and button activation; dismissal still belongs to the menu.
++		if (control && control !== focused && event.key !== "Escape" && event.key !== "Tab") return;
++		const menuItems = Array.from(menuRef.current?.querySelectorAll("[role=\"menuitem\"]:not([aria-disabled=\"true\"])") ?? []);
+ 		const focusedIndex = focused ? menuItems.indexOf(focused) : -1;
+ 		if (event.key === "Escape" || event.key === "Tab") {
+ 			onClose();
+@@ -8210,7 +8220,7 @@
  		this.updateActive(event);
  	};
  	onDragLeaveRaw = (event) => {
@@ -36,17 +50,37 @@ diff --git a/dist/index.js b/dist/index.js
  		this.updateActive(event);
  	};
  	clearDragMain() {
-@@ -9432,6 +9438,10 @@
- 		},
+@@ -9433,6 +9443,10 @@
  		addTabWithDragAndDrop: (event, json, onDrop) => {
  			controllerRef.current?.addTabWithDragAndDrop(event, json, onDrop);
-+		},
+ 		},
 +		endDrag: () => {
 +			const controller = controllerRef.current;
 +			if (controller && DragDropManager.dragState?.mainLayoutController === controller.getMainController()) controller.getDragDropManager().onDragEnded();
- 		},
++		},
  		moveTabWithDragAndDrop: (event, node) => {
  			controllerRef.current?.moveTabWithDragAndDrop(event, node);
+ 		},
+@@ -9839,6 +9853,19 @@
+ 			children: [palette.map((c, i) => /* @__PURE__ */ jsx("button", {
+ 				type: "button",
+ 				className: "flexlayout__group_color_picker_swatch",
++				tabIndex: i === 0 ? 0 : -1,
++				onFocus: (event) => {
++					for (const button of event.currentTarget.parentElement.querySelectorAll(".flexlayout__group_color_picker_swatch")) button.tabIndex = button === event.currentTarget ? 0 : -1;
++				},
++				onKeyDown: (event) => {
++					if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
++					event.preventDefault();
++					event.stopPropagation();
++					const buttons = Array.from(event.currentTarget.parentElement.querySelectorAll(".flexlayout__group_color_picker_swatch"));
++					const index = buttons.indexOf(event.currentTarget);
++					const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1) + buttons.length) % buttons.length;
++					buttons[next]?.focus();
++				},
+ 				style: { backgroundColor: c },
+ 				"aria-label": (getViewController(group.getLayout())?.i18nName(I18nLabel.Group_Color_N) ?? defaultLabel(I18nLabel.Group_Color_N)).replace("?", String(i + 1)),
+ 				onClick: (e) => {
 diff --git a/types/view/Layout.d.ts b/types/view/Layout.d.ts
 --- a/types/view/Layout.d.ts
 +++ b/types/view/Layout.d.ts

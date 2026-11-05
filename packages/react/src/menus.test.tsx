@@ -73,6 +73,91 @@ async function fixture() {
 }
 
 describe("native default Worksplit menus", () => {
+  it.each(["body", "input"] as const)(
+    "preserves a newer outside %s owner while an invalid menu finishes closing",
+    async (destination) => {
+      const { instance, first } = await fixture();
+      applied(await instance.dispatch(Actions.addTabToNewGroup(first.id, "Temporary")));
+      const group = instance.model.getNodeById(first.id)!.getParent()!;
+      let finish: (() => void) | undefined;
+      function AnimatedMenu({ open, onClosed, ...props }: MenuRendererProps) {
+        useEffect(() => {
+          if (!open) finish = onClosed;
+        }, [open, onClosed]);
+        return open ? <PopupMenu {...props} /> : null;
+      }
+      const outside = document.createElement("input");
+      document.body.append(outside);
+      render(
+        <Workbench
+          instance={instance}
+          menus={{ render: (props) => <AnimatedMenu {...props} /> }}
+        />,
+      );
+      fireEvent.contextMenu(await screen.findByRole("button", { name: "Temporary" }));
+      await screen.findByRole("menu");
+      await act(async () => {
+        applied(await instance.dispatch(Actions.ungroup(group.getId())));
+      });
+      await waitFor(() => expect(finish).toBeTypeOf("function"));
+      fireEvent.pointerDown(destination === "input" ? outside : document.body);
+      if (destination === "input") outside.focus();
+      act(() => finish!());
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      expect(document.activeElement).toBe(destination === "input" ? outside : document.body);
+      expect(instance.getDocument(first.id)).not.toBeNull();
+      outside.remove();
+    },
+  );
+
+  it.each(["group removal", "tab movement"] as const)(
+    "returns keyboard scope after %s invalidates the focused menu anchor",
+    async (operation) => {
+      const { instance, first, open } = await fixture();
+      const second = await open("B");
+      const view = render(<Workbench instance={instance} />);
+      await waitFor(() =>
+        expect(document.activeElement).toBe(
+          view.container.querySelector(`[data-worksplit-content="${second.id}"]`),
+        ),
+      );
+      let mutate: () => Promise<OperationResult<unknown>>;
+      if (operation === "group removal") {
+        await act(async () => {
+          applied(await instance.dispatch(Actions.addTabToNewGroup(first.id, "Temporary")));
+        });
+        const group = instance.model.getNodeById(first.id)!.getParent()!;
+        fireEvent.contextMenu(await screen.findByRole("button", { name: "Temporary" }));
+        mutate = () => instance.dispatch(Actions.ungroup(group.getId()));
+      } else {
+        fireEvent.contextMenu(await screen.findByRole("tab", { name: "A" }));
+        const container = instance.getDocument(first.id)!.containerId;
+        if (!container) throw new Error("The opened document has no native container");
+        mutate = () =>
+          instance.dispatch(Actions.moveNode(first.id, container, DockLocation.RIGHT, -1));
+      }
+      const stale = await screen.findByRole("menuitem", {
+        name: operation === "group removal" ? "Close Group" : "Close",
+      });
+      expect(screen.getByRole("menu").contains(document.activeElement)).toBe(true);
+      await act(async () => {
+        applied(await mutate());
+      });
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+      await waitFor(() => expect(document.activeElement).toBe(view.container.firstElementChild));
+      fireEvent.click(stale);
+      expect(instance.getDocuments()).toHaveLength(2);
+    },
+  );
+
+  it("portals the default menu into its native layout's theme scope", async () => {
+    const { instance, first } = await fixture();
+    render(<Workbench instance={instance} />);
+    fireEvent.contextMenu(await screen.findByRole("tab", { name: "A" }));
+    const menu = await screen.findByRole("menu");
+    expect(menu.closest(".flexlayout__layout")).toBe(first.node.getLayoutRef());
+  });
+
   it("retains native translations while protecting close ranges", async () => {
     const { instance, open } = await fixture();
     const second = await open("B");
@@ -148,6 +233,7 @@ describe("native default Worksplit menus", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: "Renamed reports" }));
     fireEvent.click(screen.getAllByRole("button", { name: /Group color/i })[0]!);
     await waitFor(() => expect(group.getColor()).not.toBe("#426b42"));
+    expect(screen.getByRole("menu")).toBeDefined();
     await act(async () => {
       applied(
         await instance.dispatch(Actions.updateNodeAttributes(group.getId(), { opened: false })),

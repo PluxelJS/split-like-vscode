@@ -1,4 +1,4 @@
-import { Layout, Model } from "flexlayout-react";
+import { Actions, ContextMenuBuilder, Layout, Model, showPopupMenu } from "flexlayout-react";
 import { createElement, createRef } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -28,7 +28,40 @@ const models = [0, 1].map((index) =>
   }),
 );
 const metrics = { starts: 0, ends: 0, events: [] };
-window.nativeGate = { refs, models, metrics };
+const menuModel = Model.fromJson({
+  global: { tabSetEnableTabGroups: true },
+  layout: {
+    type: "row",
+    children: [
+      {
+        type: "tabset",
+        children: [{ type: "tab", id: "palette", name: "Palette", component: "editor" }],
+      },
+    ],
+  },
+});
+menuModel.doAction(Actions.addTabToNewGroup("palette", "Palette"));
+const menu = { group: menuModel.getNodeById("palette").getParent(), actions: [], dismissed: 0 };
+window.nativeGate = { refs, models, metrics, menu };
+function showGroupMenu(event) {
+  const hide = showPopupMenu({
+    anchor: { x: 80, y: 160 },
+    container: refs[0].current.getRootDiv(),
+    returnFocusTo: event.currentTarget,
+    items: new ContextMenuBuilder(menu.group, {
+      onAction: (action) => {
+        menu.actions.push(action);
+        menuModel.doAction(action);
+      },
+      closeMenu: () => hide(),
+    })
+      .addStandard()
+      .build(),
+    onClose: () => {
+      menu.dismissed++;
+    },
+  });
+}
 const factory = (node) =>
   createElement("input", {
     "aria-label": node.getName(),
@@ -39,6 +72,11 @@ createRoot(document.getElementById("root")).render(
     "main",
     null,
     createElement("h1", null, "Native dependency acceptance"),
+    createElement(
+      "button",
+      { id: "native-group-menu", onClick: showGroupMenu },
+      "Native group menu",
+    ),
     createElement(
       "div",
       { className: "controls" },

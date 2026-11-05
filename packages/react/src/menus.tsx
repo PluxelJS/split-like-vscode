@@ -112,6 +112,7 @@ export function useWorkbenchMenus<TRouter extends AnyRouter>(
     if (session.current !== menu) return;
     session.current = null;
     setDisplay(null);
+    if (!menu.valid) internal.returnFocus();
     menu.afterClosed?.();
   };
   const cancel = useCallback(
@@ -132,6 +133,7 @@ export function useWorkbenchMenus<TRouter extends AnyRouter>(
     const point = { x: event.clientX, y: event.clientY };
     const show = () => {
       if (!anchor.isConnected || instance.model.getNodeById(node.getId()) !== node) return;
+      const menuContainer = node.getLayoutRef() ?? root.current;
       const menu: MenuSession = {
         node,
         parent: node.getParent(),
@@ -146,7 +148,7 @@ export function useWorkbenchMenus<TRouter extends AnyRouter>(
         props: {
           anchor: point,
           items: [],
-          ...(root.current ? { container: root.current } : {}),
+          ...(menuContainer ? { container: menuContainer } : {}),
           returnFocusTo: anchor,
           onClose: () => close(menu),
           onClosed: () => onClosed(menu),
@@ -160,7 +162,9 @@ export function useWorkbenchMenus<TRouter extends AnyRouter>(
       for (const child of tabContainer(node)?.getChildren() ?? [])
         references.set(child.getId(), child);
       const dispatch = (action: Action) =>
-        queue(menu, () => {
+        // Embedded native editors (for example group colors) do not close the menu.
+        // Entry callbacks already wait for onClosed through protect/queue below.
+        run(menu, () => {
           const ids = [
             action.data.node,
             action.data.fromNode,

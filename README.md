@@ -228,6 +228,9 @@ receives native PopupMenu props plus `open` and `onClosed`; it calls `onClosed` 
 popup disappears and its focus-return cleanup finishes. Only then does the library execute the
 selected action. This keeps dialogs and navigation from losing focus to a late menu cleanup.
 The default menu stays in the same React provider tree.
+It also stays inside the native layout's CSS theme scope. Embedded native controls, such as
+group color buttons, dispatch without closing the popup; ordinary selected entries still wait
+for the renderer's `onClosed` acknowledgement.
 
 Financial 2×2 limits, min sizes, reading hierarchy and sidebar policy belong to the host.
 `createLayoutPolicy` and `beside` are small native geometry helpers, not a second layout tree.
