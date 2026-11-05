@@ -46,7 +46,12 @@ export default defineConfig({
   run: {
     tasks: {
       compile: {
-        command: "vp pack && node ../../scripts/native-dependency-artifact.mjs native-dependencies",
+        command: [],
+        dependsOn: ["compile-lib", "compile-native"],
+        cache: false,
+      },
+      "compile-lib": {
+        command: "vp pack",
         cache: {
           input: [
             { auto: true },
@@ -56,13 +61,31 @@ export default defineConfig({
             { pattern: "../../scripts/native-dependency-*.mjs", base: "package" },
             { pattern: "../../mise.toml", base: "package" },
             { pattern: "mise.toml", base: "workspace" },
+            "!dist/**",
           ],
           env: ["CI", "NODE_ENV"],
-          output: ["dist/**", "native-dependencies/**"],
+          output: ["dist/**"],
+        },
+      },
+      "compile-native": {
+        command: "node ../../scripts/native-dependency-artifact.mjs native-dependencies",
+        cache: {
+          input: [
+            { auto: true },
+            { pattern: "../../patches/**", base: "package" },
+            { pattern: "../../scripts/native-dependency-*.mjs", base: "package" },
+            { pattern: "../../mise.toml", base: "package" },
+            { pattern: "mise.toml", base: "workspace" },
+            "!native-dependencies/**",
+          ],
+          env: ["CI", "NODE_ENV"],
+          output: ["native-dependencies/**"],
         },
       },
       "check-tests": {
-        command: "vp test run --maxWorkers=1 --no-file-parallelism",
+        command:
+          "node --test ../../scripts/native-dependency-artifact.test.mjs && vp test run --maxWorkers=1 --no-file-parallelism",
+        dependsOn: ["compile"],
         cache: {
           input: [
             { auto: true },

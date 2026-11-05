@@ -1,6 +1,7 @@
 /* oxlint-disable no-await-in-loop -- Installation, native mutations and acceptance run serially. */
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +9,10 @@ import { fileURLToPath } from "node:url";
 import { applyFilePatch, parsePatch, sha256 } from "./native-dependency-install.mjs";
 
 const root = resolve(import.meta.dirname, "..");
+// Resolve the build dependency from its owning package, including in a host workspace.
+const { extract } = createRequire(new URL("../packages/react/package.json", import.meta.url))(
+  "pacote",
+);
 export const supportedNativeDependencies = [
   { name: "flexlayout-react", version: "0.11.1", patch: "flexlayout-react@0.11.1.patch" },
   { name: "@tanstack/history", version: "1.162.5", patch: "@tanstack+history@1.162.5.patch" },
@@ -60,7 +65,8 @@ export async function createNativeDependencyArtifact(
       installer === (await readFile(join(output, "install.mjs"), "utf8"));
     for (const specification of specifications) {
       const entry = cached.dependencies.find((value) => value.name === specification.name);
-      if (!entry || entry.version !== specification.version) {
+      const patchName = specification.patch ? "patches/" + specification.patch : undefined;
+      if (!entry || entry.version !== specification.version || entry.patch !== patchName) {
         valid = false;
         break;
       }
@@ -80,50 +86,50 @@ export async function createNativeDependencyArtifact(
     if (error.code !== "ENOENT") throw error;
   }
   const staging = await mkdtemp(join(tmpdir(), "worksplit-native-upstream-"));
-  await mkdir(join(output, "patches"), { recursive: true });
-  const dependencies = [];
-  for (const specification of specifications) {
-    if (!specification.patch) {
-      dependencies.push(specification);
-      continue;
-    }
-    const directory = join(staging, specification.name.replaceAll("/", "+"));
-    await mkdir(directory);
-    const packed = JSON.parse(
-      await run(
-        "npm",
-        ["pack", specification.name + "@" + specification.version, "--ignore-scripts", "--json"],
+  try {
+    await mkdir(join(output, "patches"), { recursive: true });
+    const dependencies = [];
+    for (const specification of specifications) {
+      if (!specification.patch) {
+        dependencies.push(specification);
+        continue;
+      }
+      const directory = join(staging, specification.name.replaceAll("/", "+"));
+      // Fetch and verify the registry tarball directly, independent of npm/tar PATH shims.
+      const { integrity } = await extract(
+        specification.name + "@" + specification.version,
         directory,
-        true,
-      ),
-    )[0];
-    await run("tar", ["-xzf", packed.filename], directory);
-    const patch = await readFile(resolve(root, "patches", specification.patch), "utf8");
-    const files = [];
-    for (const file of parsePatch(patch)) {
-      const source = await readFile(join(directory, "package", file.path), "utf8");
-      const result = applyFilePatch(source, file);
-      files.push({ path: file.path, before: sha256(source), after: sha256(result) });
+        { ignoreScripts: true },
+      );
+      const patch = await readFile(resolve(root, "patches", specification.patch), "utf8");
+      const files = [];
+      for (const file of parsePatch(patch)) {
+        const source = await readFile(join(directory, file.path), "utf8");
+        const result = applyFilePatch(source, file);
+        files.push({ path: file.path, before: sha256(source), after: sha256(result) });
+      }
+      const patchName = "patches/" + specification.patch;
+      await writeFile(join(output, patchName), patch);
+      dependencies.push({
+        ...specification,
+        patch: patchName,
+        sha256: sha256(patch),
+        upstreamIntegrity: integrity,
+        files,
+      });
     }
-    const patchName = "patches/" + specification.patch;
-    await writeFile(join(output, patchName), patch);
-    dependencies.push({
-      ...specification,
-      patch: patchName,
-      sha256: sha256(patch),
-      upstreamIntegrity: packed.integrity,
-      files,
-    });
+    await copyFile(
+      join(import.meta.dirname, "native-dependency-install.mjs"),
+      join(output, "install.mjs"),
+    );
+    await writeFile(
+      join(output, "manifest.json"),
+      JSON.stringify({ format: 1, dependencies }, null, 2) + "\n",
+    );
+    return { directory: output, dependencies };
+  } finally {
+    await rm(staging, { recursive: true, force: true });
   }
-  await copyFile(
-    join(import.meta.dirname, "native-dependency-install.mjs"),
-    join(output, "install.mjs"),
-  );
-  await writeFile(
-    join(output, "manifest.json"),
-    JSON.stringify({ format: 1, dependencies }, null, 2) + "\n",
-  );
-  return { directory: output, dependencies };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

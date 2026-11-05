@@ -33,6 +33,7 @@ minimumReleaseAgeExclude:
   - vite-plus@1.4.0
 catalogs:
   build:
+    pacote: ^22.0.1
     vite-plus: 1.4.0
   dev:
     capnweb: 0.12.0
