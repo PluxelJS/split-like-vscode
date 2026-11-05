@@ -64,7 +64,7 @@ try {
             supportedNativeDependencies.map(({ name, version }) => [name, version]),
           ),
         },
-        devDependencies: { vite: "8.3.3" },
+        devDependencies: { vite: "8.3.5" },
         overrides: { "@tanstack/router-core": "1.171.39", "@tanstack/history": "1.162.5" },
       },
       null,

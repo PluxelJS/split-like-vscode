@@ -48,6 +48,13 @@ The baseline production demo and current installed tarballs passed the same 36 b
 actual saved-state evidence, overlapping leave requests, native menus/dragging/focus, browser
 history, restoration and resource cleanup.
 
+Integration with the main branch's toolchain update also passed all 18 standalone verification
+tasks and frozen-lockfile installation under Node 24.22.2, pnpm 11.28.10 and Vite+ 1.4.0.
+The demo and packed consumer each passed those 36 browser checks using the existing WebSocket
+browser service; the consumer uses standard Vite 8.3.5. Exact native peers and all four corrections
+remain required. Core source and patches were unchanged by this integration. Main-branch delivery
+does not publish a new registry package; consume this source or freshly built archives.
+
 The financial checkout now uses the new dependency, content controller, browser handoff, menu
 and snapshot wiring. Its actual host validation and current limits are owned by the parent
 repository's `VALIDATION.md`, separately from library and tarball acceptance. The

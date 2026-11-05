@@ -42,6 +42,8 @@ export default defineConfig(({ command }) => ({
     },
   },
   resolve: {
+    // Embedded workspace installs must share the demo's React and provider contexts.
+    dedupe: ["react", "react-dom", "@tanstack/react-router", "@tanstack/react-hotkeys"],
     conditions: command === "serve" ? ["development"] : ["module", "browser", "production"],
   },
   server: { host: "127.0.0.1", port: Number(process.env.PORT ?? 5188), strictPort: true },
