@@ -58,6 +58,39 @@ async function setup(
   return { workbench, open, navigation, routers, onIssue, internal: integrationState(workbench) };
 }
 describe("preview admission boundaries", () => {
+  it.each(["activation", "outside-input"] as const)(
+    "does not reclaim foreground after a preview decision waits through later %s",
+    async (intent) => {
+      const { workbench, open, internal } = await setup();
+      const ordinary = await workbench.open(navigation("ordinary"));
+      const old = await open("old");
+      if (ordinary.status !== "applied" || old.status !== "applied")
+        throw new Error("Fixture did not open documents");
+      const gate = deferred();
+      const decide = vi.fn<() => Promise<LeaveDecision>>(async () => {
+        await gate.promise;
+        return { decision: "allow" as const, token: 1 };
+      });
+      internal.registerController(old.value.document.handle, {
+        controller: { leave: { getState: () => ({ hasUnsavedChanges: false, token: 1 }), decide } },
+      });
+      const opening = open("late-preview");
+      try {
+        await vi.waitFor(() => expect(decide).toHaveBeenCalledOnce());
+        if (intent === "activation") await workbench.activate(ordinary.value.document.id);
+        else internal.focus(null, "outside", true);
+        const active = workbench.getActiveDocument()?.id;
+        gate.resolve();
+        expect(await opening).toEqual({ status: "superseded" });
+        expect(workbench.getActiveDocument()?.id).toBe(active);
+        expect(workbench.getDocuments()).toHaveLength(2);
+        expect(workbench.getDocument(old.value.document.id)?.preview).toBe(true);
+      } finally {
+        gate.resolve();
+        await opening;
+      }
+    },
+  );
   it("supersedes a slow preview when actual outside focus revokes foreground eligibility", async () => {
     const gate = deferred();
     const { workbench, open, internal } = await setup((id) =>

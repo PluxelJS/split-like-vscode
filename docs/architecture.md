@@ -39,9 +39,18 @@ eligibility, then insert or reuse. Querying a route may need a transient native 
 must not load an unrelated preview or create another live content owner. Native document
 navigation stays with its own Router, including background navigation without a provider.
 
-Native Actions enter through dispatch or the native Layout action hook. The exact original
-Action instances and group order are retained when accepted. Removal is resolved to actual
+One capture of the source, any explicit destination and foreground intent lasts through lazy target resolution,
+candidate loading and preview approval. Capture is not repeated after an await. The final
+admission rechecks current presentation as well as content and placement; background work does
+not take ownership of an unrelated browser visit. Preview competition is attached to the live
+Model or native container, so retired containers and one-off split destinations need no registry.
+
+Native Actions enter through dispatch or the native Layout action hook. Supported non-removal
+Actions retain their original instances and group order. Removal is resolved to actual
 leaf tabs, including collapsed native groups; every protected member approves before removal.
+The close coordinator deletes members individually, rechecking remaining approvals between
+synchronous native callbacks and reporting any partial effect. It cannot treat grouped removal
+as one opaque native commit.
 Invalid actions are rejected rather than partly executing an alternate imitation. Native Model
 change listeners reconcile records and stable query projections from the actual accepted layout.
 

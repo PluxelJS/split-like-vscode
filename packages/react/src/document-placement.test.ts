@@ -274,7 +274,7 @@ describe("native document destinations and presentation", () => {
     });
     await workbench.activate(b.id);
     slow.resolve();
-    expect((await pending).status).toBe("denied");
+    expect((await pending).status).toBe("superseded");
     expect(workbench.getActiveDocument()?.id).toBe(b.id);
     expect(workbench.getDocuments()).toHaveLength(2);
   });

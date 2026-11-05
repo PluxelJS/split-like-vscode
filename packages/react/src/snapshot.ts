@@ -47,11 +47,14 @@ export function tabMetadata(tab: IJsonTabNode): {
 /** Strict v2 input only. Native configuration stays native; this does not convert old snapshots. */
 export function initialLayout<TRouter extends AnyRouter>(
   options: WorkbenchOptions<TRouter>,
-  workspaceId: string,
 ): {
+  workspaceId: string;
   layout: IJsonModel;
   activeDocumentId: string | undefined;
 } {
+  let workspaceId = options.workspaceId;
+  if (workspaceId !== undefined && (typeof workspaceId !== "string" || !workspaceId))
+    throw new TypeError("workspaceId must be a nonempty string");
   let activeDocumentId: string | undefined;
   const serialized = options.initial && "snapshot" in options.initial;
   let layout: IJsonModel;
@@ -62,13 +65,16 @@ export function initialLayout<TRouter extends AnyRouter>(
     const snapshot = value as WorkbenchSnapshot;
     if (
       snapshot.version !== 2 ||
-      snapshot.workspaceId !== workspaceId ||
+      typeof snapshot.workspaceId !== "string" ||
+      !snapshot.workspaceId ||
+      (workspaceId !== undefined && snapshot.workspaceId !== workspaceId) ||
       !snapshot.layout ||
       typeof snapshot.layout !== "object" ||
       Array.isArray(snapshot.layout) ||
       (snapshot.activeDocumentId !== undefined && typeof snapshot.activeDocumentId !== "string")
     )
       throw new TypeError("Incompatible Worksplit snapshot; explicitly reset it");
+    workspaceId ??= snapshot.workspaceId;
     layout = structuredClone(snapshot.layout);
     activeDocumentId = snapshot.activeDocumentId;
   } else {
@@ -76,7 +82,7 @@ export function initialLayout<TRouter extends AnyRouter>(
   }
   validateLayout(layout, !!serialized);
   layout.global = { ...defaultWorkbenchLayout().global, ...layout.global };
-  return { layout, activeDocumentId };
+  return { workspaceId: workspaceId ?? crypto.randomUUID(), layout, activeDocumentId };
 }
 
 export function validateLayout(layout: IJsonModel, serialized: boolean): void {

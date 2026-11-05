@@ -50,7 +50,8 @@ function fixture(options: OpenOptions = {}, navigate?: DocumentLinkNavigator) {
     () => true,
   );
   const report = vi.fn<(error: unknown) => void>();
-  const controller = new DocumentLinkController(model, allowMove, undefined, report);
+  const reportResult = vi.fn<(value: OpenResult) => void>();
+  const controller = new DocumentLinkController(model, allowMove, undefined, report, reportResult);
   controllers.push(controller);
   const detach = controller.attach(() => api);
   const destination = vi.fn<DocumentLinkNavigator>(

@@ -4,6 +4,7 @@ import {
   BorderNode,
   ContextMenuBuilder,
   DockLocation,
+  getNodeContextMenuItem,
   PopupMenu,
   TabGroupNode,
   TabNode,
@@ -43,7 +44,7 @@ interface MenuSession {
   valid: boolean;
   executing: boolean;
   settled: boolean;
-  pending: MenuTask[];
+  pending: MenuTask | undefined;
   afterClosed: MenuTask | undefined;
   props: Omit<MenuRendererProps, "open">;
   render: MenuOptions["render"];
@@ -92,8 +93,8 @@ export function useWorkbenchMenus<TRouter extends AnyRouter>(
   const queue = (menu: MenuSession, task: MenuTask) => {
     if (!isCurrent(menu)) return;
     if (menu.executing) run(menu, task);
-    else if (!menu.settled) {
-      menu.pending.push(task);
+    else if (menu.open && !menu.settled) {
+      menu.pending = task;
       close(menu);
     }
   };
@@ -104,7 +105,9 @@ export function useWorkbenchMenus<TRouter extends AnyRouter>(
     if (session.current !== menu || menu.settled || menu.open) return;
     menu.settled = true;
     menu.executing = true;
-    for (const task of menu.pending.splice(0)) run(menu, task);
+    const task = menu.pending;
+    menu.pending = undefined;
+    if (task) run(menu, task);
     menu.executing = false;
     if (session.current !== menu) return;
     session.current = null;
@@ -114,7 +117,7 @@ export function useWorkbenchMenus<TRouter extends AnyRouter>(
   const cancel = useCallback(
     (menu: MenuSession) => {
       menu.valid = false;
-      menu.pending.length = 0;
+      menu.pending = undefined;
       menu.afterClosed = undefined;
       close(menu);
     },
@@ -137,7 +140,7 @@ export function useWorkbenchMenus<TRouter extends AnyRouter>(
         valid: true,
         executing: false,
         settled: false,
-        pending: [],
+        pending: undefined,
         afterClosed: undefined,
         render: options?.render,
         props: {
@@ -178,11 +181,18 @@ export function useWorkbenchMenus<TRouter extends AnyRouter>(
         onAction: dispatch,
         closeMenu: () => close(menu),
       });
-      const addClose = (key: string, label: string, target: CloseTarget) => {
+      const addClose = (
+        key: "close" | "closeOthers" | "closeRight" | "closeGroup",
+        target: CloseTarget,
+      ) => {
+        const item =
+          key === "closeGroup"
+            ? { key, label: options?.labels?.closeGroup ?? "Close Group" }
+            : getNodeContextMenuItem(node, key, { includeDisabled: true });
+        if (!item) return;
         const targets = internal.closeTargets(target);
         builder.addCustom({
-          key,
-          label,
+          ...item,
           disabled: !targets?.length,
           onSelect: () => report(instance.close(target)),
         });
@@ -235,25 +245,25 @@ export function useWorkbenchMenus<TRouter extends AnyRouter>(
           for (const item of maximize) if (item.type !== "divider") builder.addCustom(item);
         }
         builder.addDivider();
-        addClose("close", "Close", node.getId());
-        addClose("closeOthers", "Close Others", { scope: "others", target: node });
+        addClose("close", node.getId());
+        addClose("closeOthers", { scope: "others", target: node });
         if (container instanceof TabSetNode)
-          addClose("closeRight", "Close to the Right", { scope: "right", target: node });
+          addClose("closeRight", { scope: "right", target: node });
       } else if (node instanceof TabGroupNode) {
         builder.addStandard().addDivider();
-        addClose("closeGroup", options?.labels?.closeGroup ?? "Close Group", {
+        addClose("closeGroup", {
           scope: "all",
           target: node,
         });
       } else if (node instanceof TabSetNode) {
         builder.add("maximize").addDivider();
-        addClose("closeGroup", options?.labels?.closeGroup ?? "Close Group", {
+        addClose("closeGroup", {
           scope: "all",
           target: node,
         });
       } else {
         builder.add("borderType").addDivider();
-        addClose("closeGroup", options?.labels?.closeGroup ?? "Close Group", {
+        addClose("closeGroup", {
           scope: "all",
           target: node,
         });
@@ -345,7 +355,7 @@ export function useWorkbenchMenus<TRouter extends AnyRouter>(
       const menu = session.current;
       if (menu && menu.node.getModel() === model) {
         menu.valid = false;
-        menu.pending.length = 0;
+        menu.pending = undefined;
         menu.afterClosed = undefined;
         session.current = null;
         setDisplay(null);

@@ -179,6 +179,131 @@ if (baseline) {
 }
 
 await check(
+  "standalone memory history settles every committed request without a Router or observer acknowledgement",
+  async () => {
+    const history = createMemoryHistory({ initialEntries: ["/a"] });
+    const observer = deferred();
+    let notices = 0;
+    let ended = 0;
+    const receipts = [];
+    history.subscribe(() => {
+      notices++;
+      return observer.promise;
+    });
+    for (let index = 0; index < 128; index++) {
+      const receipt = history.replace(`/entry-${index}`, undefined, {
+        onNavigationStart: (navigation) => {
+          navigation.signal.addEventListener("abort", () => ended++, { once: true });
+        },
+      });
+      receipts.push(receipt);
+      assert.equal(await within(receipt.finished, "standalone history completion"), "accepted");
+      assert.equal(await receipt.committed, true);
+      assert.equal(receipt.signal.aborted, true);
+      assert.equal(history.length, 1);
+    }
+    assert.equal(notices, receipts.length);
+    assert.equal(ended, receipts.length);
+    history.destroy();
+    assert.ok(receipts.every((receipt) => receipt.result === "accepted"));
+    observer.resolve();
+  },
+);
+
+await check(
+  "standalone reentrant history accepts both real writes and ends denied or destroyed attempts",
+  async () => {
+    const history = createMemoryHistory({ initialEntries: ["/a"] });
+    let newer;
+    history.subscribe(({ location }) => {
+      if (location.href === "/b") newer = history.push("/c");
+    });
+    const first = history.push("/b");
+    assert.equal(await within(first.finished, "standalone reentrant predecessor"), "accepted");
+    assert.equal(await within(newer.finished, "standalone reentrant successor"), "accepted");
+    assert.equal(history.location.href, "/c");
+    assert.equal(history.location.state["__TSR_index"], 2);
+    const stop = history.block({ blockerFn: () => true });
+    assert.equal(await within(history.back().finished, "standalone refusal"), "denied");
+    assert.equal(history.location.href, "/c");
+    stop();
+    const waiting = deferred();
+    history.block({ blockerFn: () => waiting.promise });
+    const pending = history.push("/pending");
+    history.destroy();
+    assert.equal(await within(pending.finished, "standalone destruction"), "superseded");
+    assert.equal(await pending.committed, false);
+    waiting.resolve(false);
+  },
+);
+
+await check("destroy releases native registrations and does not retain late owners", async () => {
+  const history = createMemoryHistory({ initialEntries: ["/a"] });
+  // eslint-disable-next-line no-underscore-dangle -- This method is part of the exported native RouterHistory interface.
+  const blockerCount = () => history._getBlockers().length;
+  const before = history.block({ blockerFn: () => false });
+  const subscribed = history.subscribe(() => {});
+  history.signal.addEventListener("abort", () => {
+    history.block({ blockerFn: () => false });
+    history.subscribe(() => {});
+  });
+  history.destroy();
+  history.destroy();
+  assert.equal(blockerCount(), 0);
+  assert.equal(history.subscribers.size, 0);
+  const late = history.block({ blockerFn: () => false });
+  const lateSubscription = history.subscribe(() => {});
+  assert.equal(blockerCount(), 0);
+  assert.equal(history.subscribers.size, 0);
+  before();
+  subscribed();
+  late();
+  lateSubscription();
+  const navigation = history.push("/after-disposal");
+  assert.equal(await within(navigation.finished, "late history request"), "superseded");
+  assert.equal(await navigation.committed, false);
+  assert.equal(history.location.href, "/a");
+});
+
+for (const subscribe of [true, false]) {
+  await check(
+    `Router claims completion before a slow accepted load (history subscription=${subscribe})`,
+    async () => {
+      const slow = deferred();
+      const { history, router, stop } = await fixture({
+        subscribe,
+        loader: ({ params }) => (params.id === "slow" ? slow.promise : undefined),
+      });
+      let receipt;
+      let completion = false;
+      const pending = router.navigate({
+        to: "/slow",
+        onNavigationStart: (navigation) => {
+          receipt = navigation;
+          void navigation.finished.then(() => {
+            completion = true;
+            return undefined;
+          });
+        },
+      });
+      await until(
+        () => receipt !== undefined && history.location.href === "/slow",
+        "slow entry commit",
+      );
+      assert.equal(await receipt.committed, true);
+      assert.equal(completion, false);
+      assert.equal(receipt.signal.aborted, false);
+      assert.equal(router.state.resolvedLocation.href, "/a");
+      slow.resolve();
+      await within(pending, "claimed Router acceptance");
+      assert.equal(await receipt.finished, "accepted");
+      assert.equal(router.state.resolvedLocation.href, "/slow");
+      stop();
+    },
+  );
+}
+
+await check(
   "all five native history operations run blockers, retain entries/state on denial, and settle",
   async () => {
     const { history, router, stop } = await fixture({

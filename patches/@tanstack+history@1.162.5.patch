@@ -1,8 +1,8 @@
 diff --git a/dist/cjs/index.cjs b/dist/cjs/index.cjs
-index 6d3ac145..e4708c56 100644
+index 6d3ac145..576b1a75 100644
 --- a/dist/cjs/index.cjs
 +++ b/dist/cjs/index.cjs
-@@ -361,44 +361,207 @@ function createHashHistory(opts) {
+@@ -361,44 +361,223 @@ function createHashHistory(opts) {
  * Ideal for server rendering, tests, and non-DOM environments.
  * @link https://tanstack.com/router/latest/docs/framework/react/guide/history-types
  */
@@ -69,11 +69,21 @@ index 6d3ac145..e4708c56 100644
 +            value: error
 +        });
 +        live.delete(navigation);
++        record.settlementOwner = undefined;
++        record.checks.length = 0;
 +        if (pending === navigation) pending = undefined;
 +        record.resolveCommit(record.committed);
 +        record.resolveFinished(result);
 +        record.controller.abort();
 +        if (navigation.parent) completeNavigation(navigation.parent, result, error);
++    };
++    const claimNavigation = (navigation, owner)=>{
++        const record = records.get(navigation);
++        if (!record || navigation.result) return;
++        if (record.settlementOwner && record.settlementOwner !== owner) {
++            throw new Error('A navigation already has a settlement owner');
++        }
++        record.settlementOwner = owner;
 +    };
 +    const notify = (action, navigation)=>{
 +        const location = entries[index];
@@ -185,6 +195,7 @@ index 6d3ac145..e4708c56 100644
 +                } : {
 +                    type: action
 +                }, navigation);
++                if (!record.settlementOwner) completeNavigation(navigation, 'accepted');
 +            } catch (error) {
 +                completeNavigation(navigation, 'failed', error);
 +            }
@@ -202,6 +213,7 @@ index 6d3ac145..e4708c56 100644
 +        },
 +        subscribers,
 +        subscribe (cb) {
++            if (destroyed) return noop;
 +            subscriptions.set(cb, (subscriptions.get(cb) ?? 0) + 1);
 +            subscribers.add(cb);
 +            let active = true;
@@ -224,6 +236,7 @@ index 6d3ac145..e4708c56 100644
 +        canGoBack: ()=>index > 0,
 +        createHref: normalizeHref,
 +        block (blocker) {
++            if (destroyed) return noop;
 +            blockers.push(blocker);
 +            return ()=>{
 +                blockers = blockers.filter((item)=>item !== blocker);
@@ -231,7 +244,9 @@ index 6d3ac145..e4708c56 100644
 +        },
 +        flush () {},
 +        destroy () {
++            if (destroyed) return;
 +            destroyed = true;
++            blockers = [];
 +            lifetime.abort();
 +            for (const navigation of live)completeNavigation(navigation, 'superseded');
 +            subscribers.clear();
@@ -239,6 +254,7 @@ index 6d3ac145..e4708c56 100644
 +        },
 +        notify,
 +        _getBlockers: ()=>blockers,
++        claimNavigation,
 +        completeNavigation,
 +        getEntry: (key)=>entries.find((entry)=>entry.state.__TSR_key === key)
 +    };
@@ -247,7 +263,7 @@ index 6d3ac145..e4708c56 100644
  var noop = () => {};
  var ServerHistory = class {
  	constructor(location) {
-@@ -469,5 +632,3 @@ exports.createMemoryHistory = createMemoryHistory;
+@@ -469,5 +648,3 @@ exports.createMemoryHistory = createMemoryHistory;
  exports.createServerHistory = createServerHistory;
  exports.normalizeProtocolRelative = normalizeProtocolRelative;
  exports.parseHref = parseHref;
@@ -255,7 +271,7 @@ index 6d3ac145..e4708c56 100644
 -//# sourceMappingURL=index.cjs.map
 \ No newline at end of file
 diff --git a/dist/cjs/index.d.cts b/dist/cjs/index.d.cts
-index e35a50b2..cb446ed3 100644
+index e35a50b2..dd8b1d30 100644
 --- a/dist/cjs/index.d.cts
 +++ b/dist/cjs/index.d.cts
 @@ -1,5 +1,7 @@
@@ -266,7 +282,7 @@ index e35a50b2..cb446ed3 100644
  }
  type SubscriberHistoryAction = {
      type: Exclude<HistoryAction, 'GO'>;
-@@ -10,17 +12,20 @@ type SubscriberHistoryAction = {
+@@ -10,17 +12,21 @@ type SubscriberHistoryAction = {
  type SubscriberArgs = {
      location: HistoryLocation;
      action: SubscriberHistoryAction;
@@ -275,6 +291,7 @@ index e35a50b2..cb446ed3 100644
  export interface RouterHistory {
 +    readonly signal?: AbortSignal;
      location: HistoryLocation;
++    claimNavigation?: (navigation: HistoryNavigation, owner: object) => void;
 +    completeNavigation?: (navigation: HistoryNavigation, result: HistoryNavigationResult, error?: unknown) => void;
      length: number;
      subscribers: Set<(opts: SubscriberArgs) => void>;
@@ -292,7 +309,7 @@ index e35a50b2..cb446ed3 100644
      canGoBack: () => boolean;
      createHref: (href: string) => string;
      block: (blocker: NavigationBlocker) => () => void;
-@@ -53,10 +58,12 @@ export type BlockerFnArgs = {
+@@ -53,10 +59,12 @@ export type BlockerFnArgs = {
      currentLocation: HistoryLocation;
      nextLocation: HistoryLocation;
      action: HistoryAction;
@@ -305,7 +322,7 @@ index e35a50b2..cb446ed3 100644
      enableBeforeUnload?: (() => boolean) | boolean;
  };
  export declare function normalizeProtocolRelative(url: string): string;
-@@ -113,8 +120,41 @@ export declare function createHashHistory(opts?: {
+@@ -113,8 +121,43 @@ export declare function createHashHistory(opts?: {
  export declare function createMemoryHistory(opts?: {
      initialEntries: Array<string>;
      initialIndex?: number;
@@ -342,6 +359,8 @@ index e35a50b2..cb446ed3 100644
 +  go: (delta: number, options?: NavigateOptions) => HistoryNavigation
 +  back: (options?: NavigateOptions) => HistoryNavigation
 +  forward: (options?: NavigateOptions) => HistoryNavigation
++  /** One Router owns completion; ordinary history requests settle after publication. */
++  claimNavigation: (navigation: HistoryNavigation, owner: object) => void
 +  /** Called by the Router at its actual acceptance or retirement boundary. */
 +  completeNavigation: (navigation: HistoryNavigation, result: HistoryNavigationResult, error?: unknown) => void
 +  /** Resolve a real session entry; replaced or truncated entries are absent. */
@@ -349,7 +368,7 @@ index e35a50b2..cb446ed3 100644
 +}
 +
 diff --git a/dist/esm/index.d.ts b/dist/esm/index.d.ts
-index e35a50b2..cb446ed3 100644
+index e35a50b2..dd8b1d30 100644
 --- a/dist/esm/index.d.ts
 +++ b/dist/esm/index.d.ts
 @@ -1,5 +1,7 @@
@@ -360,7 +379,7 @@ index e35a50b2..cb446ed3 100644
  }
  type SubscriberHistoryAction = {
      type: Exclude<HistoryAction, 'GO'>;
-@@ -10,17 +12,20 @@ type SubscriberHistoryAction = {
+@@ -10,17 +12,21 @@ type SubscriberHistoryAction = {
  type SubscriberArgs = {
      location: HistoryLocation;
      action: SubscriberHistoryAction;
@@ -369,6 +388,7 @@ index e35a50b2..cb446ed3 100644
  export interface RouterHistory {
 +    readonly signal?: AbortSignal;
      location: HistoryLocation;
++    claimNavigation?: (navigation: HistoryNavigation, owner: object) => void;
 +    completeNavigation?: (navigation: HistoryNavigation, result: HistoryNavigationResult, error?: unknown) => void;
      length: number;
      subscribers: Set<(opts: SubscriberArgs) => void>;
@@ -386,7 +406,7 @@ index e35a50b2..cb446ed3 100644
      canGoBack: () => boolean;
      createHref: (href: string) => string;
      block: (blocker: NavigationBlocker) => () => void;
-@@ -53,10 +58,12 @@ export type BlockerFnArgs = {
+@@ -53,10 +59,12 @@ export type BlockerFnArgs = {
      currentLocation: HistoryLocation;
      nextLocation: HistoryLocation;
      action: HistoryAction;
@@ -399,7 +419,7 @@ index e35a50b2..cb446ed3 100644
      enableBeforeUnload?: (() => boolean) | boolean;
  };
  export declare function normalizeProtocolRelative(url: string): string;
-@@ -113,8 +120,41 @@ export declare function createHashHistory(opts?: {
+@@ -113,8 +121,43 @@ export declare function createHashHistory(opts?: {
  export declare function createMemoryHistory(opts?: {
      initialEntries: Array<string>;
      initialIndex?: number;
@@ -436,6 +456,8 @@ index e35a50b2..cb446ed3 100644
 +  go: (delta: number, options?: NavigateOptions) => HistoryNavigation
 +  back: (options?: NavigateOptions) => HistoryNavigation
 +  forward: (options?: NavigateOptions) => HistoryNavigation
++  /** One Router owns completion; ordinary history requests settle after publication. */
++  claimNavigation: (navigation: HistoryNavigation, owner: object) => void
 +  /** Called by the Router at its actual acceptance or retirement boundary. */
 +  completeNavigation: (navigation: HistoryNavigation, result: HistoryNavigationResult, error?: unknown) => void
 +  /** Resolve a real session entry; replaced or truncated entries are absent. */
@@ -443,10 +465,10 @@ index e35a50b2..cb446ed3 100644
 +}
 +
 diff --git a/dist/esm/index.js b/dist/esm/index.js
-index 795c98a8..bef758e5 100644
+index 795c98a8..17b0dd02 100644
 --- a/dist/esm/index.js
 +++ b/dist/esm/index.js
-@@ -360,44 +360,207 @@ function createHashHistory(opts) {
+@@ -360,44 +360,223 @@ function createHashHistory(opts) {
  * Ideal for server rendering, tests, and non-DOM environments.
  * @link https://tanstack.com/router/latest/docs/framework/react/guide/history-types
  */
@@ -513,11 +535,21 @@ index 795c98a8..bef758e5 100644
 +            value: error
 +        });
 +        live.delete(navigation);
++        record.settlementOwner = undefined;
++        record.checks.length = 0;
 +        if (pending === navigation) pending = undefined;
 +        record.resolveCommit(record.committed);
 +        record.resolveFinished(result);
 +        record.controller.abort();
 +        if (navigation.parent) completeNavigation(navigation.parent, result, error);
++    };
++    const claimNavigation = (navigation, owner)=>{
++        const record = records.get(navigation);
++        if (!record || navigation.result) return;
++        if (record.settlementOwner && record.settlementOwner !== owner) {
++            throw new Error('A navigation already has a settlement owner');
++        }
++        record.settlementOwner = owner;
 +    };
 +    const notify = (action, navigation)=>{
 +        const location = entries[index];
@@ -629,6 +661,7 @@ index 795c98a8..bef758e5 100644
 +                } : {
 +                    type: action
 +                }, navigation);
++                if (!record.settlementOwner) completeNavigation(navigation, 'accepted');
 +            } catch (error) {
 +                completeNavigation(navigation, 'failed', error);
 +            }
@@ -646,6 +679,7 @@ index 795c98a8..bef758e5 100644
 +        },
 +        subscribers,
 +        subscribe (cb) {
++            if (destroyed) return noop;
 +            subscriptions.set(cb, (subscriptions.get(cb) ?? 0) + 1);
 +            subscribers.add(cb);
 +            let active = true;
@@ -668,6 +702,7 @@ index 795c98a8..bef758e5 100644
 +        canGoBack: ()=>index > 0,
 +        createHref: normalizeHref,
 +        block (blocker) {
++            if (destroyed) return noop;
 +            blockers.push(blocker);
 +            return ()=>{
 +                blockers = blockers.filter((item)=>item !== blocker);
@@ -675,7 +710,9 @@ index 795c98a8..bef758e5 100644
 +        },
 +        flush () {},
 +        destroy () {
++            if (destroyed) return;
 +            destroyed = true;
++            blockers = [];
 +            lifetime.abort();
 +            for (const navigation of live)completeNavigation(navigation, 'superseded');
 +            subscribers.clear();
@@ -683,6 +720,7 @@ index 795c98a8..bef758e5 100644
 +        },
 +        notify,
 +        _getBlockers: ()=>blockers,
++        claimNavigation,
 +        completeNavigation,
 +        getEntry: (key)=>entries.find((entry)=>entry.state.__TSR_key === key)
 +    };
@@ -691,7 +729,7 @@ index 795c98a8..bef758e5 100644
  var noop = () => {};
  var ServerHistory = class {
  	constructor(location) {
-@@ -462,5 +625,3 @@ function createRandomKey() {
+@@ -462,5 +641,3 @@ function createRandomKey() {
  }
  //#endregion
  export { createBrowserHistory, createHashHistory, createHistory, createMemoryHistory, createServerHistory, normalizeProtocolRelative, parseHref };
@@ -699,7 +737,7 @@ index 795c98a8..bef758e5 100644
 -//# sourceMappingURL=index.js.map
 \ No newline at end of file
 diff --git a/src/index.ts b/src/index.ts
-index d2f80581..cc70b044 100644
+index d2f80581..1bce317f 100644
 --- a/src/index.ts
 +++ b/src/index.ts
 @@ -3,7 +3,9 @@
@@ -712,7 +750,7 @@ index d2f80581..cc70b044 100644
  }
  
  type SubscriberHistoryAction =
-@@ -18,18 +20,22 @@ type SubscriberHistoryAction =
+@@ -18,18 +20,24 @@ type SubscriberHistoryAction =
  type SubscriberArgs = {
    location: HistoryLocation
    action: SubscriberHistoryAction
@@ -722,6 +760,8 @@ index d2f80581..cc70b044 100644
  export interface RouterHistory {
 +  readonly signal?: AbortSignal
    location: HistoryLocation
++  /** A Router claims settlement before history finishes synchronous publication. */
++  claimNavigation?: (navigation: HistoryNavigation, owner: object) => void
 +  /** Memory history exposes exact native navigation settlement. */
 +  completeNavigation?: (navigation: HistoryNavigation, result: HistoryNavigationResult, error?: unknown) => void
    length: number
@@ -740,7 +780,7 @@ index d2f80581..cc70b044 100644
    canGoBack: () => boolean
    createHref: (href: string) => string
    block: (blocker: NavigationBlocker) => () => void
-@@ -68,6 +74,7 @@ export type BlockerFnArgs = {
+@@ -68,6 +76,7 @@ export type BlockerFnArgs = {
    currentLocation: HistoryLocation
    nextLocation: HistoryLocation
    action: HistoryAction
@@ -748,7 +788,7 @@ index d2f80581..cc70b044 100644
  }
  
  export type BlockerFn = (
-@@ -76,6 +83,8 @@ export type BlockerFn = (
+@@ -76,6 +85,8 @@ export type BlockerFn = (
  
  export type NavigationBlocker = {
    blockerFn: BlockerFn
@@ -757,7 +797,7 @@ index d2f80581..cc70b044 100644
    enableBeforeUnload?: (() => boolean) | boolean
  }
  
-@@ -629,59 +638,191 @@ export function createHashHistory(opts?: { window?: any }): RouterHistory {
+@@ -629,59 +640,217 @@ export function createHashHistory(opts?: { window?: any }): RouterHistory {
   * Ideal for server rendering, tests, and non-DOM environments.
   * @link https://tanstack.com/router/latest/docs/framework/react/guide/history-types
   */
@@ -786,6 +826,8 @@ index d2f80581..cc70b044 100644
 +  go: (delta: number, options?: NavigateOptions) => HistoryNavigation
 +  back: (options?: NavigateOptions) => HistoryNavigation
 +  forward: (options?: NavigateOptions) => HistoryNavigation
++  /** One Router owns completion; ordinary history requests settle after publication. */
++  claimNavigation: (navigation: HistoryNavigation, owner: object) => void
 +  /** Called by the Router at its actual acceptance or retirement boundary. */
 +  completeNavigation: (navigation: HistoryNavigation, result: HistoryNavigationResult, error?: unknown) => void
 +  /** Resolve a real session entry; replaced or truncated entries are absent. */
@@ -838,6 +880,7 @@ index d2f80581..cc70b044 100644
 +  type Record = {
 +    controller: AbortController
 +    committed: boolean
++    settlementOwner?: object
 +    resolveCommit: (value: boolean) => void
 +    resolveFinished: (value: HistoryNavigationResult) => void
 +    checks: Array<{ blocker: NavigationBlocker; args: BlockerFnArgs }>
@@ -853,11 +896,21 @@ index d2f80581..cc70b044 100644
 +    Object.defineProperty(navigation, 'result', { value: result })
 +    if (error !== undefined) Object.defineProperty(navigation, 'error', { value: error })
 +    live.delete(navigation)
++    record.settlementOwner = undefined
++    record.checks.length = 0
 +    if (pending === navigation) pending = undefined
 +    record.resolveCommit(record.committed)
 +    record.resolveFinished(result)
 +    record.controller.abort()
 +    if (navigation.parent) completeNavigation(navigation.parent, result, error)
++  }
++  const claimNavigation = (navigation: HistoryNavigation, owner: object) => {
++    const record = records.get(navigation)
++    if (!record || navigation.result) return
++    if (record.settlementOwner && record.settlementOwner !== owner) {
++      throw new Error('A navigation already has a settlement owner')
++    }
++    record.settlementOwner = owner
 +  }
 +  const notify = (action: SubscriberHistoryAction, navigation?: HistoryNavigation) => {
 +    const location = entries[index]!
@@ -935,6 +988,9 @@ index d2f80581..cc70b044 100644
 +        resolveCommit(true)
 +        // All internal state is final before synchronous subscriber reentry.
 +        notify(action === 'GO' ? { type: action, index: value as number } : { type: action }, navigation)
++        // Observation does not own navigation. A Router claims before issuing a
++        // request or synchronously in its history subscription, never afterwards.
++        if (!record.settlementOwner) completeNavigation(navigation, 'accepted')
 +      } catch (error) {
 +        completeNavigation(navigation, 'failed', error)
 +        // Consumers receive failure through finished; no orphan async throw.
@@ -949,6 +1005,7 @@ index d2f80581..cc70b044 100644
 +    get length() { return entries.length },
 +    subscribers,
 +    subscribe(cb) {
++      if (destroyed) return noop
 +      subscriptions.set(cb, (subscriptions.get(cb) ?? 0) + 1)
 +      subscribers.add(cb)
 +      let active = true
@@ -983,11 +1040,20 @@ index d2f80581..cc70b044 100644
 -    getBlockers: _getBlockers,
 -    setBlockers: _setBlockers,
 -  })
-+    block(blocker) { blockers.push(blocker); return () => { blockers = blockers.filter((item) => item !== blocker) } },
++    block(blocker) { if (destroyed) return noop; blockers.push(blocker); return () => { blockers = blockers.filter((item) => item !== blocker) } },
 +    flush() {},
-+    destroy() { destroyed = true; lifetime.abort(); for (const navigation of live) completeNavigation(navigation, 'superseded'); subscribers.clear(); subscriptions.clear() },
++    destroy() {
++      if (destroyed) return
++      destroyed = true
++      blockers = []
++      lifetime.abort()
++      for (const navigation of live) completeNavigation(navigation, 'superseded')
++      subscribers.clear()
++      subscriptions.clear()
++    },
 +    notify,
 +    _getBlockers: () => blockers,
++    claimNavigation,
 +    completeNavigation,
 +    getEntry: (key) => entries.find((entry) => entry.state.__TSR_key === key),
 +  }

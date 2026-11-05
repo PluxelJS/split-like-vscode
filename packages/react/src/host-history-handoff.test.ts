@@ -197,6 +197,86 @@ describe("Worksplit browser visits use live document entry identities", () => {
     expect(issues).toEqual([]);
   });
 
+  it.each(["direct", "lazy-link"] as const)(
+    "keeps an in-flight browser traversal independent of a %s background open",
+    async (entrance) => {
+      const { instance, start, issues } = fixture();
+      await start();
+      const record = documentRecord(instance, instance.getActiveDocument()!.id);
+      await record.runtime!.history.push("/b").finished;
+      await record.runtime!.history.push("/c").finished;
+      const waiting = deferred();
+      const requests: LeaveRequest[] = [];
+      integrationState(instance).registerController(record.handle, {
+        controller: {
+          leave: {
+            getState: () => ({ hasUnsavedChanges: true, token: 1 }),
+            decide: async (request) => {
+              requests.push(request);
+              await waiting.promise;
+              return { decision: "allow", token: 1 };
+            },
+          },
+        },
+      });
+      window.history.back();
+      await vi.waitFor(() => expect(requests).toHaveLength(1));
+      const navigation = { to: "/$id" as const, params: { id: "background" } };
+      const opened = await (entrance === "direct"
+        ? instance.open(navigation, { presentation: "background" })
+        : instance.createLink(async () => navigation, { presentation: "background" }).open());
+      expect(opened).toMatchObject({ status: "applied", value: { presentation: "background" } });
+      expect(requests[0]!.signal.aborted).toBe(false);
+      expect(record.runtime!.history.location.href).toBe("/c");
+      waiting.resolve();
+      await vi.waitFor(() => expect(instance.getActiveDocument()?.href).toBe("/b"));
+      expect(href()).toBe("/b");
+      expect(issues).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["href", "https://example.test/external"],
+    ["to", "https://example.test/external"],
+    ["to", "//example.test/external"],
+  ] as const)(
+    "rejects external %s=%s before canceling a pending browser traversal",
+    async (field, target) => {
+      const { instance, start, issues } = fixture();
+      await start();
+      const record = documentRecord(instance, instance.getActiveDocument()!.id);
+      await record.runtime!.history.push("/b").finished;
+      await record.runtime!.history.push("/c").finished;
+      const waiting = deferred();
+      const requests: LeaveRequest[] = [];
+      integrationState(instance).registerController(record.handle, {
+        controller: {
+          leave: {
+            getState: () => ({ hasUnsavedChanges: true, token: 1 }),
+            decide: async (request) => {
+              requests.push(request);
+              await waiting.promise;
+              return { decision: "allow", token: 1 };
+            },
+          },
+        },
+      });
+      window.history.back();
+      await vi.waitFor(() => expect(requests).toHaveLength(1));
+      // JavaScript consumers can submit targets outside the registered route tree.
+      const result = await instance.open({ [field]: target } as Parameters<
+        typeof instance.open
+      >[0]);
+      expect(result.status).toBe("denied");
+      expect(result).toMatchObject({ reason: "invalid-argument" });
+      expect(requests[0]!.signal.aborted).toBe(false);
+      waiting.resolve();
+      await vi.waitFor(() => expect(instance.getActiveDocument()?.href).toBe("/b"));
+      expect(href()).toBe("/b");
+      expect(issues).toEqual([]);
+    },
+  );
+
   it("restores a denied browser visit without rewriting native entry state", async () => {
     const { instance, start, issues } = fixture();
     await start();

@@ -3,7 +3,7 @@
 2026-11-05：新 API、唯一原生 Model、内容 owner、原生导航修正与共享公开实例已经进入代码。
 已实施契约只在 [README](../../README.md)、[架构](../architecture.md)、[行为](../vscode-workbench-behavior.md)、
 [资源](../resource-lifetimes.md)及[原生支持](../navigation-support.md)维护；这里不再保留一份完整 API 草案。
-库、demo、独立最终制品、子模块 verify 和实际财务宿主已通过各自验收。
+库、demo、独立制品的验收与实际财务宿主迁移分别记录；财务宿主仍待新 API 迁移和验收。
 当前执行结果与缺口统一见[迁移状态](README.md)，不同消费者的证据不能相互替代。
 
 ## 保留的决策与证据时点

@@ -7,14 +7,21 @@ Public contracts now live in the
 [native support](../navigation-support.md). The same runnable examples are used by the demo and
 independent package consumer; target API sketches must not be treated as installed capability.
 
-The child repository's final `workspace:verify` passed all 18 tasks, preserving the task cache.
-It covers source and registered-router types, tests, formatting, lint, builds and declarations.
-This full gate used the parent workspace's Vite+ 1.4.0 / Vitest 5.0.5. Separately, the final source
-passed all 330 React tests, builds and types in an independent checkout using its declared
-Node 24.21.0 / pnpm 11.28.2 / Vite+ 1.2.0 / Vitest 5.0.4, preserving that installation and cache.
+The 2026-11-05 stabilization pass following `b253313` passed the library's full
+`pnpm verify`: all 18 tasks, using the declared Node 24.21.0 / pnpm 11.28.2 /
+Vite+ 1.2.0 / Vitest 5.0.4 in an independent installation. The final source passed
+357 React, 25 SplitView and 13 editor-store tests, source and registered-consumer types,
+formatting, lint, builds and declaration checks. The parent workspace's old installation
+was not changed or used as proof of the new native support contract.
+
+This pass corrected foreground intent across lazy/preview waits, background/browser isolation,
+default snapshot identity, owned drop feedback, native menu translation and repeated selection
+during menu exit. It also bounded preview competition to live native scopes and made native
+history settlement/termination explicit for both ordinary and Router-owned use. Worksplit's
+public API did not gain a new coordinator, registry or compatibility path.
 
 The fresh tarball consumer passed JavaScript/types/CSS, unique native objects, the shipped native
-installer and its read-only capability check. Its native regression passed 41 cases in each of
+installer and its read-only capability check. Its native regression passed 46 cases in each of
 ESM and CJS, plus 14 source/runtime consistency checks. SplitView also passed installation with
 only its React peer. These checks use the actual installed correction, not version numbers alone.
 
@@ -23,22 +30,23 @@ The production demo and installed tarballs each passed the same 36 browser check
 actual saved-state evidence, overlapping leave requests, native menus/dragging/focus, browser
 history, restoration and resource cleanup.
 
-The declared running financial host passed its own acceptance, including actual 2×2 layout,
-narrow panes, keyboard/mouse/dragging, focus and resource cleanup. The parent repository owns its
-aggregate validation and unrun financial checks in its `VALIDATION.md`; the library's results do
-not substitute for those checks.
+The current financial checkout still uses the old API and dependency wiring. It has not been
+migrated or accepted against this stabilized implementation. The previous host-completion
+statement did not correspond to that checkout and must not be used as migration evidence.
+The [downstream migration task](downstream-migration.md) supplies the next session's scope and
+acceptance paths; the parent repository will own its actual validation in `VALIDATION.md`.
 
-Both final-source measurement tasks passed their browser behavior prechecks, then measured
-2/10/50/200 documents, 1,000 queries, 20 activations and complete cleanup. Ordinary queries caused
-no Model serialization; the explicit final snapshot serialized once, and every started resource
-was released. Source and production-bundle SHA inventories accompany the ignored results.
-These are single samples on Node 24.21.0 / Chromium 156.0.8078.4, with two animation frames included
-per open/activation. There is no equivalent historical baseline, accounting workload or performance
-improvement claim.
+This stabilization pass did not repeat the earlier performance measurements and makes no speedup
+claim. The regressions exercise native lifetime release, ordinary history settlement, and query
+behavior without Model serialization. The supported native versions remain exact; an upstream
+upgrade still requires the unpatched/patched boundary checks described in native support.
+Logs, browser screenshots and source inventories for this pass are retained in the financial
+workspace's ignored `.artifacts/worksplit-stabilization/`; they are not a financial-host acceptance.
 
 - [Scenarios and counterexamples](worksplit-redesign-scenarios.md): the consumer problems and boundaries to preserve.
 - [Redesign requirements](worksplit-redesign.md): the migration acceptance matrix, design rationale and pending external scope.
 - [Implementation order](worksplit-redesign-implementation.md): prerequisite and verification sequencing.
+- [Downstream migration task](downstream-migration.md): the financial consumer's execution prompt.
 
 External Pluxel Shell/Studio repositories have not been modified by this task. Their actual
 install/API/lifecycle adaptation remains a migration gap, not a completed consumer.

@@ -618,10 +618,10 @@ index 98a92734..22b2d9d5 100644
  export declare function preloadClientRoute<TRouteTree extends AnyRoute, TTrailingSlashOption extends TrailingSlashOption, TDefaultStructuralSharingOption extends boolean, TRouterHistory extends RouterHistory, TDehydrated extends Record<string, any> = Record<string, any>, TFrom extends RoutePaths<TRouteTree> | string = string, TTo extends string | undefined = undefined, TMaskFrom extends RoutePaths<TRouteTree> | string = TFrom, TMaskTo extends string = ''>(router: RouterCore<TRouteTree, TTrailingSlashOption, TDefaultStructuralSharingOption, TRouterHistory, TDehydrated>, opts: NavigateOptions<RouterCore<TRouteTree, TTrailingSlashOption, TDefaultStructuralSharingOption, TRouterHistory, TDehydrated>, TFrom, TTo, TMaskFrom, TMaskTo>): Promise<Array<AnyRouteMatch> | undefined>;
  declare global {
 diff --git a/dist/cjs/router.cjs b/dist/cjs/router.cjs
-index 68b6ef85..f157dcea 100644
+index 68b6ef85..6eb92011 100644
 --- a/dist/cjs/router.cjs
 +++ b/dist/cjs/router.cjs
-@@ -384,81 +384,135 @@ var RouterCore = class {
+@@ -384,81 +384,138 @@ var RouterCore = class {
  			if (!(_tanstack_router_core_isServer.isServer ?? this.isServer) && !usedCurrent && opts._fromLocation) this.staticLocations.set(opts, next);
  			return next;
  		};
@@ -765,7 +765,10 @@ index 68b6ef85..f157dcea 100644
 +            const receipt = this.history[historyAction === 'REPLACE' ? 'replace' : 'push'](nextHistory.publicHref, nextHistory.state, {
 +                ignoreBlocker,
 +                navigation,
-+                onNavigationStart
++                onNavigationStart: (request)=>{
++                    this.history.claimNavigation?.(request, this);
++                    onNavigationStart?.(request);
++                }
 +            });
 +            if (receipt) {
 +                this._scroll.n = next.resetScroll ?? true;
@@ -832,7 +835,7 @@ index 68b6ef85..f157dcea 100644
  		this.navigate = async ({ to, reloadDocument, href, publicHref, ...rest }) => {
  			if (_tanstack_router_core_isServer.isServer ?? this.isServer) return;
  			const hrefScheme = href ? require_utils.getUrlScheme(href) : void 0;
-@@ -482,12 +536,27 @@ var RouterCore = class {
+@@ -482,12 +539,28 @@ var RouterCore = class {
  				_isNavigate: true
  			});
  		};
@@ -846,6 +849,7 @@ index 68b6ef85..f157dcea 100644
 +        if (_tanstack_router_core_isServer.isServer ?? this.isServer) return _tanstack_router_core_isServer.loadServerRoute(this, opts);
 +        let outcome;
 +        try {
++            if (opts?.navigation) this.history.claimNavigation?.(opts.navigation, this);
 +            this.updateLatestLocation();
 +            if (opts?.action) this._scroll.h = opts.action.type === 'PUSH' || opts.action.type === 'REPLACE';
 +            outcome = await require_load_client.loadClientRoute(this, opts);
@@ -866,7 +870,7 @@ index 68b6ef85..f157dcea 100644
  		this.startViewTransition = (fn) => {
  			const shouldViewTransition = this.shouldViewTransition ?? this.options.defaultViewTransition;
  			this.shouldViewTransition = void 0;
-@@ -986,5 +1055,3 @@ exports.lazyFn = lazyFn;
+@@ -986,5 +1059,3 @@ exports.lazyFn = lazyFn;
  exports.lifecycleEnd = lifecycleEnd;
  exports.runRouteLifecycle = runRouteLifecycle;
  exports.trailingSlashOptions = trailingSlashOptions;
@@ -1531,10 +1535,10 @@ index 0b15e99c..e938b30d 100644
      action?: {
          type: HistoryAction;
 diff --git a/dist/esm/router.js b/dist/esm/router.js
-index a3188602..466ad79b 100644
+index a3188602..a8bb1d14 100644
 --- a/dist/esm/router.js
 +++ b/dist/esm/router.js
-@@ -384,81 +384,135 @@ var RouterCore = class {
+@@ -384,81 +384,138 @@ var RouterCore = class {
  			if (!(isServer ?? this.isServer) && !usedCurrent && opts._fromLocation) this.staticLocations.set(opts, next);
  			return next;
  		};
@@ -1678,7 +1682,10 @@ index a3188602..466ad79b 100644
 +            const receipt = this.history[historyAction === 'REPLACE' ? 'replace' : 'push'](nextHistory.publicHref, nextHistory.state, {
 +                ignoreBlocker,
 +                navigation,
-+                onNavigationStart
++                onNavigationStart: (request)=>{
++                    this.history.claimNavigation?.(request, this);
++                    onNavigationStart?.(request);
++                }
 +            });
 +            if (receipt) {
 +                this._scroll.n = next.resetScroll ?? true;
@@ -1745,7 +1752,7 @@ index a3188602..466ad79b 100644
  		this.navigate = async ({ to, reloadDocument, href, publicHref, ...rest }) => {
  			if (isServer ?? this.isServer) return;
  			const hrefScheme = href ? getUrlScheme(href) : void 0;
-@@ -482,12 +536,27 @@ var RouterCore = class {
+@@ -482,12 +539,28 @@ var RouterCore = class {
  				_isNavigate: true
  			});
  		};
@@ -1759,6 +1766,7 @@ index a3188602..466ad79b 100644
 +        if (isServer ?? this.isServer) return loadServerRoute(this, opts);
 +        let outcome;
 +        try {
++            if (opts?.navigation) this.history.claimNavigation?.(opts.navigation, this);
 +            this.updateLatestLocation();
 +            if (opts?.action) this._scroll.h = opts.action.type === 'PUSH' || opts.action.type === 'REPLACE';
 +            outcome = await loadClientRoute(this, opts);
@@ -1779,7 +1787,7 @@ index a3188602..466ad79b 100644
  		this.startViewTransition = (fn) => {
  			const shouldViewTransition = this.shouldViewTransition ?? this.options.defaultViewTransition;
  			this.shouldViewTransition = void 0;
-@@ -976,5 +1045,3 @@ function extractStrictParams(route, accumulatedParams) {
+@@ -976,5 +1049,3 @@ function extractStrictParams(route, accumulatedParams) {
  }
  //#endregion
  export { PathParamError, RouterCore, SearchParamError, _getUserHistoryState, defaultSerializeError, getInitialRouterState, getLocationChangeInfo, lazyFn, lifecycleEnd, runRouteLifecycle, trailingSlashOptions };
@@ -2018,7 +2026,7 @@ index e84bb8fb..013fa3e4 100644
  
  export async function refreshClientRoute(
 diff --git a/src/router.ts b/src/router.ts
-index ecf44316..32aab2bd 100644
+index ecf44316..84bad3a6 100644
 --- a/src/router.ts
 +++ b/src/router.ts
 @@ -56,6 +56,7 @@ import {
@@ -2074,7 +2082,7 @@ index ecf44316..32aab2bd 100644
        this.load()
      } else {
        let {
-@@ -2310,11 +2319,27 @@ export class RouterCore<
+@@ -2310,11 +2319,34 @@ export class RouterCore<
  
        historyAction = next.replace ? 'REPLACE' : 'PUSH'
  
@@ -2083,7 +2091,14 @@ index ecf44316..32aab2bd 100644
          nextHistory.publicHref,
          nextHistory.state,
 -        { ignoreBlocker },
-+        { ignoreBlocker, navigation, onNavigationStart },
++        {
++          ignoreBlocker,
++          navigation,
++          onNavigationStart: (request) => {
++            this.history.claimNavigation?.(request, this)
++            onNavigationStart?.(request)
++          },
++        },
        )
 +      if (receipt) {
 +        this._scroll.n = next.resetScroll ?? true
@@ -2104,7 +2119,7 @@ index ecf44316..32aab2bd 100644
  
        // Without a subscribed adapter the history commit cannot trigger the
        // load itself. The same-location branch already loads directly.
-@@ -2335,6 +2360,8 @@ export class RouterCore<
+@@ -2335,6 +2367,8 @@ export class RouterCore<
      hashScrollIntoView,
      viewTransition,
      ignoreBlocker,
@@ -2113,7 +2128,7 @@ index ecf44316..32aab2bd 100644
      ...rest
    }: BuildNextOptions & CommitLocationOptions = {}): Promise<void> => {
      if (isServer ?? this.isServer) {
-@@ -2357,6 +2384,8 @@ export class RouterCore<
+@@ -2357,6 +2391,8 @@ export class RouterCore<
        resetScroll,
        hashScrollIntoView,
        ignoreBlocker,
@@ -2122,7 +2137,7 @@ index ecf44316..32aab2bd 100644
      })
  
      // Clear pending location after commit starts
-@@ -2419,16 +2448,19 @@ export class RouterCore<
+@@ -2419,16 +2455,20 @@ export class RouterCore<
    }
  
    load: LoadFn = async (opts): Promise<void> => {
@@ -2139,6 +2154,7 @@ index ecf44316..32aab2bd 100644
 +    if (isServer ?? this.isServer) return loadServerRoute(this, opts)
 +    let outcome: HistoryNavigationOutcome
 +    try {
++      if (opts?.navigation) this.history.claimNavigation?.(opts.navigation, this)
 +      this.updateLatestLocation()
 +      if (opts?.action) this._scroll.h = opts.action.type === 'PUSH' || opts.action.type === 'REPLACE'
 +      outcome = await loadClientRoute(this, opts)

@@ -6,7 +6,7 @@ import {
   type MenuRendererProps,
   type OperationResult,
 } from "@worksplit/react";
-import { Actions, DockLocation, PopupMenu, TabGroupNode } from "flexlayout-react";
+import { Actions, DockLocation, I18nLabel, PopupMenu, TabGroupNode } from "flexlayout-react";
 import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -73,6 +73,30 @@ async function fixture() {
 }
 
 describe("native default Worksplit menus", () => {
+  it("retains native translations while protecting close ranges", async () => {
+    const { instance, open } = await fixture();
+    const second = await open("B");
+    const labels: Partial<Record<I18nLabel, string>> = {
+      [I18nLabel.Menu_Rename]: "重新命名",
+      [I18nLabel.Close_Tab]: "关闭标签",
+      [I18nLabel.Menu_Close_Others]: "关闭其他",
+      [I18nLabel.Menu_Close_Right]: "关闭右侧",
+    };
+    render(
+      <Workbench
+        instance={instance}
+        native={{ i18nTranslator: (key) => labels[key as I18nLabel] ?? key }}
+      />,
+    );
+    fireEvent.contextMenu(await screen.findByRole("tab", { name: "A" }));
+    expect(await screen.findByRole("menuitem", { name: "重新命名" })).toBeDefined();
+    expect(screen.getByRole("menuitem", { name: "关闭标签" })).toBeDefined();
+    expect(screen.getByRole("menuitem", { name: "关闭右侧" })).toBeDefined();
+    fireEvent.click(screen.getByRole("menuitem", { name: "关闭其他" }));
+    await waitFor(() => expect(instance.getDocument(second.id)).toBeNull());
+    expect(instance.getDocuments()).toHaveLength(1);
+  });
+
   it("opens from the keyboard and disables a split that cannot create another pane", async () => {
     const { instance } = await fixture();
     render(<Workbench instance={instance} />);
@@ -200,5 +224,31 @@ describe("native default Worksplit menus", () => {
       closed.forEach((done) => done());
     });
     expect(selected).not.toHaveBeenCalled();
+  });
+
+  it("accepts only one selection while a custom menu finishes its exit animation", async () => {
+    const { instance } = await fixture();
+    const duplicate = vi.spyOn(instance, "duplicate");
+    let finish: (() => void) | undefined;
+    function AnimatedMenu({ open, onClosed, ...props }: MenuRendererProps) {
+      useEffect(() => {
+        if (!open) finish = onClosed;
+      }, [open, onClosed]);
+      // Keep the actual popup until the animation completes, including its native handlers.
+      return <PopupMenu {...props} />;
+    }
+    render(
+      <Workbench instance={instance} menus={{ render: (props) => <AnimatedMenu {...props} /> }} />,
+    );
+    fireEvent.contextMenu(await screen.findByRole("tab", { name: "A" }));
+    const item = await screen.findByRole("menuitem", { name: "Duplicate" });
+    fireEvent.click(item);
+    fireEvent.click(item);
+    expect(duplicate).not.toHaveBeenCalled();
+    expect(finish).toBeTypeOf("function");
+    act(() => finish!());
+    expect(duplicate).toHaveBeenCalledOnce();
+    await waitFor(() => expect(instance.getDocuments()).toHaveLength(2));
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 });

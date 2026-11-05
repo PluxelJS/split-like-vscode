@@ -116,6 +116,28 @@ function stateOf(controller: { getState(): LeaveState }): LeaveState {
 function same<T>(left: readonly T[], right: readonly T[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
+
+function validNavigation(navigation: RuntimeNavigation): boolean {
+  if (
+    !navigation ||
+    navigation.reloadDocument !== undefined ||
+    navigation.ignoreBlocker !== undefined ||
+    Object.hasOwn(navigation, "navigation") ||
+    (navigation.to !== undefined &&
+      (typeof navigation.to !== "string" ||
+        navigation.to.startsWith("//") ||
+        URL.canParse(navigation.to)))
+  )
+    return false;
+  if (navigation.href !== undefined) {
+    try {
+      checkHref(navigation.href);
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
 interface Approval {
   readonly attempt: LeaveAttempt;
   readonly decision: Promise<boolean>;
@@ -134,6 +156,7 @@ interface OpenCapture {
   anchor: TabSetNode | undefined;
   destination: { value: Destination; target: Node; children: readonly Node[] } | undefined;
   focus: number;
+  order: number;
   presentation: "activate" | "reveal" | "background";
   current?: () => boolean;
 }
@@ -187,7 +210,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     | undefined;
   private workspaceCloseRequest: { destination: string | undefined; handoff: boolean } | undefined;
   private readonly pendingRouters = new Set<DocumentRuntime<AnyRouter>>();
-  private readonly previewEpochs = new Map<string, number>();
+  private readonly previewEpochs = new WeakMap<object, number>();
   private browser: BrowserHistoryCoordinator | undefined;
   private readonly browserRequests = new WeakMap<NativeNavigation, BrowserVisitSource>();
   private readonly links: DocumentLinkController;
@@ -201,10 +224,9 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       ...(options.tools ? { tools: { ...options.tools } } : {}),
       ...(options.home ? { home: { ...options.home } } : {}),
     };
-    this.workspaceId = options.workspaceId ?? crypto.randomUUID();
-    if (!this.workspaceId) throw new TypeError("workspaceId must be nonempty");
     if (options.home) checkHref(options.home.href);
-    const initial = initialLayout(options, this.workspaceId);
+    const initial = initialLayout(options);
+    this.workspaceId = initial.workspaceId;
     this.restoredActive = initial.activeDocumentId;
     this.model = Model.fromJson(initial.layout);
     if (options.layoutPolicy && !options.layoutPolicy.allows(this.model))
@@ -257,6 +279,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       (drag, target, location) => this.allowMove(drag, target, location),
       this.options.layoutPolicy,
       (error) => this.issue(error),
+      (result) => this.reportResult(result),
     );
     this.modelListener = {
       onBeforeAction: (action) => {
@@ -1052,7 +1075,6 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
 
   private captureOpen(
     options: OpenOptions,
-    claimFocus = true,
   ): OpenCapture | { status: "denied"; reason: DenialReason } {
     const presentation = options.presentation ?? "activate";
     if (
@@ -1082,8 +1104,23 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
         children: [...target.getChildren()],
       };
     }
-    if (presentation === "activate" && claimFocus) this.cancelFocus();
-    return { source, sourceContainer, anchor, destination, focus: this.focusEpoch, presentation };
+    return {
+      source,
+      sourceContainer,
+      anchor,
+      destination,
+      focus: this.focusEpoch,
+      order: 0,
+      presentation,
+    };
+  }
+  private claimOpen(capture: OpenCapture, browser = false): void {
+    if (capture.presentation === "activate") {
+      if (!browser) this.browser?.cancelPending();
+      this.cancelFocus();
+    }
+    capture.focus = this.focusEpoch;
+    capture.order = ++this.sequence;
   }
   private captureCurrent(capture: OpenCapture): boolean {
     return (
@@ -1100,6 +1137,11 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
             capture.destination.value.index < 0 ||
             same(capture.destination.children, capture.destination.target.getChildren()))))
     );
+  }
+  private openPresentation(capture: OpenCapture, preview: boolean | undefined) {
+    if (capture.presentation === "background" || capture.focus === this.focusEpoch)
+      return capture.presentation;
+    return capture.presentation === "activate" && !preview ? "background" : null;
   }
   private canPlace(
     tab: IJsonTabNode,
@@ -1209,37 +1251,32 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     navigation: DocumentNavigationOptions<TRouter, TFrom, TTo>,
     options: OpenOptions = {},
   ): Promise<OpenResult> {
-    return this.openDocument(navigation as unknown as RuntimeNavigation, options, false);
+    return this.openDocument(navigation as unknown as RuntimeNavigation, options);
   }
   private async openDocument(
     navigation: RuntimeNavigation,
     options: OpenOptions,
-    starting: boolean,
-    current?: () => boolean,
-    source?: BrowserVisitSource,
+    request: { starting?: boolean; capture?: OpenCapture; browser?: BrowserVisitSource } = {},
   ): Promise<OpenResult> {
-    if (this.phase !== "running" && !(starting && this.phase === "starting"))
+    if (this.phase !== "running" && !(request.starting && this.phase === "starting"))
       return denied("not-ready");
-    if (!current) this.browser?.cancelPending();
+    const source = request.browser;
     let prepared: ReturnType<WorkbenchSession<TRouter>["runtime"]> | undefined;
     let previewApproval: Approval | undefined;
     let oldPreview: DocumentRecord | undefined;
     let removedPreview: DocumentRecord | undefined;
     let admitted: DocumentRecord | undefined;
     const cleanupErrors: unknown[] = [];
-    const requestOrder = ++this.sequence;
     try {
       if (
-        !navigation ||
-        navigation.reloadDocument !== undefined ||
-        navigation.ignoreBlocker !== undefined ||
-        Object.hasOwn(navigation, "navigation") ||
+        !validNavigation(navigation) ||
         (options.reuse !== undefined && !["preserve", "navigate", "new"].includes(options.reuse))
       )
         return denied("invalid-argument");
-      const capture = this.captureOpen(options);
+      const capture = request.capture ?? this.captureOpen(options);
       if ("status" in capture) return capture;
-      if (current) capture.current = current;
+      if (source) capture.current = source.current;
+      if (!this.captureCurrent(capture)) return superseded;
       prepared = this.runtime(
         capture.source?.role === "document"
           ? capture.source.href
@@ -1254,6 +1291,10 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       if (location.external) return denied("invalid-argument");
       checkHref(location.publicHref);
       const requestedKey = this.identity(router, location);
+      if (!this.captureCurrent(capture)) return superseded;
+      // Plain targets fail their synchronous URL/key validation before claiming intent.
+      // A lazy entrance already claimed the same capture before awaiting its resolver.
+      if (!capture.order) this.claimOpen(capture, !!source);
       const reuse = options.reuse ?? "preserve";
       const useExisting = async (record: DocumentRecord): Promise<OpenResult> => {
         if (!this.captureCurrent(capture)) return superseded;
@@ -1321,11 +1362,9 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
         const match = this.findDocument(key, router);
         if (match) return await useExisting(match);
       }
-      let presentation = capture.presentation;
-      if (presentation === "activate" && capture.focus !== this.focusEpoch) {
-        if (options.preview) return superseded;
-        presentation = "background";
-      }
+      const initialPresentation = this.openPresentation(capture, options.preview);
+      if (!initialPresentation) return superseded;
+      let presentation = initialPresentation;
       const id = `document-${this.prefix}-${++this.sequence}`;
       const title =
         router.state.matches
@@ -1360,19 +1399,18 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       const targetChildren = [...target.getChildren()];
       const scope =
         this.options.previewScope === "workspace"
-          ? "workspace"
+          ? this.model
           : destination.location === DockLocation.CENTER
-            ? (tabContainer(target) ?? target).getId()
-            : `split-${requestOrder}`;
-      const previewEpoch = requestOrder;
-      if (options.preview) {
-        if ((this.previewEpochs.get(scope) ?? 0) > previewEpoch) return superseded;
-        this.previewEpochs.set(scope, previewEpoch);
+            ? (tabContainer(target) ?? target)
+            : undefined;
+      if (options.preview && scope) {
+        if ((this.previewEpochs.get(scope) ?? 0) > capture.order) return superseded;
+        this.previewEpochs.set(scope, capture.order);
         oldPreview = [...this.records.values()].find(
           (record): record is DocumentRecord =>
             record.role === "document" &&
             record.preview &&
-            this.previewScope(record.node) === scope,
+            (scope === this.model || tabContainer(record.node) === scope),
         );
         if (oldPreview) {
           if (
@@ -1392,9 +1430,12 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
         (destination.index !== undefined &&
           destination.index >= 0 &&
           !same(targetChildren, target.getChildren())) ||
-        (options.preview && this.previewEpochs.get(scope) !== previewEpoch)
+        (options.preview && scope && this.previewEpochs.get(scope) !== capture.order)
       )
         return superseded;
+      const finalPresentation = this.openPresentation(capture, options.preview);
+      if (!finalPresentation) return superseded;
+      presentation = finalPresentation;
       if (!this.canPlace(tab, destination, capture, presentation)) return denied("layout-policy");
       const action = Actions.addTab(
         tab,
@@ -2124,7 +2165,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
         if (!location) return false;
         // Native tool ADD owns its select flag, including admission into a closed Border.
         // Document background presentation constraints do not reinterpret a native Action.
-        const capture = this.captureOpen({}, false);
+        const capture = this.captureOpen({});
         return (
           !("status" in capture) &&
           this.canPlace(
@@ -2387,7 +2428,10 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     options: LinkOptions = {},
   ) {
     let href: string | undefined;
-    if (typeof navigation !== "function") {
+    if (
+      typeof navigation !== "function" &&
+      validNavigation(navigation as unknown as RuntimeNavigation)
+    ) {
       const sourceHandle = options.source ?? this.store.get().source;
       const source = sourceHandle ? this.recordFor(sourceHandle) : undefined;
       const borrowed = source?.role === "document" ? source.runtime?.router : undefined;
@@ -2397,9 +2441,13 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
             source?.role === "document" ? source.href : (this.options.home?.href ?? "/"),
           );
       try {
-        href = (borrowed ?? temporary!.runtime.router).buildLocation(
+        const location = (borrowed ?? temporary!.runtime.router).buildLocation(
           navigation as Parameters<AnyRouter["buildLocation"]>[0],
-        ).publicHref;
+        );
+        if (!location.external) {
+          checkHref(location.publicHref);
+          href = location.publicHref;
+        }
       } finally {
         if (temporary) {
           this.pendingRouters.delete(temporary.runtime);
@@ -2411,17 +2459,19 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     return this.links.create(
       () => href,
       async (requested, current) => {
-        const capture = this.captureOpen(requested, false);
-        if ("status" in capture) return capture;
+        if (this.phase !== "running") return denied("not-ready");
         if (!current()) return superseded;
+        const capture = this.captureOpen(requested);
+        if ("status" in capture) return capture;
+        capture.current = current;
         try {
+          if (typeof navigation === "function") this.claimOpen(capture);
           const target = typeof navigation === "function" ? await navigation() : navigation;
           if (!current() || !this.captureCurrent(capture)) return superseded;
           const result = await this.openDocument(
             target as unknown as RuntimeNavigation,
-            { ...requested, ...(capture.source ? { source: capture.source.handle } : {}) },
-            false,
-            current,
+            requested,
+            { capture },
           );
           if (result.status === "applied") href = result.value.document.href;
           return result;
@@ -2521,7 +2571,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
         )
           result = applied({ document: null, href });
         else {
-          const opened = await this.openDocument({ href }, {}, true);
+          const opened = await this.openDocument({ href }, {}, { starting: true });
           result =
             opened.status === "applied"
               ? applied(
@@ -2593,9 +2643,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       const opened = await this.openDocument(
         { href, onNavigationStart: claim },
         { reuse: "new" },
-        this.phase === "starting",
-        current,
-        source,
+        { starting: this.phase === "starting", browser: source },
       );
       this.reportResult(opened);
       if (!current() || opened.status !== "applied") return;

@@ -47,8 +47,9 @@ A refused replacement leaves the old preview, native layout and resources intact
 ## Native actions and names
 
 The live `instance.model` is the unique layout authority. Use `dispatch` for mutations and
-`canDispatch` to check exact supported actions. Native grouped Actions preserve object identity,
-order and one native commit. Tab/group movement and resizing do not request a new document load
+`canDispatch` to check exact supported actions. Supported non-removal grouped Actions preserve
+object identity, order and one native commit. Grouped removal uses the same protected close
+path, with a fresh approval check before each member's deletion. Tab/group movement and resizing do not request a new document load
 or duplicate content. A native group that becomes singleton remains the same group under the
 supported FlexLayout correction. The last empty native root remains a valid workspace.
 
@@ -83,6 +84,9 @@ native menu entries. A chosen callback is held until the renderer has removed it
 finished returning focus. `onClose` requests that transition; `onClosed` acknowledges completion.
 A late acknowledgement from an invalidated session cannot execute its action. The default
 PopupMenu is rendered in the existing React tree and retains Router/application providers.
+Only the first selection is accepted while a custom renderer completes its exit animation.
+Standard close entries retain native labels and `i18nTranslator`; Worksplit replaces their
+execution with protected close. `menus.labels` covers the additional Worksplit entries.
 
 Host dialogs may take focus after that completion without a later menu cleanup stealing it.
 Custom renderers need no command framework and must keep exactly this close-completion protocol.

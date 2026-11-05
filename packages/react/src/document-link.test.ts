@@ -47,9 +47,10 @@ async function setup(
   });
   const routeTree = root.addChildren([route]);
   const dropHook = vi.spyOn(Model.prototype, "setOnAllowDrop");
+  const onIssue = vi.fn<NonNullable<WorkbenchOptions<AnyRouter>["onIssue"]>>();
   const workbench = createWorkbench({
     ...options,
-    onIssue: vi.fn<() => void>(),
+    onIssue,
     home: { mode: "empty", href: "/" },
     createRouter: (history) => createRouter({ routeTree, history, defaultPendingMinMs: 0 }),
   });
@@ -99,6 +100,7 @@ async function setup(
     drop,
     dragNode,
     allowsDrop,
+    onIssue,
     getJson: () => json,
   };
 }
@@ -117,6 +119,90 @@ function dragEvent() {
 }
 
 describe("routed document links", () => {
+  it.each([
+    { href: "https://example.test/external" },
+    { to: "https://example.test/external" },
+    { to: "//example.test/external" },
+  ])("does not advertise an internal href for an invalid target %j", async (navigation) => {
+    const { workbench, open } = await setup();
+    const source = await open("source");
+    const onResult = vi.fn<(result: OpenResult) => void>();
+    // JavaScript consumers may provide targets outside the registered native route tree.
+    const link = workbench.createLink(navigation as Parameters<typeof workbench.open>[0], {
+      onResult,
+    });
+    expect(link.href).toBeUndefined();
+    const result = await link.open();
+    expect(result).toEqual({ status: "denied", reason: "invalid-argument" });
+    expect(onResult).toHaveBeenCalledExactlyOnceWith(result);
+    expect(workbench.getActiveDocument()?.id).toBe(source.id);
+    expect(workbench.getDocuments()).toHaveLength(1);
+  });
+
+  it.each([false, true])(
+    "retains the original foreground intent across a lazy resolver (preview=%s)",
+    async (preview) => {
+      const { workbench, open } = await setup();
+      const source = await open("source");
+      const gate = deferred();
+      const link = workbench.createLink(
+        async () => {
+          await gate.promise;
+          return nav("older");
+        },
+        { source: source.handle, preview },
+      );
+      const opening = link.open();
+      try {
+        const newer = await open("newer");
+        gate.resolve();
+        const result = await opening;
+        expect(result).toMatchObject(
+          preview
+            ? { status: "superseded" }
+            : { status: "applied", value: { presentation: "background" } },
+        );
+        expect(workbench.getActiveDocument()?.id).toBe(newer.id);
+        expect(workbench.getDocuments()).toHaveLength(preview ? 2 : 3);
+      } finally {
+        gate.resolve();
+        await opening;
+      }
+    },
+  );
+
+  it("claims a lazy foreground action before its resolver so an older loader stays background", async () => {
+    const loader = deferred();
+    const { workbench, open } = await setup({}, (id) =>
+      id === "older" ? loader.promise : undefined,
+    );
+    const source = await open("source");
+    const older = workbench.open(nav("older"));
+    const resolver = deferred();
+    const link = workbench.createLink(
+      async () => {
+        await resolver.promise;
+        return nav("newer");
+      },
+      { source: source.handle },
+    );
+    const newer = link.open();
+    try {
+      loader.resolve();
+      expect(await older).toMatchObject({
+        status: "applied",
+        value: { presentation: "background" },
+      });
+      expect(workbench.getActiveDocument()?.id).toBe(source.id);
+      resolver.resolve();
+      expect(await newer).toMatchObject({ status: "applied", value: { presentation: "activate" } });
+      expect(workbench.getActiveDocument()?.href).toBe("/documents/newer");
+    } finally {
+      loader.resolve();
+      resolver.resolve();
+      await Promise.all([older, newer]);
+    }
+  });
   it("ends native dragging while disposal waits for content cleanup", async () => {
     const { workbench, open, endDrag } = await setup();
     const source = await open("A");
@@ -349,4 +435,71 @@ describe("routed document links", () => {
     link.dragEnd(dragEvent());
     expect(endDrag).toHaveBeenCalledOnce();
   });
+
+  it("leaves an explicit link.open failure with its caller when no handler is supplied", async () => {
+    const { workbench, onIssue } = await setup();
+    const error = new Error("lookup failed");
+    const link = workbench.createLink(async () => {
+      throw error;
+    });
+    expect(await link.open()).toMatchObject({ status: "failed", error });
+    expect(onIssue).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "reports an unawaited native drop failure once (custom result handler: %s)",
+    async (customHandler) => {
+      const { workbench, open, drop, onIssue } = await setup();
+      const source = await open("A");
+      const error = new Error("lookup failed");
+      const onResult = vi.fn<(result: OpenResult) => void>();
+      const link = workbench.createLink(
+        async () => {
+          throw error;
+        },
+        { source: source.handle, ...(customHandler ? { onResult } : {}) },
+      );
+      link.dragStart(dragEvent());
+      drop(source.containerId!);
+      await vi.waitFor(() => expect(customHandler ? onResult : onIssue).toHaveBeenCalledOnce());
+      const expectedResult = expect.objectContaining({ status: "failed", error });
+      expect(onResult.mock.calls).toEqual(customHandler ? [[expectedResult]] : []);
+      expect(onIssue.mock.calls).toEqual(
+        customHandler ? [] : [[{ code: "operation-failed", error }]],
+      );
+    },
+  );
+
+  it.each([false, true])(
+    "reports native drop preview cleanup errors once (custom result handler: %s)",
+    async (customHandler) => {
+      const { workbench, open, drop, onIssue } = await setup();
+      const source = await open("A");
+      const preview = await open("B", { preview: true });
+      const error = new Error("preview cleanup failed");
+      preview.handle.runEffect(({ defer }) =>
+        defer(() => {
+          throw error;
+        }),
+      );
+      const onResult = vi.fn<(result: OpenResult) => void>();
+      const link = workbench.createLink(nav("C"), {
+        source: source.handle,
+        preview: true,
+        ...(customHandler ? { onResult } : {}),
+      });
+      link.dragStart(dragEvent());
+      drop(source.containerId!);
+      await vi.waitFor(() => expect(customHandler ? onResult : onIssue).toHaveBeenCalledOnce());
+      expect(workbench.getDocument(preview.id)).toBeNull();
+      expect(workbench.getDocuments().some((document) => document.href === "/documents/C")).toBe(
+        true,
+      );
+      const expectedResult = expect.objectContaining({ status: "applied", cleanupErrors: [error] });
+      expect(onResult.mock.calls).toEqual(customHandler ? [[expectedResult]] : []);
+      expect(onIssue.mock.calls).toEqual(
+        customHandler ? [] : [[{ code: "operation-failed", error }]],
+      );
+    },
+  );
 });

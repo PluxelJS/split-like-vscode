@@ -57,7 +57,13 @@ interface HistoryNavigation {
 
 `createMemoryHistory({ initialEntries, initialIndex?, requireNavigationApproval: true })` 返回
 原生 `MemoryHistory`。其 push/replace/go/back/forward 返回本次 `HistoryNavigation`。
-`committed` 只表示 history 已改写；`finished` 在 Router 接纳或确定终止时结算。
+`committed` 只表示 history 已改写。普通独立 history 请求在实际写入及同步订阅通知结束后自行以
+accepted 结算；观察者和它返回的 Promise 不拥有导航寿命。Router 通过 `claimNavigation(navigation, owner)`
+在发起请求的 `onNavigationStart`，或收到原生 history 的同步 load 通知时认领该请求，之后 `finished`
+才等待这个 Router 的实际接纳或确定终止。同一请求不能由两个 Router 认领，终态释放 owner 和
+blocker 检查引用。`requireNavigationApproval` 仅控制批准，不能被当作 Router 是否存在的标志。
+这使未接入 Worksplit 的普通 `createMemoryHistory` 用法也能正常结束，不把每次已完成写入保留到 destroy。
+
 `signal` 在本次尝试结束时 abort，不表示保存结果或远端工作撤销。拒绝和取代均正常结算，
 失败还保留 `error`。父请求在真实 redirect 子链结束时一并结算，错误也沿同一父链保留。
 
@@ -67,10 +73,12 @@ history 的订阅通知和 `BlockerFnArgs` 增加 `navigation`。`NavigationBloc
 批准绑定原请求的 args，继承批准的 redirect 重新复核原批准，不按 URL 重新找到一张通行证。
 
 `MemoryHistory.signal` 是唯一实例寿命。`destroy()` 终止未提交请求以及已提交、初次加载、重载和后台加载，
-使晚到结果失去发布资格。当前 Router transaction 保留一个实例监听；后继、失败和销毁清理该监听，
+使晚到结果失去发布资格，同时释放 blocker 和订阅；终态后的登记立即返回空清理，不继续保留回调。
+当前 Router transaction 保留一个实例监听；后继、失败和销毁清理该监听，
 反复导航不会保留每代 transaction。`getEntry(key)` 查询真实会话 entry；replace 或分支截断后返回缺失，
 不按 index 或 href 冒充原 entry。`completeNavigation(navigation, result, error?)` 供原生 Router 在真实结算点调用；
-应用不能调用它伪造批准或接纳。
+`claimNavigation` / `completeNavigation` 是上游 Router 与 history 的结算协议扩展，页面不应调用它们
+伪造批准、接纳或延长寿命。认领必须发生在同步发布结束前，不能以延迟微任务或订阅数量推断 owner。
 
 原生导航 options 另有 `onNavigationStart?: (navigation: HistoryNavigation) => void`，
 在真实请求已登记、blocker 尚未运行时同步通知。它沿同址 load 到实际 redirect 的路径传递；

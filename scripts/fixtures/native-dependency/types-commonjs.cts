@@ -31,3 +31,8 @@ void router.navigate({
     void outcome;
   },
 });
+
+// The Router/history protocol has an explicit completion owner in both module formats.
+const claim: (navigation: history.HistoryNavigation, owner: object) => void =
+  memory.claimNavigation;
+void claim;

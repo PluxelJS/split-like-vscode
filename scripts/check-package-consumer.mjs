@@ -115,7 +115,7 @@ try {
   );
   await run(process.execPath, ["check-navigation-patch-runtime.mjs", consumer], consumer);
   report.checks.push(
-    "Same 41 real Router regressions in ESM and CJS plus 14 source/runtime parity assertions",
+    "Same real Router regressions in ESM and CJS plus source/runtime parity assertions",
   );
   await run(process.execPath, ["--conditions=browser", "runtime.mjs"], consumer);
   await run(

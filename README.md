@@ -164,6 +164,13 @@ its `href`, `open`, `dragStart` and `dragEnd` support a real link and a separate
 canceled drag does not run the resolver. A drop keeps the native container/group/border and index,
 and invalidates admission if its source, destination ordering or Layout binding changes.
 
+An open captures its source and foreground intent once, including time spent in a lazy link
+resolver or preview decision. Later user intent prevents the older request from taking selection
+or focus: an ordinary open may finish in the background at its still-valid destination; a stale
+preview or reveal is superseded. An unrelated background open does not cancel browser traversal.
+Use `onResult` when a link owns feedback; without it, native drops report failures and cleanup
+errors through `onIssue`. An explicit `link.open()` caller owns its returned receipt.
+
 Every asynchronous operation settles to `applied`, `denied`, `superseded` or `failed`.
 Read `value` only for `applied`; it records what this operation committed. While cleanup waits,
 a later operation may change or end that content; query current live state before follow-up work.
@@ -238,7 +245,10 @@ Native back/forward/go, push/replace, initial deep links and outside handoff are
 `createSnapshot()` explicitly exports version 2 layout/location state. Restore through
 `initial: { snapshot: unknown }`; invalid versions, malformed entries or unsupported layouts
 fail before content creation. There is no old snapshot converter. A snapshot contains no live
-Router, controller or draft. The host chooses storage and throttling, using `snapshotRevision`
+Router, controller or draft. Without an explicit `workspaceId`, restore inherits the validated
+snapshot identity; an explicitly supplied ID must match. A fresh session generates an ID when
+none is supplied. Project hosts can provide their stable project identity to reject another
+project's snapshot. The host chooses storage and throttling, using `snapshotRevision`
 when it needs to observe persistent changes; ordinary queries do not serialize the Model.
 `captureSnapshotOnClose` obtains the final protected exit snapshot after decisions and before
 removal. See the [browser/history example](packages/demo/src/examples/browser.tsx).

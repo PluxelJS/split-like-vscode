@@ -50,3 +50,8 @@ void router.navigate({
 const nativeGlobals = model.getGlobalAttributes();
 const closes: boolean | undefined = nativeGlobals.tabEnableClose;
 void closes;
+
+// The Router/history protocol has an explicit completion owner in both module formats.
+const claim: (navigation: HistoryNavigation, owner: object) => void =
+  protectedHistory.claimNavigation;
+void claim;

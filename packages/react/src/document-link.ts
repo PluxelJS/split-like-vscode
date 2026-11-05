@@ -85,6 +85,7 @@ export class DocumentLinkController {
     private readonly allowMove: (drag: Node, target: Node, location: DockLocation) => boolean,
     private readonly layoutPolicy: WorkbenchLayoutPolicy | undefined,
     private readonly report: (error: unknown) => void,
+    private readonly reportResult: ResultHandler,
   ) {}
 
   attach(getApi: () => ILayoutApi | null): () => void {
@@ -113,14 +114,19 @@ export class DocumentLinkController {
         ? { destination: Object.freeze({ ...options.destination }) }
         : {}),
     });
-    const notify: ResultHandler = (result) => {
+    const notify = (result: OpenResult, ownedDrop = false) => {
       try {
-        onResult?.(result);
+        if (onResult) onResult(result);
+        else if (ownedDrop) this.reportResult(result);
       } catch (error) {
         this.report(error);
       }
     };
-    const execute = async (requested: OpenOptions, current: () => boolean): Promise<OpenResult> => {
+    const execute = async (
+      requested: OpenOptions,
+      current: () => boolean,
+      ownedDrop = false,
+    ): Promise<OpenResult> => {
       let result: OpenResult;
       try {
         result = this.disposed
@@ -138,7 +144,8 @@ export class DocumentLinkController {
           cleanupErrors: [],
         };
       }
-      notify(result);
+      // Explicit open has a caller; an accepted native drop has no promise consumer.
+      notify(result, ownedDrop);
       return result;
     };
     return Object.freeze({
@@ -177,7 +184,7 @@ export class DocumentLinkController {
           api,
           binding,
           drag: undefined,
-          notify,
+          notify: (result) => notify(result, true),
           drop: (destination, current) =>
             execute(
               {
@@ -187,6 +194,7 @@ export class DocumentLinkController {
                 destination,
               } as OpenOptions,
               current,
+              true,
             ),
         };
         this.pending = pending;

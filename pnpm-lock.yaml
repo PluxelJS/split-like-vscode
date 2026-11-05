@@ -83,9 +83,9 @@ overrides:
   vite@*: npm:@voidzero-dev/vite-plus-core@1.2.0
 
 patchedDependencies:
-  '@tanstack/history@1.162.5': 2744adda2da7e44c051b00ff7fd33ce9c6aec67ca381429d005be134bc5d8710
+  '@tanstack/history@1.162.5': ffcf90d261a23d540cc01b29d8c6033e3f62135e52979409c0fd626d44a91e44
   '@tanstack/react-router@1.170.46': a06f7fffde2d0daf0c006a0f415da14330df13d063afb0849cf85951b6f93a51
-  '@tanstack/router-core@1.171.39': 8730462ac8f2667ce77f6252337cc607821bfd0d9056b6ae51916a1dd68475f9
+  '@tanstack/router-core@1.171.39': 8c8c284faf7097cb407920dd77b598ceb5b38e295ec464d12b9cd9f8ab06f808
   flexlayout-react@0.11.1: 372b8a39eed33bb2faf78ef5124437b02c67e543ce1f9aba4852887f83d55ca9
 
 importers:
@@ -1865,7 +1865,7 @@ snapshots:
 
   '@rolldown/pluginutils@1.0.1': {}
 
-  '@tanstack/history@1.162.5(patch_hash=2744adda2da7e44c051b00ff7fd33ce9c6aec67ca381429d005be134bc5d8710)': {}
+  '@tanstack/history@1.162.5(patch_hash=ffcf90d261a23d540cc01b29d8c6033e3f62135e52979409c0fd626d44a91e44)': {}
 
   '@tanstack/hotkeys@0.17.0':
     dependencies:
@@ -1880,9 +1880,9 @@ snapshots:
 
   '@tanstack/react-router@1.170.46(patch_hash=a06f7fffde2d0daf0c006a0f415da14330df13d063afb0849cf85951b6f93a51)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
-      '@tanstack/history': 1.162.5(patch_hash=2744adda2da7e44c051b00ff7fd33ce9c6aec67ca381429d005be134bc5d8710)
+      '@tanstack/history': 1.162.5(patch_hash=ffcf90d261a23d540cc01b29d8c6033e3f62135e52979409c0fd626d44a91e44)
       '@tanstack/react-store': 0.11.2(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@tanstack/router-core': 1.171.39(patch_hash=8730462ac8f2667ce77f6252337cc607821bfd0d9056b6ae51916a1dd68475f9)
+      '@tanstack/router-core': 1.171.39(patch_hash=8c8c284faf7097cb407920dd77b598ceb5b38e295ec464d12b9cd9f8ab06f808)
       isbot: 5.2.2
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)
@@ -1894,9 +1894,9 @@ snapshots:
       react-dom: 19.3.0(react@19.3.0)
       use-sync-external-store: 1.7.0(react@19.3.0)
 
-  '@tanstack/router-core@1.171.39(patch_hash=8730462ac8f2667ce77f6252337cc607821bfd0d9056b6ae51916a1dd68475f9)':
+  '@tanstack/router-core@1.171.39(patch_hash=8c8c284faf7097cb407920dd77b598ceb5b38e295ec464d12b9cd9f8ab06f808)':
     dependencies:
-      '@tanstack/history': 1.162.5(patch_hash=2744adda2da7e44c051b00ff7fd33ce9c6aec67ca381429d005be134bc5d8710)
+      '@tanstack/history': 1.162.5(patch_hash=ffcf90d261a23d540cc01b29d8c6033e3f62135e52979409c0fd626d44a91e44)
       cookie-es: 3.1.1
       seroval: 1.6.9
       seroval-plugins: 1.6.9(seroval@1.6.9)
