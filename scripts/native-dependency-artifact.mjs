@@ -65,7 +65,8 @@ export async function createNativeDependencyArtifact(
       installer === (await readFile(join(output, "install.mjs"), "utf8"));
     for (const specification of specifications) {
       const entry = cached.dependencies.find((value) => value.name === specification.name);
-      if (!entry || entry.version !== specification.version) {
+      const patchName = specification.patch ? "patches/" + specification.patch : undefined;
+      if (!entry || entry.version !== specification.version || entry.patch !== patchName) {
         valid = false;
         break;
       }

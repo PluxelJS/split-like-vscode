@@ -15,7 +15,11 @@
 
 冷构建通过 `@worksplit/react` 的构建依赖 `pacote` 获取固定版本的 npm registry tarball，
 校验 integrity 与补丁文件后生成制品，不调用 PATH 中的 `npm` 或系统 `tar`。
-已有制品通过补丁与安装器校验后可离线复用；交付给消费者的安装器仍只依赖 Node。
+已有制品的依赖版本、补丁选择（包括移除补丁）、补丁内容与安装器都匹配时才可离线复用；
+交付给消费者的安装器仍只依赖 Node。`@worksplit/react#check-tests` 先准备真实制品，
+再验证缓存复用与补丁移除后的重新生成。
+`compile-lib` 与 `compile-native` 分别拥有 `dist/` 和 `native-dependencies/`，
+`compile` 连接这两个任务，缓存恢复不会相互覆盖另一阶段的产物。
 
 Worksplit 是客户端会话。文档 factory 返回原生 Router，runtime 通过公开
 `router.update({ isServer: false })` 明确客户端执行；直接验证上游能力的无 DOM 测试同样
