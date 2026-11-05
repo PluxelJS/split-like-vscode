@@ -7,9 +7,20 @@ Public contracts now live in the
 [native support](../navigation-support.md). The same runnable examples are used by the demo and
 independent package consumer; target API sketches must not be treated as installed capability.
 
+Other repositories should use the [general migration guide](../migration.md). The financial
+consumer's [scope and acceptance](downstream-migration.md) supplement it with that host's policies.
+
+The consumer API review corrected preview-link background overrides, made content roles narrow
+to document/tool types, and marked SplitView's borrowed layout outputs readonly. Its collapsed
+separator renderer is now named `renderCollapsedSash`; the controlled visibility example handles
+restore requests. The current standalone gate passed 18 tasks, including 36 browser checks each
+for demo and installed packages (41 total package checks). All four code blocks from the migration
+and SplitView guides also compile against the installed declarations. This review's evidence is
+in the financial workspace's ignored `.artifacts/worksplit-api-review/`.
+
 The financial migration retained local commit `6557cf8` as its library baseline and integrated
 the complete native corrections into the parent's single installation. The current source passed
-386 React, 25 SplitView and 13 editor-store tests, plus source, test and registered-consumer
+387 React, 25 SplitView and 13 editor-store tests, plus source, test and registered-consumer
 types. The parent runs the library's own build and test tasks rather than recreating the former
 core/react packages or retaining a second installation.
 
@@ -58,7 +69,7 @@ does not publish a new registry package; consume this source or freshly built ar
 The financial checkout now uses the new dependency, content controller, browser handoff, menu
 and snapshot wiring. Its actual host validation and current limits are owned by the parent
 repository's `VALIDATION.md`, separately from library and tarball acceptance. The
-[downstream migration task](downstream-migration.md) records that consumer's scope and acceptance
+[financial migration scope](downstream-migration.md) records that consumer's scope and acceptance
 paths; old host-completion statements are not evidence for the current checkout.
 
 This migration did not repeat the earlier performance measurements and makes no speedup
@@ -74,7 +85,8 @@ Library examples are not a financial-host acceptance.
 - [Scenarios and counterexamples](worksplit-redesign-scenarios.md): the consumer problems and boundaries to preserve.
 - [Redesign requirements](worksplit-redesign.md): the migration acceptance matrix, design rationale and pending external scope.
 - [Implementation order](worksplit-redesign-implementation.md): prerequisite and verification sequencing.
-- [Downstream migration task](downstream-migration.md): the financial consumer's execution prompt.
+- [General migration guide](../migration.md): old-to-new APIs, changed defaults and consumer acceptance.
+- [Financial migration scope](downstream-migration.md): the financial consumer's policies and acceptance.
 
 External Pluxel Shell/Studio repositories have not been modified by this task. Their actual
 install/API/lifecycle adaptation remains a migration gap, not a completed consumer.

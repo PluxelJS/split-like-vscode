@@ -8,7 +8,7 @@ export type {
   SplitViewLayoutReason,
   SplitViewPaneVisibilityChange,
   SplitViewSashRenderInfo,
-  SplitViewCollapsedRenderInfo,
+  SplitViewCollapsedSashRenderInfo,
 } from "./split-view";
 export type {
   PaneConstraints,

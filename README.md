@@ -13,6 +13,9 @@ There are two packages:
 There is no required Hotkeys provider or command registry. Import native Router, Model, Actions,
 Layout props and refs from their upstream packages.
 
+Upgrading an existing application? Follow the [migration guide](docs/migration.md) for old-to-new
+entrypoints, changed defaults and actual-host acceptance. It applies to any consumer repository.
+
 ## Install
 
 This refactor has not been published by this task. Use the verified tarballs built from this
@@ -74,6 +77,8 @@ import "@worksplit/split-view/style.css";
 
 This package neither installs nor loads Router, FlexLayout or Workbench. Its sizing algorithms
 are internal; public layout and pane types support its props, events and ref.
+See the [SplitView guide](docs/split-view.md) for controlled visibility, readonly layout queries,
+separator customization and saving expanded sizes without overwriting them on collapse.
 
 ## Start a read-only workspace
 
@@ -170,6 +175,8 @@ or focus: an ordinary open may finish in the background at its still-valid desti
 preview or reveal is superseded. An unrelated background open does not cancel browser traversal.
 Use `onResult` when a link owns feedback; without it, native drops report failures and cleanup
 errors through `onIssue`. An explicit `link.open()` caller owns its returned receipt.
+An explicit background override also clears an inherited preview default for that call, so a
+preview link can offer background opening without a second execution path.
 
 Every asynchronous operation settles to `applied`, `denied`, `superseded` or `failed`.
 Read `value` only for `applied`; it records what this operation committed. While cleanup waits,
@@ -177,6 +184,10 @@ a later operation may change or end that content; query current live state befor
 `cleanupErrors` describe cleanup after that operation. Failure
 identifies `prepare` / `commit`, whether changes occurred, and affected ids. An accepted router
 error page is still an accepted location; it is not a transport failure or a reason to roll back.
+
+`getContent`, activation results and placement sources distinguish documents from tools through
+`role`. After checking `content.role === "document"`, TypeScript exposes `href`, `preview` and
+`navigationKey` directly; tools have only the shared content fields.
 
 ## Editing and resources
 
@@ -225,7 +236,8 @@ Worksplit has no general command/plugin registry.
 
 ## Browser history and snapshots
 
-Only one workspace may attach to a browser window:
+Only one workspace may attach to a browser window. Configure an explicit `home` when creating
+that instance (`{ mode: "empty", href: "/" }` for an empty root, or `mode: "route"` for a routed root):
 
 ```tsx
 await instance.start({

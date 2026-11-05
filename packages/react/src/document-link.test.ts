@@ -119,6 +119,37 @@ function dragEvent() {
 }
 
 describe("routed document links", () => {
+  it("opens an inherited preview in the background as an ordinary tab without changing link defaults", async () => {
+    const { workbench, open } = await setup();
+    const source = await open("source");
+    const link = workbench.createLink(nav("related"), { source: source.handle, preview: true });
+
+    const background = await link.open({ presentation: "background" });
+    expect(background).toMatchObject({
+      status: "applied",
+      value: { presentation: "background", document: { preview: false } },
+    });
+    expect(workbench.getActiveDocument()?.id).toBe(source.id);
+    expect(workbench.getDocuments()).toHaveLength(2);
+
+    // JavaScript callers can still explicitly request an invalid combination.
+    const invalid = await link.open({
+      presentation: "background",
+      preview: true,
+    } as unknown as OpenOptions);
+    expect(invalid).toEqual({ status: "denied", reason: "invalid-argument" });
+    expect(workbench.getActiveDocument()?.id).toBe(source.id);
+    expect(workbench.getDocuments()).toHaveLength(2);
+
+    if (background.status !== "applied") throw new Error(background.status);
+    expect((await workbench.close(background.value.document.id)).status).toBe("applied");
+    const defaultOpen = await link.open();
+    expect(defaultOpen).toMatchObject({
+      status: "applied",
+      value: { presentation: "activate", document: { preview: true } },
+    });
+  });
+
   it.each([
     { href: "https://example.test/external" },
     { to: "https://example.test/external" },

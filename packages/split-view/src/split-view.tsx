@@ -43,10 +43,13 @@ export interface PaneProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
   minSize?: number | undefined;
   maxSize?: number | undefined;
+  /** Initial size and reset target, subject to the other panes and their constraints. */
   defaultSize?: PaneSizeValue | undefined;
+  /** Initial visibility when `visible` is not supplied. */
   defaultVisible?: boolean | undefined;
   priority?: PaneConstraints["priority"] | undefined;
   collapsedSize?: number | undefined;
+  /** Controlled visibility; handle requests through `onPaneVisibilityChange`. */
   visible?: boolean | undefined;
   /** Mount content even while collapsed. Effects continue running while hidden. */
   keepMounted?: boolean | undefined;
@@ -56,22 +59,26 @@ export interface PaneProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 export interface SplitViewHandle {
+  /** Restore initial defaultSizeById and current pane defaults; keep visibility unchanged. */
   reset(): void;
+  /** Merge supplied pixel targets and reconcile them against available space and constraints. */
   setPaneSizes(sizeById: Record<string, number>): void;
   resizePane(id: string, size: number): void;
   collapsePane(id: string): void;
   expandPane(id: string): void;
   togglePane(id: string): void;
   isPaneVisible(id: string): boolean;
+  /** Read current geometry after measurement; update it through this handle or pane props. */
   getLayout(): SplitLayout | null;
 }
 
 export interface SplitViewLayoutEvent {
-  layout: SplitLayout;
-  sizes: number[];
-  sizeById: Record<string, number>;
-  reason: SplitViewLayoutReason;
-  phase: SplitViewLayoutPhase;
+  readonly layout: SplitLayout;
+  readonly sizes: readonly number[];
+  /** Current geometry, including collapsed sizes; persist expanded sizes from visible panes. */
+  readonly sizeById: Readonly<Record<string, number>>;
+  readonly reason: SplitViewLayoutReason;
+  readonly phase: SplitViewLayoutPhase;
 }
 
 export type SplitViewLayoutPhase = "start" | "change" | "commit";
@@ -79,29 +86,29 @@ export type SplitViewLayoutPhase = "start" | "change" | "commit";
 export type SplitViewLayoutReason = "pointer" | "keyboard" | "visibility" | "reset" | "imperative";
 
 export interface SplitViewPaneVisibilityChange {
-  id: string;
-  visible: boolean;
+  readonly id: string;
+  readonly visible: boolean;
 }
 
 export interface SplitViewSashRenderInfo {
-  index: number;
-  beforeId: string;
-  afterId: string;
-  orientation: SplitOrientation;
-  disabled: boolean;
-  offset: number;
-  layout: SplitLayout;
+  readonly index: number;
+  readonly beforeId: string;
+  readonly afterId: string;
+  readonly orientation: SplitOrientation;
+  readonly disabled: boolean;
+  readonly offset: number;
+  readonly layout: SplitLayout;
 }
 
-export interface SplitViewCollapsedRenderInfo {
-  id: string;
-  pane: PaneSnapshot;
-  index: number;
-  edge: "start" | "end" | "between";
-  orientation: SplitOrientation;
-  disabled: boolean;
-  offset: number;
-  layout: SplitLayout;
+export interface SplitViewCollapsedSashRenderInfo {
+  readonly id: string;
+  readonly pane: PaneSnapshot;
+  readonly index: number;
+  readonly edge: "start" | "end" | "between";
+  readonly orientation: SplitOrientation;
+  readonly disabled: boolean;
+  readonly offset: number;
+  readonly layout: SplitLayout;
 }
 
 export interface SplitViewProps extends Omit<
@@ -110,14 +117,18 @@ export interface SplitViewProps extends Omit<
 > {
   children: ReactNode;
   orientation?: SplitOrientation | undefined;
+  /** Initial pixel sizes, captured once and reused by reset(); not a controlled size map. */
   defaultSizeById?: Record<string, number | undefined> | undefined;
   sashSize?: number;
   disabled?: boolean;
   proportionalResize?: boolean;
+  /** Reports interactions and handle operations, not container measurement or prop updates. */
   onLayout?: (event: SplitViewLayoutEvent) => void;
+  /** Visibility requests from interactions/handles; controlled panes change only after props update. */
   onPaneVisibilityChange?: (event: SplitViewPaneVisibilityChange) => void;
   renderSash?: (info: SplitViewSashRenderInfo) => ReactNode;
-  renderCollapsedPane?: (info: SplitViewCollapsedRenderInfo) => ReactNode;
+  /** Decorate the collapsed pane's reveal separator, not the pane content. */
+  renderCollapsedSash?: (info: SplitViewCollapsedSashRenderInfo) => ReactNode;
 }
 
 type PaneElement = ReactElement<PaneProps> & {
@@ -160,7 +171,7 @@ export const SplitView = forwardRef<SplitViewHandle, SplitViewProps>(
       onPaneVisibilityChange,
       orientation = "horizontal",
       proportionalResize = true,
-      renderCollapsedPane,
+      renderCollapsedSash,
       renderSash,
       sashSize = 8,
       style,
@@ -696,7 +707,7 @@ export const SplitView = forwardRef<SplitViewHandle, SplitViewProps>(
               style={sashStyle(orientation, boundary.offset, sashSize)}
               tabIndex={disabled ? -1 : 0}
             >
-              {renderCollapsedPane?.({
+              {renderCollapsedSash?.({
                 disabled,
                 edge: boundary.edge,
                 id: boundary.pane.id,

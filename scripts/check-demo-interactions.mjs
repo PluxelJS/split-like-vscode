@@ -22,6 +22,23 @@ export async function checkDemoInteractions(page, { viewport, report }) {
   assert.ok((await separator.boundingBox()).x > after.x);
   await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
   assert.equal(await draft.isVisible(), false);
+  const revealSeparator = page.getByRole("separator", {
+    name: "Reveal sidebar by dragging",
+    exact: true,
+  });
+  await revealSeparator.focus();
+  await page.keyboard.press("ArrowRight");
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).waitFor();
+  assert.equal(await draft.isVisible(), true);
+  assert.equal(await draft.inputValue(), "Retained through collapse");
+  assert.equal(
+    await handle.evaluate(
+      (node) => node === document.querySelector('[aria-label="Retained sidebar draft"]'),
+    ),
+    true,
+  );
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
+  assert.equal(await draft.isVisible(), false);
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
   assert.equal(await draft.inputValue(), "Retained through collapse");
   assert.equal(
@@ -31,7 +48,7 @@ export async function checkDemoInteractions(page, { viewport, report }) {
     true,
   );
   report.checks.push(
-    `${viewport.width}×${viewport.height}: independently packaged SplitView pointer/keyboard resizing and controlled collapse retain DOM and draft`,
+    `${viewport.width}×${viewport.height}: independently packaged SplitView pointer/keyboard resizing and controlled hide/reveal through its separator retain DOM, draft and owner state`,
   );
 
   await page.getByRole("button", { name: "Read-only", exact: true }).click();

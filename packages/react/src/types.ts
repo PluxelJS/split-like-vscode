@@ -97,22 +97,25 @@ export type OperationResult<T> =
   | { status: "denied"; reason: DenialReason; detail?: string }
   | { status: "superseded" }
   | Failed;
-export interface ContentInfo {
+interface ContentInfoBase {
   readonly id: string;
   readonly handle: ContentHandle;
-  readonly role: "document" | "tool";
   readonly node: TabNode;
   readonly containerId: string | null;
   readonly tabGroupId: string | null;
   readonly title: string;
   readonly visible: boolean;
 }
-export interface DocumentInfo extends ContentInfo {
+export interface DocumentInfo extends ContentInfoBase {
   readonly role: "document";
   readonly href: string;
   readonly preview: boolean;
   readonly navigationKey: string | null;
 }
+export interface ToolInfo extends ContentInfoBase {
+  readonly role: "tool";
+}
+export type ContentInfo = DocumentInfo | ToolInfo;
 export interface ContainerInfo {
   readonly id: string;
   readonly kind: "tabset" | "border";
@@ -187,13 +190,18 @@ export type CloseResult = OperationResult<{ closedIds: readonly string[] }>;
 export type StartResult = OperationResult<{ document: DocumentInfo | null; href: string }>;
 export type DisposeResult = Applied<void> | Failed;
 export interface BrowserHandoff {
+  /** The browser has already visited this outside entry; do not push it again. */
   readonly href: string;
   readonly state: unknown;
   readonly snapshot: WorkbenchSnapshot | null;
+  /** Cleanup already started after approved termination; this observes its completion. */
   readonly cleanup: Promise<DisposeResult>;
 }
 export interface BrowserOptions {
   window?: Window;
+  /** Called after protected workspace exit commits and the instance terminates.
+   * This hands the existing browser entry to the host; it cannot veto departure.
+   * Put approval in content leave guards or workspaceLeave, not in this callback. */
   onOutsideNavigate(handoff: BrowserHandoff): void;
 }
 export type StartOptions =
@@ -222,6 +230,8 @@ export interface WorkbenchOptions<TRouter extends AnyRouter> {
   previewScope?: "container" | "workspace";
   layoutPolicy?: WorkbenchLayoutPolicy;
   allowDrop?: (tabs: readonly TabNode[], target: Node, location: DockLocation) => boolean;
+  /** Guards workspace-owned state after content decisions, before termination.
+   * Does not repeat the individual content guards or perform browser handoff. */
   workspaceLeave?: WorkspaceLeave;
   captureSnapshotOnClose?: boolean;
   onIssue?: (issue: { code: "operation-failed" | "history"; error: unknown; id?: string }) => void;
@@ -238,6 +248,8 @@ export type DocumentNavigationOptions<
 };
 export interface DocumentLink {
   readonly href: string | undefined;
+  /** Overrides captured defaults for this open only. Background clears an inherited preview;
+   * explicitly requesting both background and preview remains invalid. */
   open(overrides?: OpenOptions): Promise<OpenResult>;
   dragStart(event: DragEvent<HTMLElement>): void;
   dragEnd(event: DragEvent<HTMLElement>): void;
@@ -254,7 +266,7 @@ export interface WorkbenchInstance<TRouter extends AnyRouter> {
       | (() =>
           | DocumentNavigationOptions<TRouter, TFrom, TTo>
           | Promise<DocumentNavigationOptions<TRouter, TFrom, TTo>>),
-    options?: OpenOptions & { onResult?: (result: OpenResult) => void },
+    options?: LinkOptions,
   ): DocumentLink;
   duplicate(id: string, options?: Omit<OpenOptions, "reuse" | "preview">): Promise<OpenResult>;
   keepOpen(id: string): Promise<OperationResult<DocumentInfo>>;

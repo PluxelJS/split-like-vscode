@@ -20,6 +20,9 @@ export function SplitViewExample() {
       </nav>
       <SplitView
         ref={split}
+        onPaneVisibilityChange={({ id, visible: nextVisible }) => {
+          if (id === "sidebar") setVisible(nextVisible);
+        }}
         onLayout={(event) => {
           if (event.phase === "commit")
             setLast(`${event.reason}: ${Math.round(event.sizeById.sidebar ?? 0)} px sidebar`);

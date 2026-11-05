@@ -15,36 +15,37 @@ export interface PaneConstraints {
 }
 
 export interface ResolvedPane {
-  id: string;
-  minSize: number;
-  maxSize: number;
-  collapsedSize: number;
-  defaultSize?: PaneSizeValue | undefined;
-  priority: number;
-  visible: boolean;
+  readonly id: string;
+  readonly minSize: number;
+  readonly maxSize: number;
+  readonly collapsedSize: number;
+  readonly defaultSize?: PaneSizeValue | undefined;
+  readonly priority: number;
+  readonly visible: boolean;
 }
 
 export interface PaneLayoutItem extends ResolvedPane {
-  size: number;
-  offset: number;
-  visible: true;
+  readonly size: number;
+  readonly offset: number;
+  readonly visible: true;
 }
 
 export interface PaneSnapshot extends ResolvedPane {
-  size: number;
-  offset: number;
-  visible: boolean;
+  readonly size: number;
+  readonly offset: number;
+  readonly visible: boolean;
 }
 
+/** Current geometry; collapsed sizes are not the remembered expanded sizes. */
 export interface SplitLayout {
-  containerSize: number;
-  contentSize: number;
-  items: PaneLayoutItem[];
-  panes: PaneSnapshot[];
-  sizes: number[];
-  offsets: number[];
-  sizeById: Record<string, number>;
-  visibleIds: string[];
+  readonly containerSize: number;
+  readonly contentSize: number;
+  readonly items: readonly PaneLayoutItem[];
+  readonly panes: readonly PaneSnapshot[];
+  readonly sizes: readonly number[];
+  readonly offsets: readonly number[];
+  readonly sizeById: Readonly<Record<string, number>>;
+  readonly visibleIds: readonly string[];
 }
 
 export interface CreateSplitLayoutOptions {

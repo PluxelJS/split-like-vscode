@@ -551,7 +551,7 @@ describe("@worksplit/split-view", () => {
       <div style={{ height: 400, width: 800 }}>
         <SplitView
           ref={handle}
-          renderCollapsedPane={(info) => <span>restore-{info.id}</span>}
+          renderCollapsedSash={(info) => <span>restore-{info.id}</span>}
           renderSash={(info) => <span>sash-{info.beforeId}</span>}
         >
           <Pane id="left" defaultSize={300}>

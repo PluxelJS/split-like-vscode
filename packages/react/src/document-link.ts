@@ -153,7 +153,14 @@ export class DocumentLinkController {
         return getHref();
       },
       open: (overrides?: OpenOptions) =>
-        execute({ ...captured, ...overrides } as OpenOptions, () => true),
+        execute(
+          {
+            ...captured,
+            ...(overrides?.presentation === "background" ? { preview: false } : {}),
+            ...overrides,
+          } as OpenOptions,
+          () => true,
+        ),
       dragStart: (event: DragEvent<HTMLElement>) => {
         if (event.defaultPrevented) return;
         this.drops.delete(owner);

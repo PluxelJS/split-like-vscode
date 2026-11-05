@@ -4,7 +4,7 @@ import {
   createRouter,
   type RouterHistory,
 } from "@tanstack/react-router";
-import { createWorkbench } from "@worksplit/react";
+import { createWorkbench, type DocumentInfo, type ToolInfo } from "@worksplit/react";
 
 const root = createRootRoute();
 const documents = createRoute({
@@ -76,5 +76,43 @@ void workbench.open(
     presentation: "background",
     // @ts-expect-error A background document cannot become the replaceable preview.
     preview: true,
+  },
+);
+
+const content = workbench.getContent("current");
+if (content?.role === "document") {
+  const document: DocumentInfo = content;
+  const href: string = content.href;
+  void [document, href];
+} else if (content) {
+  const tool: ToolInfo = content;
+  void tool;
+  // @ts-expect-error Tools have no routed document location.
+  void content.href;
+}
+void workbench.activate("current").then((result) => {
+  if (result.status === "applied" && result.value.role === "document") {
+    const document: DocumentInfo = result.value;
+    const preview: boolean = result.value.preview;
+    void [document, preview];
+  }
+  return undefined;
+});
+void workbench.open(
+  { to: "/rules", search: { onlyUnclassified: true } },
+  {
+    destination: ({ source, defaultDestination }) => {
+      if (source?.role === "document") {
+        const document: DocumentInfo = source;
+        const navigationKey: string | null = source.navigationKey;
+        void [document, navigationKey];
+      } else if (source) {
+        const tool: ToolInfo = source;
+        void tool;
+        // @ts-expect-error A tool source cannot have document preview state.
+        void source.preview;
+      }
+      return defaultDestination;
+    },
   },
 );

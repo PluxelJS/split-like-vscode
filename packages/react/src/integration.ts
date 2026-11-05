@@ -63,6 +63,7 @@ import type {
   StartOptions,
   StartResult,
   ToolDefinition,
+  ToolInfo,
   WorkbenchContext,
   WorkbenchInstance,
   WorkbenchOptions,
@@ -557,10 +558,10 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       record.node.isSelected() &&
       !closedGroup(record.node) &&
       (container instanceof BorderNode ? container.isShowing() : !max || max === container);
-    const fields: ContentInfo = {
+    const fields: ToolInfo = {
       id,
       handle: record.handle,
-      role: record.role,
+      role: "tool",
       node: record.node,
       containerId: container?.getId() ?? null,
       tabGroupId: parent instanceof TabGroupNode ? parent.getId() : null,
@@ -569,13 +570,13 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     };
     const next: ContentInfo =
       record.role === "document"
-        ? ({
+        ? {
             ...fields,
             role: "document",
             href: record.href,
             preview: record.preview,
             navigationKey: this.routeMetadata(record, "navigationKey") ?? null,
-          } as DocumentInfo)
+          }
         : fields;
     const previous = record.projection;
     if (
@@ -590,7 +591,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
   }
   getDocument(id: string): DocumentInfo | null {
     const content = this.getContent(id);
-    return content?.role === "document" ? (content as DocumentInfo) : null;
+    return content?.role === "document" ? content : null;
   }
   getDocuments(): readonly DocumentInfo[] {
     const next = [...this.records.values()].flatMap((record) => {

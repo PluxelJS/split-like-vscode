@@ -5,7 +5,9 @@ import {
   useContentController,
   useWorkbenchState,
   type ContentController,
+  type DocumentInfo,
   type OpenOptions,
+  type ToolInfo,
   type WorkbenchSnapshot,
 } from "@worksplit/react";
 import { type PaneProps, type SplitViewHandle } from "@worksplit/split-view";
@@ -40,6 +42,17 @@ export async function contracts() {
   const invalid: OpenOptions = { presentation: "background", preview: true };
   void invalid;
   if (result.status === "applied") {
+    const content = instance.getContent(result.value.document.id);
+    if (content?.role === "document") {
+      const document: DocumentInfo = content;
+      const href: string = content.href;
+      void [document, href];
+    } else if (content?.role === "tool") {
+      const tool: ToolInfo = content;
+      // @ts-expect-error Tools do not acquire document navigation fields.
+      void content.href;
+      void tool;
+    }
     const snapshot: WorkbenchSnapshot = instance.createSnapshot();
     const native: IJsonModel = snapshot.layout;
     const model: Model = instance.model;
@@ -60,5 +73,16 @@ export function Controller({ controller }: { controller: ContentController }) {
 }
 export function splitTypes(pane: PaneProps, handle: SplitViewHandle) {
   handle.resizePane(pane.id, 180);
-  return handle.getLayout();
+  const layout = handle.getLayout();
+  if (layout) {
+    // @ts-expect-error Geometry is owned by SplitView; callers use props or handle operations.
+    layout.containerSize = 800;
+    // @ts-expect-error The exposed arrays cannot reorder the internal layout.
+    layout.items.splice(0, 1);
+    // @ts-expect-error Pane snapshots are readonly at the field level.
+    layout.panes[0]!.size = 180;
+    // @ts-expect-error Named geometry cannot be mutated in place.
+    layout.sizeById[pane.id] = 180;
+  }
+  return layout;
 }
