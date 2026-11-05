@@ -13,6 +13,10 @@
 在 build/prepack 时生成，实际安装后的源码、ESM、CJS 与声明共同接受验证。
 不向消费者打包第二份 React、Router 或 history，不在运行时猜测能力后切换另一条实现。
 
+冷构建通过 `@worksplit/react` 的构建依赖 `pacote` 获取固定版本的 npm registry tarball，
+校验 integrity 与补丁文件后生成制品，不调用 PATH 中的 `npm` 或系统 `tar`。
+已有制品通过补丁与安装器校验后可离线复用；交付给消费者的安装器仍只依赖 Node。
+
 Worksplit 是客户端会话。文档 factory 返回原生 Router，runtime 通过公开
 `router.update({ isServer: false })` 明确客户端执行；直接验证上游能力的无 DOM 测试同样
 显式设置客户端模式，并使用浏览器条件导出。服务端渲染、`reloadDocument`、外部 redirect 和

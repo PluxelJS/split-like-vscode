@@ -43,6 +43,7 @@
     "@types/react-dom": "catalog:frontend",
     "capnweb": "catalog:dev",
     "jsdom": "catalog:dev",
+    "pacote": "catalog:build",
     "react": "catalog:frontend",
     "react-dom": "catalog:frontend",
     "vite": "catalog:tooling",

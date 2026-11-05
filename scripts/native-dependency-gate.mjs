@@ -98,7 +98,16 @@ try {
       );
     }
     const artifact = await mkdtemp(join(tmpdir(), "worksplit-native-delivery-"));
-    await createNativeDependencyArtifact(artifact);
+    // A cold build must not depend on host npm/tar executables or their PATH shims.
+    const originalPath = process.env.PATH;
+    try {
+      process.env.PATH = "";
+      await createNativeDependencyArtifact(artifact);
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+    }
+    report.checks.push("Cold artifact generation with no external commands on PATH");
     const archive = join(consumer, "native-dependencies.tgz");
     await run("tar", ["-czf", archive, "-C", artifact, "."], consumer);
     await mkdir(join(consumer, "native-dependencies"), { recursive: true });
