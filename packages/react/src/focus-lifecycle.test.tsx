@@ -81,9 +81,7 @@ describe("document focus and lifecycle ownership", () => {
       await act(async () => {
         expect((await workbench.dispatch(Actions.maximizeToggle(left))).status).toBe("applied");
       });
-      expect(tab.closest<HTMLElement>(".flexlayout__tabset_container")!.style.display).toBe(
-        "none",
-      );
+      expect(tab.closest<HTMLElement>(".flexlayout__tabset_container")!.style.display).toBe("none");
       // Chromium blurs CSS-hidden focus to body. JSDOM keeps it focused and then
       // refuses blur on a hidden element, so emulate that browser default here.
       const hidden: HTMLElement[] = [];
