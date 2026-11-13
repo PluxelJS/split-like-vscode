@@ -189,6 +189,42 @@ error page is still an accepted location; it is not a transport failure or a rea
 `role`. After checking `content.role === "document"`, TypeScript exposes `href`, `preview` and
 `navigationKey` directly; tools have only the shared content fields.
 
+### Content needs and automatic placement
+
+Install one `openPolicy` on `createWorkbench` when the host chooses automatic opening positions.
+Links declare `intent: "open"` (the default) or `"inspect"`; preview replacement remains a separate
+option. The policy receives the captured source, native Model/containers, the currently eligible
+presentation and a target with its accepted href, reading needs and optional existing document.
+Return `{ destination, presentation }` or `null` to refuse placement. `canPlace(destination,
+presentation?)` checks native admission for that combination, so a narrow inspection can fall
+back to the source pane **and activate the detail** within the same request and loader execution.
+
+An existing target stays at its native location. Its `defaultDestination` is that container's
+center, and `canPlace` checks presentation rather than pretending to add or move a tab. Thus a
+host can preserve source focus when revealing another pane, activate a same-pane target, and
+reuse content even if its container refuses new drops. An explicit `destination`, including a
+native drop or a destination resolver, takes precedence and bypasses automatic policy. Explicit
+modifier handling should override `intent: "open"` when clearing an inspection's default position.
+
+Routes declare `staticData.worksplit.readingSize` as `{ minWidth, preferredWidth?, minHeight? }`
+or a function receiving `{ params, search, location }`. The deepest declaration is evaluated
+against the accepted route before first render. These are positive finite content needs;
+`preferredWidth` must be at least `minWidth`. Invalid declarations fail the opening request.
+`resolveRouteReadingSize(router, location?)` resolves the same declaration for a mounted host.
+Its default is the Router's resolved location, then current location.
+
+A persistent `ContentController.readingSize` can publish current content needs, for example from
+visible columns and user-adjusted widths; `ContentInfo.readingSize` exposes that override or the
+route fallback. Dimensions describe content independently of its current allocation. Updating
+them does not resize existing panes or change preview, focus, drafts or snapshot data. The host
+owns its allocation rules; FlexLayout remains the only source of available layout geometry.
+Policies run synchronously inside the original request and must not open another document or
+mutate the Model. After asynchronous preview approval or existing-document navigation, automatic
+policy is evaluated again with current dimensions and content needs. A changed destination,
+ratio or presentation supersedes the request; there is no second load, retry or forced resize.
+Explicit destinations retain their existing evaluation path. Policies cannot reclaim foreground
+eligibility lost during asynchronous work.
+
 ## Editing and resources
 
 `useContent()` borrows a content handle. `useContentController({ leave, save, focus, title })`

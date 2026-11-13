@@ -1,6 +1,7 @@
 export { createWorkbench } from "./integration";
 export { Workbench, useContent, useContentController, useWorkbenchState } from "./workbench";
-export { beside } from "./document-placement";
+export { beside, isInSplitDirection } from "./document-placement";
+export { resolveRouteReadingSize } from "./reading-size";
 export {
   createLayoutPolicy,
   getLayoutTopology,

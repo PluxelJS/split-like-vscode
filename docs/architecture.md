@@ -45,6 +45,12 @@ admission rechecks current presentation as well as content and placement; backgr
 not take ownership of an unrelated browser visit. Preview competition is attached to the live
 Model or native container, so retired containers and one-off split destinations need no registry.
 
+The host's optional opening policy settles automatic destination and presentation together in
+that same admission path, including reuse at its fixed native location. Explicit destinations
+retain their native meaning. Route declarations provide cold content needs; the committed
+controller can override them for mounted content. Reading needs do not become layout state or
+resize existing panes. Public semantics are maintained in [automatic placement](../README.md#content-needs-and-automatic-placement).
+
 Native Actions enter through dispatch or the native Layout action hook. Supported non-removal
 Actions retain their original instances and group order. Removal is resolved to actual
 leaf tabs, including collapsed native groups; every protected member approves before removal.
@@ -121,6 +127,7 @@ mounting; absent a controller callback the content root is programmatically focu
 | Native document / browser history                    | `document-history.ts`, `browser-history.ts`                     |
 | Menu completion and link drag admission              | `menus.tsx`, `document-link.ts`                                 |
 | Native action and placement geometry                 | `native-layout.ts`, `layout-policy.ts`, `document-placement.ts` |
+| Route content-size declarations                      | `reading-size.ts`                                               |
 | Strict restore                                       | `snapshot.ts`                                                   |
 | Independent pane component and private sizing        | `packages/split-view/src/`                                      |
 | Native correction artifact and isolated installation | `scripts/native-dependency-*.mjs`, `patches/`                   |

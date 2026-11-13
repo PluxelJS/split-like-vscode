@@ -47,6 +47,8 @@ export interface LeaveGuard {
 }
 export interface ContentController {
   title?: string;
+  /** Content needs, independent of the space currently allocated by the native layout. */
+  readingSize?: ReadingSize | undefined;
   leave: LeaveGuard | null;
   save?: () => void | Promise<void>;
   focus?: () => void;
@@ -105,6 +107,7 @@ interface ContentInfoBase {
   readonly tabGroupId: string | null;
   readonly title: string;
   readonly visible: boolean;
+  readonly readingSize?: Readonly<ReadingSize> | undefined;
 }
 export interface DocumentInfo extends ContentInfoBase {
   readonly role: "document";
@@ -152,11 +155,37 @@ export interface PlacementContext {
   canPlace(destination: Destination): boolean;
 }
 export type DestinationResolver = (context: PlacementContext) => Destination | null;
+/** A content demand, not a native minimum or an instruction to resize an existing pane. */
+export interface ReadingSize {
+  minWidth: number;
+  preferredWidth?: number;
+  minHeight?: number;
+}
+export interface OpenPolicyContext extends Omit<PlacementContext, "canPlace"> {
+  readonly intent: "open" | "inspect";
+  readonly presentation: "activate" | "reveal" | "background";
+  readonly preview: boolean;
+  readonly target: {
+    readonly href: string;
+    readonly readingSize?: Readonly<ReadingSize> | undefined;
+    readonly existing: DocumentInfo | null;
+  };
+  /** An existing target can only be presented at its current native location. */
+  canPlace(destination: Destination, presentation?: OpenPolicyContext["presentation"]): boolean;
+}
+export interface OpenPolicyDecision {
+  destination: Destination;
+  presentation: OpenPolicyContext["presentation"];
+}
+/** Synchronous policy within the existing request; returning null refuses automatic placement. */
+export type OpenPolicy = (context: OpenPolicyContext) => OpenPolicyDecision | null;
 export type OpenPresentation =
   | { presentation?: "activate" | "reveal"; preview?: boolean }
   | { presentation: "background"; preview?: false };
 export type OpenOptions = OpenPresentation & {
   source?: ContentHandle;
+  /** A hint to the installed policy; explicit destinations take precedence. */
+  intent?: "open" | "inspect";
   reuse?: "preserve" | "navigate" | "new";
   destination?: Destination | DestinationResolver;
 };
@@ -211,14 +240,16 @@ export interface ToolDefinition {
   title?: string;
   render(context: { content: ContentHandle; node: TabNode }): ReactNode;
 }
+export interface RouteMetadataContext {
+  params: AnyRouteMatch["params"];
+  search: AnyRouteMatch["search"];
+  location: ParsedLocation;
+}
 export interface WorkbenchRouteMetadata {
   title?: string;
   navigationKey?: string;
-  documentKey?: (context: {
-    params: AnyRouteMatch["params"];
-    search: AnyRouteMatch["search"];
-    location: ParsedLocation;
-  }) => string;
+  readingSize?: ReadingSize | ((context: RouteMetadataContext) => ReadingSize);
+  documentKey?: (context: RouteMetadataContext) => string;
 }
 export interface WorkbenchOptions<TRouter extends AnyRouter> {
   createRouter(history: RouterHistory): TRouter;
@@ -228,6 +259,7 @@ export interface WorkbenchOptions<TRouter extends AnyRouter> {
   home?: { mode: "empty" | "route"; href: string };
   workspaceId?: string;
   previewScope?: "container" | "workspace";
+  openPolicy?: OpenPolicy;
   layoutPolicy?: WorkbenchLayoutPolicy;
   allowDrop?: (tabs: readonly TabNode[], target: Node, location: DockLocation) => boolean;
   /** Guards workspace-owned state after content decisions, before termination.

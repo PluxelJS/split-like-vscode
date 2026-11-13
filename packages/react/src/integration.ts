@@ -33,6 +33,7 @@ import { applySplitRatio, centralTabsets } from "./document-placement";
 import { installIntegration } from "./internal";
 import { LeaveAttempt } from "./leave-attempt";
 import { actionsIn, closedGroup, revealTab, tabContainer, tabsIn } from "./native-layout";
+import { checkReadingSize, resolveRouteReadingSize, sameReadingSize } from "./reading-size";
 import { checkHref, DOCUMENT_COMPONENT, initialLayout, tabMetadata } from "./snapshot";
 import type {
   ActivateOptions,
@@ -57,9 +58,10 @@ import type {
   LeaveToken,
   LinkOptions,
   OpenOptions,
+  OpenPolicyContext,
+  OpenPolicyDecision,
   OpenResult,
   OperationResult,
-  PlacementContext,
   StartOptions,
   StartResult,
   ToolDefinition,
@@ -84,6 +86,16 @@ const denied = (reason: DenialReason): { status: "denied"; reason: DenialReason 
   reason,
 });
 const superseded = { status: "superseded" } as const;
+function sameOpening(a: OpenPolicyDecision, b: OpenPolicyDecision | null): boolean {
+  return (
+    b !== null &&
+    a.presentation === b.presentation &&
+    a.destination.target === b.destination.target &&
+    a.destination.location === b.destination.location &&
+    (a.destination.index ?? -1) === (b.destination.index ?? -1) &&
+    a.destination.ratio === b.destination.ratio
+  );
+}
 function failed(
   error: unknown,
   phase: Failed["phase"] = "prepare",
@@ -558,6 +570,15 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       record.node.isSelected() &&
       !closedGroup(record.node) &&
       (container instanceof BorderNode ? container.isShowing() : !max || max === container);
+    const previous = record.projection;
+    const size =
+      checkReadingSize(record.owner?.controller.readingSize) ??
+      (record.role === "document" && record.runtime
+        ? resolveRouteReadingSize(record.runtime.router, record.accepted)
+        : undefined);
+    const readingSize = sameReadingSize(previous?.readingSize, size)
+      ? previous?.readingSize
+      : size && Object.freeze({ ...size });
     const fields: ToolInfo = {
       id,
       handle: record.handle,
@@ -567,6 +588,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       tabGroupId: parent instanceof TabGroupNode ? parent.getId() : null,
       title: record.node.getName(),
       visible,
+      readingSize,
     };
     const next: ContentInfo =
       record.role === "document"
@@ -578,7 +600,6 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
             navigationKey: this.routeMetadata(record, "navigationKey") ?? null,
           }
         : fields;
-    const previous = record.projection;
     if (
       previous &&
       Object.keys(next).every((key) =>
@@ -641,6 +662,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
   }
 
   private registerController(content: ContentHandle, owner: ControllerOwner): () => void {
+    checkReadingSize(owner.controller.readingSize);
     const record = this.recordFor(content);
     if (!record) throw new Error("Cannot register a controller on ended content");
     if (record.owner && record.owner !== owner)
@@ -674,8 +696,10 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
         typeof controller.leave.decide !== "function")
     )
       throw new TypeError("A leave guard requires getState and decide");
+    checkReadingSize(controller.readingSize);
     const record = this.recordFor(content);
     const shapeChanged = (owner.controller.leave === null) !== (controller.leave === null);
+    const sizeChanged = !sameReadingSize(owner.controller.readingSize, controller.readingSize);
     owner.controller = controller;
     if (!record || record.owner !== owner) return;
     if (shapeChanged) {
@@ -685,7 +709,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     record.hadProtection ||= controller.leave !== null;
     this.updateTitle(record);
     this.scheduleFocus();
-    if (shapeChanged) this.changed();
+    if (shapeChanged || sizeChanged) this.changed();
   }
   private newAttempt(record?: ContentRecord): LeaveAttempt {
     const attempt = new LeaveAttempt((error) => this.issue(error, record?.id));
@@ -1277,6 +1301,81 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     return target ? { target: target.getId(), location: DockLocation.CENTER } : null;
   }
 
+  private resolveOpening(
+    capture: OpenCapture,
+    options: OpenOptions,
+    target: OpenPolicyContext["target"],
+    eligible: OpenPolicyContext["presentation"],
+    tab?: IJsonTabNode,
+  ): OpenPolicyDecision | null {
+    const existing = target.existing ? this.records.get(target.existing.id) : undefined;
+    const container = existing ? tabContainer(existing.node) : undefined;
+    const defaultDestination = container
+      ? { target: container.getId(), location: DockLocation.CENTER }
+      : this.defaultDestination(capture);
+    const canPlace = (
+      destination: Destination,
+      presentation: OpenPolicyContext["presentation"] = eligible,
+    ) => {
+      if (!this.captureCurrent(capture) || (presentation === "background" && options.preview))
+        return false;
+      if (!existing) return !!tab && this.canPlace(tab, destination, capture, presentation);
+      // Reuse presents the accepted identity; it neither ADDs nor moves a native tab.
+      if (
+        !this.live(existing) ||
+        !container ||
+        destination.target !== container.getId() ||
+        destination.location !== DockLocation.CENTER ||
+        destination.index !== undefined ||
+        destination.ratio !== undefined
+      )
+        return false;
+      return (
+        presentation !== "reveal" ||
+        (capture.focus === this.focusEpoch &&
+          !!capture.source &&
+          this.live(capture.source) &&
+          tabContainer(capture.source.node) !== container &&
+          !(this.model.getMaximizedTabset() && container instanceof TabSetNode))
+      );
+    };
+    const context: OpenPolicyContext = {
+      model: this.model,
+      source: capture.source ? this.getContent(capture.source.id) : null,
+      anchor: capture.anchor ?? null,
+      containers: this.getContainers(),
+      previews: this.getDocuments().filter((doc) => doc.preview),
+      mru: [...this.mru],
+      defaultDestination,
+      intent: options.intent ?? "open",
+      presentation: eligible,
+      preview: options.preview === true,
+      target,
+      canPlace,
+    };
+    const decision =
+      options.destination === undefined && this.options.openPolicy
+        ? this.options.openPolicy(context)
+        : {
+            destination: existing
+              ? defaultDestination
+              : typeof options.destination === "function"
+                ? options.destination(context)
+                : (capture.destination?.value ?? defaultDestination),
+            presentation: eligible,
+          };
+    if (!decision?.destination) return null;
+    if (!["activate", "reveal", "background"].includes(decision.presentation))
+      throw new TypeError("Open policies must return a valid presentation");
+    const destination = { ...decision.destination };
+    // A policy cannot promote an original background request or reclaim a lost foreground.
+    const presentation = eligible === "background" ? "background" : decision.presentation;
+    // Without a policy, keep the established reuse/presentation failure semantics.
+    if (existing && (options.destination !== undefined || !this.options.openPolicy))
+      return { destination, presentation };
+    return canPlace(destination, presentation) ? { destination, presentation } : null;
+  }
+
   open<const TFrom extends string = string, const TTo extends string | undefined = ".">(
     navigation: DocumentNavigationOptions<TRouter, TFrom, TTo>,
     options: OpenOptions = {},
@@ -1300,6 +1399,7 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
     try {
       if (
         !validNavigation(navigation) ||
+        (options.intent !== undefined && !["open", "inspect"].includes(options.intent)) ||
         (options.reuse !== undefined && !["preserve", "navigate", "new"].includes(options.reuse))
       )
         return denied("invalid-argument");
@@ -1330,9 +1430,19 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
         if (!this.captureCurrent(capture)) return superseded;
         await this.initialize(record);
         if (!this.captureCurrent(capture) || !this.live(record)) return superseded;
+        const eligible = this.openPresentation(capture, options.preview);
+        if (!eligible) return superseded;
+        const document = this.getDocument(record.id)!;
+        const opening = this.resolveOpening(
+          capture,
+          options,
+          { href: document.href, readingSize: document.readingSize, existing: document },
+          eligible,
+        );
+        if (!opening) return denied("layout-policy");
         let navigated = false;
         if (reuse === "navigate") {
-          if (capture.presentation === "reveal" && record === capture.source)
+          if (opening.presentation === "reveal" && record === capture.source)
             return denied("focus-conflict");
           const result = await record.runtime!.navigate(navigation);
           cleanupErrors.push(...result.cleanupErrors);
@@ -1362,16 +1472,29 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
               )
             : superseded;
         }
-        const result = this.present(record, capture.presentation, capture.source);
+        const finalEligible = this.openPresentation(capture, options.preview);
+        if (!finalEligible) return superseded;
+        if (navigated && options.destination === undefined && this.options.openPolicy) {
+          const current = this.getDocument(record.id)!;
+          const refreshed = this.resolveOpening(
+            capture,
+            options,
+            { href: current.href, readingSize: current.readingSize, existing: current },
+            finalEligible,
+          );
+          if (!sameOpening(opening, refreshed)) return superseded;
+        }
+        const presentation = finalEligible === "background" ? "background" : opening.presentation;
+        const result = this.present(record, presentation, capture.source);
         if (result.status !== "applied") return result;
         if (!options.preview) record.preview = false;
         this.changed(true);
-        if (capture.presentation === "activate" && !source) this.publishActive("activate");
+        if (presentation === "activate" && !source) this.publishActive("activate");
         return applied(
           {
             document: this.getDocument(record.id)!,
             reused: true,
-            presentation: capture.presentation,
+            presentation,
           },
           cleanupErrors,
         );
@@ -1394,7 +1517,6 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
       }
       const initialPresentation = this.openPresentation(capture, options.preview);
       if (!initialPresentation) return superseded;
-      let presentation = initialPresentation;
       const id = `document-${this.prefix}-${++this.sequence}`;
       const title =
         router.state.matches
@@ -1409,22 +1531,20 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
         enableFloat: false,
         enablePopout: false,
       };
-      const context: PlacementContext = {
-        model: this.model,
-        source: capture.source ? this.getContent(capture.source.id) : null,
-        anchor: capture.anchor ?? null,
-        containers: this.getContainers(),
-        previews: this.getDocuments().filter((doc) => doc.preview),
-        mru: [...this.mru],
-        defaultDestination: this.defaultDestination(capture),
-        canPlace: (destination) => this.canPlace(tab, destination, capture, presentation),
-      };
-      const destination =
-        typeof options.destination === "function"
-          ? options.destination(context)
-          : (capture.destination?.value ?? context.defaultDestination);
-      if (!destination || !this.canPlace(tab, destination, capture, presentation))
-        return denied("layout-policy");
+      const opening = this.resolveOpening(
+        capture,
+        options,
+        {
+          href: accepted.publicHref,
+          readingSize: resolveRouteReadingSize(router, accepted),
+          existing: null,
+        },
+        initialPresentation,
+        tab,
+      );
+      if (!opening) return denied("layout-policy");
+      const { destination } = opening;
+      let presentation = opening.presentation;
       const target = this.model.getNodeById(destination.target)!;
       const targetChildren = [...target.getChildren()];
       const scope =
@@ -1465,7 +1585,21 @@ class WorkbenchSession<TRouter extends AnyRouter> implements WorkbenchInstance<T
         return superseded;
       const finalPresentation = this.openPresentation(capture, options.preview);
       if (!finalPresentation) return superseded;
-      presentation = finalPresentation;
+      if (previewApproval && options.destination === undefined && this.options.openPolicy) {
+        const refreshed = this.resolveOpening(
+          capture,
+          options,
+          {
+            href: accepted.publicHref,
+            readingSize: resolveRouteReadingSize(router, accepted),
+            existing: null,
+          },
+          finalPresentation,
+          tab,
+        );
+        if (!sameOpening(opening, refreshed)) return superseded;
+      }
+      presentation = finalPresentation === "background" ? "background" : opening.presentation;
       if (!this.canPlace(tab, destination, capture, presentation)) return denied("layout-policy");
       const action = Actions.addTab(
         tab,
